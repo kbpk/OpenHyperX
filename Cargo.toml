@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/hyperx-cli",
+    "crates/hyperx-core",
+    "crates/hyperx-devices",
+    "crates/hyperx-hid",
+    "crates/hyperx-protocol",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.72"
+license = "MIT"
+
+[workspace.dependencies]
+anyhow = "=1.0.75"
+clap = { version = "=4.4.18", features = ["derive"] }
+thiserror = "=1.0.50"
+tracing = "=0.1.40"
+tracing-subscriber = { version = "=0.3.18", features = ["env-filter", "fmt"] }
+
+[profile.release]
+lto = "thin"
+strip = "symbols"

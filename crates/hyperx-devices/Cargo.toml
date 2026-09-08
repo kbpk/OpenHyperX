@@ -1,0 +1,12 @@
+[package]
+name = "hyperx-devices"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+hyperx-core = { path = "../hyperx-core" }
+hyperx-hid = { path = "../hyperx-hid" }
+hyperx-protocol = { path = "../hyperx-protocol" }
+thiserror.workspace = true

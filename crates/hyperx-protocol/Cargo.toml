@@ -1,0 +1,11 @@
+[package]
+name = "hyperx-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+hyperx-core = { path = "../hyperx-core" }
+thiserror.workspace = true
+tracing.workspace = true
