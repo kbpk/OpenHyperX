@@ -9,9 +9,9 @@ permissions:
   contents: read
 
 jobs:
-  windows:
-    name: Windows stable
-    runs-on: windows-latest
+  quality:
+    name: Linux formatting and Clippy
+    runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
@@ -20,11 +20,22 @@ jobs:
       - name: Install Rust components
         run: rustup component add rustfmt clippy
 
+      - name: Install HID build dependencies
+        run: sudo apt-get update && sudo apt-get install --yes libudev-dev
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+  windows:
+    name: Windows tests and build
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
 
       - name: Run tests
         run: cargo test --workspace

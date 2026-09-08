@@ -9,12 +9,6 @@ if (-not (Test-Path -LiteralPath $cargo)) {
 
 Set-Location -LiteralPath (Split-Path -Parent $PSScriptRoot)
 
-& $cargo fmt --all -- --check
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-& $cargo clippy --workspace --all-targets --target $target -- -D warnings
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
 & $cargo test --workspace --target $target
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
