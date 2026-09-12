@@ -1,6 +1,6 @@
 # Pulsefire Raid research
 
-Last updated: 2026-09-07.
+Last updated: 2026-09-12.
 
 This document separates manufacturer facts, public implementation evidence,
 local observations and hypotheses. Do not promote a hypothesis into a device
@@ -77,8 +77,19 @@ It is 24 bytes long and declares report ID `0x07`, 8-bit fields, count `0x0107`
 (263), and a Feature main item. The resulting hidapi buffer is therefore 264
 bytes including the report ID. This independently confirms the OpenRGB length.
 
-Endpoint addresses are **not yet known**. Obtain these from USB descriptors in
-Wireshark/USBTreeView; do not infer them from the interface number.
+USBPcap descriptor injection on the same unit confirmed these interrupt IN
+endpoints:
+
+| USB interface | Endpoint | Maximum packet size |
+| --- | --- | --- |
+| 0 | `0x81` | 8 bytes |
+| 1 | `0x82` | 8 bytes |
+| 2 | `0x83` | 8 bytes |
+
+Feature reports for the configuration collection use class control transfers
+on endpoint 0, with `wIndex = 1`. During the 2026-09-12 capture session the
+device was address 7 on `\\.\USBPcap1`; both values are transient and must be
+re-enumerated after reconnect or reboot.
 
 ## Known RGB report from OpenRGB
 
@@ -108,16 +119,80 @@ The manufacturer page calls this one RGB lighting zone while OpenRGB exposes
 two logical LEDs. Treat zone semantics as unresolved until checked in NGENUITY
 and on hardware.
 
+## Local NGENUITY captures
+
+Captures were made with NGENUITY `5.38.0.0`, USBPcap and Wireshark on Windows
+11. They were filtered to the Pulsefire Raid device address before capture;
+raw files remain outside Git because they contain normal mouse input reports.
+
+With only `NGenuity2Helper` running, NGENUITY sends the confirmed direct RGB
+feature report about every 62 ms. The locally observed all-red transaction is:
+
+- `bmRequestType = 0x21`, `SET_REPORT`, feature report ID `0x07`;
+- `wIndex = 1`, `wLength = 264`;
+- payload prefix `07 0A FF 00 00 FF 00 00 A0`, followed by zero fill.
+
+Opening the NGENUITY GUI without changing a setting produced the same control
+traffic. This locally confirms the OpenRGB report layout and shows that
+NGENUITY's keepalive cadence is substantially faster than OpenRGB's timeout
+avoidance strategy.
+
+### DPI profile observations
+
+Changing the first DPI stage caused a read-modify-write sequence involving
+264-byte feature reports on report ID `0x07`. The resulting full profile image
+starts with `07 01 04`; offsets are relative to the complete report including
+the report ID.
+
+| First stage | Offset `0x1A` | Offset `0x26` |
+| --- | --- | --- |
+| 800 DPI | `0x10` | `0x10` |
+| 900 DPI | `0x12` | `0x12` |
+| 1000 DPI | `0x14` | `0x14` |
+
+The `900 -> 1000` and `1000 -> 900` transitions changed only these two bytes,
+and a repeated `900 -> 1000` transition produced the same result. This
+confirms a 50-DPI unit for the first stage and strongly indicates paired X/Y
+values. Separate X/Y editing has not been tested, so the axis interpretation
+remains a hypothesis.
+
+Observed configuration sequence:
+
+1. feature write with prefix `07 03 04 64`;
+2. feature write with prefix `07 81`, otherwise zero-filled;
+3. `GET_REPORT` for feature report `0x07`, length 264;
+4. feature write containing the modified full profile image, prefix
+   `07 01 04`.
+
+The purpose and allowed values of the two prelude writes are unknown. No DPI
+command may replay this sequence until they and the profile framing are
+understood well enough to preserve every unrelated field.
+
+### Polling-rate profile observations
+
+The NGENUITY profile image changed only offset `0x18` in captures made from a
+displayed 1000 Hz state:
+
+| UI transition | Before | After | Confidence |
+| --- | --- | --- | --- |
+| 1000 -> 500 Hz | `0x02` | `0x01` | one isolated capture |
+| 1000 -> 250 Hz | `0x02` | `0x04` | one isolated capture |
+
+The UI appeared to reload 1000 Hz between the two experiments, so these are
+not a continuous `1000 -> 500 -> 250` series. Repeat each transition, capture
+125 Hz, and determine when NGENUITY commits or reloads the selected profile
+before exposing a polling setter.
+
 ## Unknowns and required evidence
 
 | Area | Current state | Required next experiment |
 | --- | --- | --- |
 | firmware/device info query | unknown | capture NGENUITY startup with no setting changes; identify repeated IN/feature queries |
 | report descriptor for configuration collection | confirmed | optionally dump the two other vendor collections for research without sending reports |
-| direct RGB transport | accepted locally | visually confirm red wheel/logo, cursor/buttons, and timeout/revert |
+| direct RGB transport | accepted locally and captured from NGENUITY | visually confirm red wheel/logo, cursor/buttons, and timeout/revert |
 | RGB off semantics | unknown | compare NGENUITY static black vs explicit lighting-off capture |
-| DPI and stages | unknown | isolated 800→900→1000→1600 captures |
-| polling | unknown | isolated 125→250→500→1000 Hz captures and verify with an external rate tester |
+| DPI and stages | first-stage 800/900/1000 values confirmed in profile image | map other stage offsets, stage count/active index, and the surrounding transaction |
+| polling | 1000/500/250 profile enum candidates captured | repeat transitions, capture 125 Hz, establish commit/reload behavior, and verify with an external rate tester |
 | button bindings | unknown | isolated Back, Forward, Volume Up, Volume Down and Disabled captures |
 | onboard save | hardware advertised, command unknown | compare volatile edits with explicit “save to mouse” action and power-cycle; review every changed report before replay |
 | NGENUITY locking | unknown | run `devices`, then future read-only `info`, with NGENUITY open and closed; record open errors |

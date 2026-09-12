@@ -15,6 +15,23 @@ closed and do not capture or replay firmware, bootloader or DFU sessions.
 7. Export only relevant HID control/interrupt payloads as ordered hex lines.
 8. Repeat the same transition at least twice and compare it with a no-op capture.
 
+After identifying the USBPcap interface and device address with extcap, run a
+bounded device-only capture from WSL:
+
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/capture-windows.ps1")" \
+  -Interface '\\.\USBPcap1' \
+  -DeviceAddress 7 \
+  -DurationSeconds 20 \
+  -OutputPath 'C:\Users\you\AppData\Local\Temp\openhyperx-dpi-800-900.pcapng'
+```
+
+The interface and address are examples and can change after reconnect or
+reboot. Re-enumerate them before every capture session. The script refuses to
+capture every device, refuses to overwrite an existing file, stops after at
+most 300 seconds, and requests elevation only for the bounded capture process.
+
 USBPcap may contain traffic from other devices on the same host controller.
 Treat raw captures as potentially sensitive. The repository ignores `*.pcap`,
 `*.pcapng`, `*.etl` and `captures/private/` by default.
