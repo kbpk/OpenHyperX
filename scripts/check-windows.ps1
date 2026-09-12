@@ -9,8 +9,15 @@ if (-not (Test-Path -LiteralPath $cargo)) {
 
 Set-Location -LiteralPath (Split-Path -Parent $PSScriptRoot)
 
-& $cargo test --workspace --target $target
+& $cargo test --workspace --all-targets --locked --target $target
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-& $cargo build --workspace --target $target
+& $cargo build --workspace --locked --target $target
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+$binary = Join-Path (Get-Location) "target\$target\debug\hyperx-cli.exe"
+& $binary --version
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+& $binary devices
 exit $LASTEXITCODE
