@@ -49,7 +49,8 @@ if (-not (Test-Path -LiteralPath $usbPcap)) {
     throw "USBPcapCMD.exe was not found at $usbPcap."
 }
 
-$fullOutputPath = [IO.Path]::GetFullPath($OutputPath)
+$expandedOutputPath = [Environment]::ExpandEnvironmentVariables($OutputPath)
+$fullOutputPath = [IO.Path]::GetFullPath($expandedOutputPath)
 if (Test-Path -LiteralPath $fullOutputPath) {
     throw "Refusing to overwrite existing capture: $fullOutputPath"
 }

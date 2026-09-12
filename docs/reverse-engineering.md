@@ -24,13 +24,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -Interface '\\.\USBPcap1' \
   -DeviceAddress 7 \
   -DurationSeconds 20 \
-  -OutputPath 'C:\Users\you\AppData\Local\Temp\openhyperx-dpi-800-900.pcapng'
+  -OutputPath '%TEMP%\openhyperx-dpi-800-900.pcapng'
 ```
 
 The interface and address are examples and can change after reconnect or
 reboot. Re-enumerate them before every capture session. The script refuses to
 capture every device, refuses to overwrite an existing file, stops after at
-most 300 seconds, and requests elevation only for the bounded capture process.
+most 300 seconds, expands Windows `%NAME%` environment variables in the output
+path, and requests elevation only for the bounded capture process. Using
+`%TEMP%` avoids hard-coding a Windows account name when invoking PowerShell
+from Bash.
 
 USBPcap may contain traffic from other devices on the same host controller.
 Treat raw captures as potentially sensitive. The repository ignores `*.pcap`,
