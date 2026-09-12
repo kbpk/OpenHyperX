@@ -1,6 +1,6 @@
 # Pulsefire Raid research
 
-Last updated: 2026-09-12.
+Last updated: 2026-09-13.
 
 This document separates manufacturer facts, public implementation evidence,
 local observations and hypotheses. Do not promote a hypothesis into a device
@@ -183,8 +183,54 @@ confirmed that the value is the USB polling interval in milliseconds:
 The `125 -> 500` and `500 -> 1000` transitions reproduced the mapping and each
 changed only this byte. The initial `0x02 -> 0x01` capture was therefore
 `500 -> 1000`, not the initially assumed reverse direction. The software UI
-confirmed that the setting remained selected. The surrounding transaction and
-onboard persistence still need to be established before exposing a setter.
+confirmed that the setting remained selected. Persistence of the `0x01` value
+through an explicit onboard save and power-cycle was subsequently confirmed.
+The surrounding transaction still needs to be implemented safely before
+exposing a setter.
+
+### Onboard save observations
+
+Two captures of an explicit NGENUITY `Save to mouse` click were made on
+2026-09-13. Both used feature report ID `0x07`, interface 1 and 264-byte
+buffers. The repeated ordered sequence was:
+
+1. `SET_REPORT` prefix `07 03 01 64`;
+2. three `SET_REPORT` packets with prefixes `07 18 01 00`, carrying indexes
+   `00`, `01` and `02` at offset `0x04`;
+3. `SET_REPORT` prefix `07 81`, otherwise zero-filled;
+4. `GET_REPORT` returning a full profile image with prefix `07 81 01`;
+5. `SET_REPORT` containing a full profile image with prefix `07 01 01`;
+6. after about one second, `SET_REPORT` prefix `07 03 04 64`.
+
+The first save read an onboard profile containing polling code `0x02`
+(500 Hz) and first-stage DPI code `0x10` (800 DPI). NGENUITY wrote the current
+1000 Hz / 1000 DPI settings. Comparing the complete read response with the
+write found only these differences:
+
+| Offset | Read | Write | Interpretation |
+| --- | --- | --- | --- |
+| `0x01` | `0x81` | `0x01` | response opcode to write opcode |
+| `0x18` | `0x02` | `0x01` | 500 Hz to 1000 Hz |
+| `0x1A` | `0x10` | `0x14` | first DPI X, 800 to 1000 |
+| `0x26` | `0x10` | `0x14` | first DPI Y, 800 to 1000 |
+
+The second save read the newly stored 1000 Hz / 1000 DPI values. Its full
+read/write comparison differed only at offset `0x01`, confirming that
+NGENUITY preserved all other bytes in the no-op case.
+
+NGENUITY and its helper were then closed, the mouse was physically unplugged
+for about five seconds and reconnected, and all seven HID collections returned
+with the same identity. A capture of the next NGENUITY startup read a profile
+with prefix `07 81 04`, polling code `0x01` and DPI codes `0x14` at offsets
+`0x1A` and `0x26`. NGENUITY's corresponding `07 01 04` write differed only in
+the opcode. This confirms persistence of the saved performance values across
+a power-cycle and shows that sections `0x01` and `0x04` share the confirmed
+performance-field layout.
+
+The semantics and legal contents of the three `0x18` packets remain unknown.
+They are part of the captured save transaction and block a safe replay until
+isolated captures establish their variable fields. Raw `.pcapng` files remain
+outside Git.
 
 ## Unknowns and required evidence
 
@@ -195,9 +241,9 @@ onboard persistence still need to be established before exposing a setter.
 | direct RGB transport | accepted locally and captured from NGENUITY | visually confirm red wheel/logo, cursor/buttons, and timeout/revert |
 | RGB off semantics | unknown | compare NGENUITY static black vs explicit lighting-off capture |
 | DPI and stages | first-stage 800/900/1000 values confirmed in profile image | map other stage offsets, stage count/active index, and the surrounding transaction |
-| polling | all four profile interval codes captured and repeated | establish transaction/persistence behavior and verify with an external rate tester |
+| polling | all four interval codes captured; 1000 Hz persisted through save and power-cycle | implement only after the complete save transaction is understood; verify with an external rate tester |
 | button bindings | unknown | isolated Back, Forward, Volume Up, Volume Down and Disabled captures |
-| onboard save | hardware advertised, command unknown | compare volatile edits with explicit “save to mouse” action and power-cycle; review every changed report before replay |
+| onboard save | repeated transaction captured; read-modify-write and performance persistence confirmed | identify the three `0x18` packets, acknowledgements, timing and failure behavior before replay |
 | NGENUITY locking | unknown | run `devices`, then future read-only `info`, with NGENUITY open and closed; record open errors |
 | admin requirement | configuration collection opens without elevation | retest on a second Windows machine/account |
 

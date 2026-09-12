@@ -8,7 +8,8 @@ const DIRECT_END: u8 = 0xA0;
 
 const PROFILE_WRITE_OPCODE: u8 = 0x01;
 const PROFILE_READ_RESPONSE_OPCODE: u8 = 0x81;
-const PERFORMANCE_PROFILE_SECTION: u8 = 0x04;
+const ONBOARD_PROFILE_SECTION: u8 = 0x01;
+const RUNTIME_PROFILE_SECTION: u8 = 0x04;
 const POLLING_INTERVAL_OFFSET: usize = 0x18;
 const FIRST_DPI_X_OFFSET: usize = 0x1A;
 const FIRST_DPI_Y_OFFSET: usize = 0x26;
@@ -20,10 +21,17 @@ pub enum ProfileImageKind {
     DeviceReadResponse,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProfileSection {
+    Onboard,
+    Runtime,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PerformanceProfile {
     report: [u8; DIRECT_REPORT_LENGTH],
     kind: ProfileImageKind,
+    section: ProfileSection,
 }
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
@@ -34,8 +42,8 @@ pub enum PerformanceProfileError {
     WrongReportId(u8),
     #[error("unsupported Pulsefire Raid profile opcode 0x{0:02X}")]
     UnsupportedOpcode(u8),
-    #[error("expected performance profile section 0x04, got 0x{0:02X}")]
-    WrongSection(u8),
+    #[error("unsupported Pulsefire Raid profile section 0x{0:02X}")]
+    UnsupportedSection(u8),
     #[error("unknown Pulsefire Raid polling interval code 0x{0:02X}")]
     UnknownPollingInterval(u8),
 }
@@ -56,15 +64,25 @@ impl PerformanceProfile {
             opcode => return Err(PerformanceProfileError::UnsupportedOpcode(opcode)),
         };
 
-        if report[2] != PERFORMANCE_PROFILE_SECTION {
-            return Err(PerformanceProfileError::WrongSection(report[2]));
-        }
+        let section = match report[2] {
+            ONBOARD_PROFILE_SECTION => ProfileSection::Onboard,
+            RUNTIME_PROFILE_SECTION => ProfileSection::Runtime,
+            section => return Err(PerformanceProfileError::UnsupportedSection(section)),
+        };
 
-        Ok(Self { report, kind })
+        Ok(Self {
+            report,
+            kind,
+            section,
+        })
     }
 
     pub const fn kind(&self) -> ProfileImageKind {
         self.kind
+    }
+
+    pub const fn section(&self) -> ProfileSection {
+        self.section
     }
 
     pub fn polling_rate(&self) -> Result<PollingRate, PerformanceProfileError> {
@@ -129,14 +147,20 @@ pub fn encode_direct_rgb(wheel: RgbColor, logo: RgbColor) -> [u8; DIRECT_REPORT_
 mod tests {
     use super::*;
 
-    fn profile_fixture(kind: ProfileImageKind) -> [u8; DIRECT_REPORT_LENGTH] {
+    fn profile_fixture(
+        kind: ProfileImageKind,
+        section: ProfileSection,
+    ) -> [u8; DIRECT_REPORT_LENGTH] {
         let mut report = [0_u8; DIRECT_REPORT_LENGTH];
         report[0] = DIRECT_REPORT_ID;
         report[1] = match kind {
             ProfileImageKind::HostWrite => PROFILE_WRITE_OPCODE,
             ProfileImageKind::DeviceReadResponse => PROFILE_READ_RESPONSE_OPCODE,
         };
-        report[2] = PERFORMANCE_PROFILE_SECTION;
+        report[2] = match section {
+            ProfileSection::Onboard => ONBOARD_PROFILE_SECTION,
+            ProfileSection::Runtime => RUNTIME_PROFILE_SECTION,
+        };
         report[POLLING_INTERVAL_OFFSET] = 0x01;
         report[FIRST_DPI_X_OFFSET..FIRST_DPI_X_OFFSET + 2].copy_from_slice(&0x14_u16.to_le_bytes());
         report[FIRST_DPI_Y_OFFSET..FIRST_DPI_Y_OFFSET + 2].copy_from_slice(&0x14_u16.to_le_bytes());
@@ -164,12 +188,25 @@ mod tests {
 
     #[test]
     fn parses_captured_performance_fields() {
-        let report = profile_fixture(ProfileImageKind::DeviceReadResponse);
+        let report = profile_fixture(
+            ProfileImageKind::DeviceReadResponse,
+            ProfileSection::Runtime,
+        );
         let profile = PerformanceProfile::parse(&report).unwrap();
 
         assert_eq!(profile.kind(), ProfileImageKind::DeviceReadResponse);
+        assert_eq!(profile.section(), ProfileSection::Runtime);
         assert_eq!(profile.polling_rate().unwrap(), PollingRate::Hz1000);
         assert_eq!(profile.first_dpi_stage(), (1000, 1000));
+    }
+
+    #[test]
+    fn parses_captured_onboard_profile_section() {
+        let report = profile_fixture(ProfileImageKind::HostWrite, ProfileSection::Onboard);
+        let profile = PerformanceProfile::parse(&report).unwrap();
+
+        assert_eq!(profile.kind(), ProfileImageKind::HostWrite);
+        assert_eq!(profile.section(), ProfileSection::Onboard);
     }
 
     #[test]
@@ -180,7 +217,7 @@ mod tests {
             (0x04, PollingRate::Hz250),
             (0x08, PollingRate::Hz125),
         ] {
-            let mut report = profile_fixture(ProfileImageKind::HostWrite);
+            let mut report = profile_fixture(ProfileImageKind::HostWrite, ProfileSection::Runtime);
             report[POLLING_INTERVAL_OFFSET] = code;
             let profile = PerformanceProfile::parse(&report).unwrap();
             assert_eq!(profile.polling_rate().unwrap(), expected);
@@ -189,7 +226,7 @@ mod tests {
 
     #[test]
     fn offline_polling_patch_changes_only_confirmed_offset() {
-        let report = profile_fixture(ProfileImageKind::HostWrite);
+        let report = profile_fixture(ProfileImageKind::HostWrite, ProfileSection::Runtime);
         let mut profile = PerformanceProfile::parse(&report).unwrap();
 
         profile.set_polling_rate(PollingRate::Hz125);
@@ -211,28 +248,28 @@ mod tests {
             Err(PerformanceProfileError::WrongLength(10))
         );
 
-        let mut report = profile_fixture(ProfileImageKind::HostWrite);
+        let mut report = profile_fixture(ProfileImageKind::HostWrite, ProfileSection::Runtime);
         report[0] = 0x06;
         assert_eq!(
             PerformanceProfile::parse(&report),
             Err(PerformanceProfileError::WrongReportId(0x06))
         );
 
-        let mut report = profile_fixture(ProfileImageKind::HostWrite);
+        let mut report = profile_fixture(ProfileImageKind::HostWrite, ProfileSection::Runtime);
         report[1] = 0x10;
         assert_eq!(
             PerformanceProfile::parse(&report),
             Err(PerformanceProfileError::UnsupportedOpcode(0x10))
         );
 
-        let mut report = profile_fixture(ProfileImageKind::HostWrite);
+        let mut report = profile_fixture(ProfileImageKind::HostWrite, ProfileSection::Runtime);
         report[2] = 0x03;
         assert_eq!(
             PerformanceProfile::parse(&report),
-            Err(PerformanceProfileError::WrongSection(0x03))
+            Err(PerformanceProfileError::UnsupportedSection(0x03))
         );
 
-        let mut report = profile_fixture(ProfileImageKind::HostWrite);
+        let mut report = profile_fixture(ProfileImageKind::HostWrite, ProfileSection::Runtime);
         report[POLLING_INTERVAL_OFFSET] = 0x03;
         let profile = PerformanceProfile::parse(&report).unwrap();
         assert_eq!(
