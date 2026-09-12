@@ -227,6 +227,15 @@ the opcode. This confirms persistence of the saved performance values across
 a power-cycle and shows that sections `0x01` and `0x04` share the confirmed
 performance-field layout.
 
+The person at the machine confirmed that cursor movement and the basic mouse
+buttons still worked normally after the power-cycle. The lighting did not
+remain at the previously visible static red: with NGENUITY and its helper
+stopped, the mouse displayed a rainbow effect. This is consistent with the red
+being supplied by NGENUITY's periodic volatile `07 0A` direct-RGB reports and
+the mouse returning to a different stored lighting effect. It confirms
+performance-field persistence only; persistent lighting storage is not yet
+understood and must be tested separately.
+
 The semantics and legal contents of the three `0x18` packets remain unknown.
 They are part of the captured save transaction and block a safe replay until
 isolated captures establish their variable fields. Raw `.pcapng` files remain
@@ -238,8 +247,9 @@ outside Git.
 | --- | --- | --- |
 | firmware/device info query | unknown | capture NGENUITY startup with no setting changes; identify repeated IN/feature queries |
 | report descriptor for configuration collection | confirmed | optionally dump the two other vendor collections for research without sending reports |
-| direct RGB transport | accepted locally and captured from NGENUITY | visually confirm red wheel/logo, cursor/buttons, and timeout/revert |
+| direct RGB transport | accepted locally and captured from NGENUITY; observed lighting returns to stored rainbow without keepalive | isolate timeout/revert timing and confirm both physical LED zones |
 | RGB off semantics | unknown | compare NGENUITY static black vs explicit lighting-off capture |
+| persistent RGB/effects | saved performance survived power-cycle but visible static red did not | capture static color selection and `Save to mouse` separately, then repeat and power-cycle |
 | DPI and stages | first-stage 800/900/1000 values confirmed in profile image | map other stage offsets, stage count/active index, and the surrounding transaction |
 | polling | all four interval codes captured; 1000 Hz persisted through save and power-cycle | implement only after the complete save transaction is understood; verify with an external rate tester |
 | button bindings | unknown | isolated Back, Forward, Volume Up, Volume Down and Disabled captures |
