@@ -170,18 +170,21 @@ understood well enough to preserve every unrelated field.
 
 ### Polling-rate profile observations
 
-The NGENUITY profile image changed only offset `0x18` in captures made from a
-displayed 1000 Hz state:
+The NGENUITY profile image changed only offset `0x18`. Repeated transitions
+confirmed that the value is the USB polling interval in milliseconds:
 
-| UI transition | Before | After | Confidence |
-| --- | --- | --- | --- |
-| 1000 -> 500 Hz | `0x02` | `0x01` | one isolated capture |
-| 1000 -> 250 Hz | `0x02` | `0x04` | one isolated capture |
+| Polling rate | Offset `0x18` |
+| --- | --- |
+| 1000 Hz | `0x01` |
+| 500 Hz | `0x02` |
+| 250 Hz | `0x04` |
+| 125 Hz | `0x08` |
 
-The UI appeared to reload 1000 Hz between the two experiments, so these are
-not a continuous `1000 -> 500 -> 250` series. Repeat each transition, capture
-125 Hz, and determine when NGENUITY commits or reloads the selected profile
-before exposing a polling setter.
+The `125 -> 500` and `500 -> 1000` transitions reproduced the mapping and each
+changed only this byte. The initial `0x02 -> 0x01` capture was therefore
+`500 -> 1000`, not the initially assumed reverse direction. The software UI
+confirmed that the setting remained selected. The surrounding transaction and
+onboard persistence still need to be established before exposing a setter.
 
 ## Unknowns and required evidence
 
@@ -192,7 +195,7 @@ before exposing a polling setter.
 | direct RGB transport | accepted locally and captured from NGENUITY | visually confirm red wheel/logo, cursor/buttons, and timeout/revert |
 | RGB off semantics | unknown | compare NGENUITY static black vs explicit lighting-off capture |
 | DPI and stages | first-stage 800/900/1000 values confirmed in profile image | map other stage offsets, stage count/active index, and the surrounding transaction |
-| polling | 1000/500/250 profile enum candidates captured | repeat transitions, capture 125 Hz, establish commit/reload behavior, and verify with an external rate tester |
+| polling | all four profile interval codes captured and repeated | establish transaction/persistence behavior and verify with an external rate tester |
 | button bindings | unknown | isolated Back, Forward, Volume Up, Volume Down and Disabled captures |
 | onboard save | hardware advertised, command unknown | compare volatile edits with explicit “save to mouse” action and power-cycle; review every changed report before replay |
 | NGENUITY locking | unknown | run `devices`, then future read-only `info`, with NGENUITY open and closed; record open errors |

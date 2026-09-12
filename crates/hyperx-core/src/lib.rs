@@ -4,6 +4,6 @@ mod capability;
 mod color;
 mod device;
 
-pub use capability::{Capability, CapabilitySet, LightingZone};
+pub use capability::{Capability, CapabilitySet, LightingZone, PollingRate};
 pub use color::{ColorParseError, RgbColor};
 pub use device::{DeviceDescriptor, HidInterfaceInfo, InterfaceSelector, UsbId};
