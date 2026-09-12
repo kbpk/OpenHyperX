@@ -241,15 +241,52 @@ They are part of the captured save transaction and block a safe replay until
 isolated captures establish their variable fields. Raw `.pcapng` files remain
 outside Git.
 
+### Runtime lighting and persistence observations
+
+On the tested NGENUITY profile, the Lighting UI showed `Solid`, red, target
+`All Lights`, maximum opacity and `Visible`. Opening that tab changed the
+mouse from its standalone rainbow effect to static red. This coincided with
+the periodic direct-RGB report and did not require a profile transaction.
+
+Changing only the UI color from red to a visually green value produced no
+non-direct feature reports. The repeated direct report changed from:
+
+```text
+07 0A FF 00 00 FF 00 00 A0
+```
+
+to:
+
+```text
+07 0A 32 FF 00 32 FF 00 A0
+```
+
+The latter value is `#32FF00` for both physical LEDs; it was not pure
+`#00FF00`. Clicking `Save to mouse` while this green preview was active
+changed only the two RGB triplets at offsets `0x08` and `0x0B` of the first
+indexed `0x18` report. The complete onboard profile write was byte-for-byte
+identical to the earlier red save. After NGENUITY and its helper stopped, the
+mouse briefly displayed static red and then returned to its standalone
+rainbow effect. The green color therefore did not persist.
+
+Changing the NGENUITY effect from `Solid` to its cycle/rainbow option produced
+289 direct-RGB reports containing 131 distinct pairs of colors during one
+20-second capture, and no non-direct feature report. On this unit and
+NGENUITY version, both Solid and cycle lighting are software-rendered through
+the volatile `0x0A` path. There is no local evidence that `Save to mouse`
+persists a lighting effect, despite its `0x18` color payloads. Treat those
+payloads as unknown until their purpose is isolated; do not use them as a
+persistent-lighting encoder.
+
 ## Unknowns and required evidence
 
 | Area | Current state | Required next experiment |
 | --- | --- | --- |
 | firmware/device info query | unknown | capture NGENUITY startup with no setting changes; identify repeated IN/feature queries |
 | report descriptor for configuration collection | confirmed | optionally dump the two other vendor collections for research without sending reports |
-| direct RGB transport | accepted locally and captured from NGENUITY; observed lighting returns to stored rainbow without keepalive | isolate timeout/revert timing and confirm both physical LED zones |
+| direct RGB transport | accepted locally; NGENUITY Solid and Cycle both use it, and lighting returns to rainbow without keepalive | isolate timeout/revert timing and confirm both physical LED zones |
 | RGB off semantics | unknown | compare NGENUITY static black vs explicit lighting-off capture |
-| persistent RGB/effects | saved performance survived power-cycle but visible static red did not | capture static color selection and `Save to mouse` separately, then repeat and power-cycle |
+| persistent RGB/effects | Solid color and Cycle are software-rendered; red/green save captures did not persist lighting | determine whether Raid firmware exposes any hardware-lighting mode before claiming support; otherwise provide an explicit foreground engine |
 | DPI and stages | first-stage 800/900/1000 values confirmed in profile image | map other stage offsets, stage count/active index, and the surrounding transaction |
 | polling | all four interval codes captured; 1000 Hz persisted through save and power-cycle | implement only after the complete save transaction is understood; verify with an external rate tester |
 | button bindings | unknown | isolated Back, Forward, Volume Up, Volume Down and Disabled captures |
