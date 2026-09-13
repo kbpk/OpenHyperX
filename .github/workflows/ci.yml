@@ -72,3 +72,31 @@ jobs:
         run: |
           .\target\debug\hyperx-cli.exe --version
           .\target\debug\hyperx-cli.exe devices
+
+  macos:
+    name: macOS ${{ matrix.arch }} tests, build and CLI smoke test
+    needs: quality
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-latest
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Run tests
+        run: cargo test --workspace --all-targets --locked
+
+      - name: Build workspace
+        run: cargo build --workspace --locked
+
+      - name: Smoke test CLI executable
+        run: |
+          ./target/debug/hyperx-cli --version
+          ./target/debug/hyperx-cli devices

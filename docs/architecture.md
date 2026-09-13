@@ -54,6 +54,10 @@ and queued RX reports for tests without hardware.
 The real opened-device adapter, reconnect policy and Windows-specific errors
 belong here. Device drivers select an exact HID collection and must not open
 the standard mouse collection unless a documented operation requires it.
+The macOS build uses hidapi's shared-device mode so enumeration or future
+configuration does not request exclusive ownership. CI verifies compilation
+and no-device CLI behavior on ARM64 and Intel; physical-device behavior remains
+unverified there.
 
 ### `hyperx-protocol`
 

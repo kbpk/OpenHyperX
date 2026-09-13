@@ -11,6 +11,7 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
 ## Current status
 
 - Windows-native HID enumeration and exact collection opening through `hidapi`
+- macOS ARM64/x64 CI builds and CLI smoke tests (hardware support unverified)
 - Pulsefire Raid recognition (`0951:16E4`)
 - display of every HID collection, usage page, usage and device path
 - optional `-v`, `-vv` and `--trace` diagnostics
@@ -82,6 +83,22 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
 
 Direct RGB does not write onboard memory. Close NGENUITY and other device/RGB
 writers before using it. Once keepalive ends, the stored effect may return.
+
+## Build on macOS
+
+Install Rust and the Xcode Command Line Tools, then build and exercise the
+platform-neutral CLI normally:
+
+```bash
+cargo test --workspace --all-targets --locked
+cargo build --workspace --locked
+./target/debug/hyperx-cli --version
+./target/debug/hyperx-cli devices
+```
+
+The macOS backend opens HID devices with shared access. CI covers native ARM64
+and Intel builds, but discovery and writes against a physical Pulsefire Raid
+have not yet been validated on macOS.
 
 `devices --all` also prints unsupported HID collections and can be very noisy.
 Paths may contain machine-specific identifiers, so inspect trace logs before
