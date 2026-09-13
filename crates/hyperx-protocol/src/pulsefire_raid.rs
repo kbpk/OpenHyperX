@@ -17,6 +17,8 @@ const ACTIVE_DPI_STAGE_OFFSET: usize = 0x31;
 const DPI_STAGE_ENABLED_OFFSETS: [usize; 5] = [0x32, 0x33, 0x34, 0x35, 0x36];
 const DPI_STAGE_COLOR_OFFSETS: [usize; 5] = [0x69, 0x6C, 0x6F, 0x72, 0x75];
 const DPI_UNIT: u32 = 50;
+const MIN_DPI: u32 = 200;
+const MAX_DPI: u32 = 16_000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProfileImageKind {
@@ -57,6 +59,29 @@ pub enum PerformanceProfileError {
     NoEnabledDpiStages,
     #[error("active DPI stage {active} is outside the {stage_count} enabled stages")]
     InvalidActiveDpiStage { active: usize, stage_count: usize },
+    #[error("Pulsefire Raid requires between 1 and 5 DPI stages, got {0}")]
+    InvalidDpiStageCount(usize),
+    #[error("DPI stage {stage} {axis:?} value {dpi} must be between 200 and 16000")]
+    DpiOutOfRange {
+        stage: usize,
+        axis: DpiAxis,
+        dpi: u32,
+    },
+    #[error("DPI stage {stage} {axis:?} value {dpi} must be a multiple of 50")]
+    DpiNotStepAligned {
+        stage: usize,
+        axis: DpiAxis,
+        dpi: u32,
+    },
+}
+
+/// Axis identifying an invalid DPI value in a profile.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DpiAxis {
+    /// Horizontal sensor resolution.
+    X,
+    /// Vertical sensor resolution.
+    Y,
 }
 
 impl PerformanceProfile {
@@ -167,6 +192,57 @@ impl PerformanceProfile {
         })
     }
 
+    /// Patch all confirmed DPI fields in an existing profile image.
+    ///
+    /// This does not transmit anything. Values are validated before the image
+    /// is changed, and fields unrelated to DPI are preserved byte-for-byte.
+    pub fn set_dpi_profile(
+        &mut self,
+        dpi_profile: &DpiProfile,
+    ) -> Result<(), PerformanceProfileError> {
+        let stage_count = dpi_profile.stages.len();
+        if !(1..=DPI_X_OFFSETS.len()).contains(&stage_count) {
+            return Err(PerformanceProfileError::InvalidDpiStageCount(stage_count));
+        }
+        if dpi_profile.active_stage >= stage_count {
+            return Err(PerformanceProfileError::InvalidActiveDpiStage {
+                active: dpi_profile.active_stage,
+                stage_count,
+            });
+        }
+
+        for (index, stage) in dpi_profile.stages.iter().enumerate() {
+            validate_dpi(index, DpiAxis::X, stage.x)?;
+            validate_dpi(index, DpiAxis::Y, stage.y)?;
+        }
+
+        for index in 0..DPI_X_OFFSETS.len() {
+            if let Some(stage) = dpi_profile.stages.get(index) {
+                write_dpi(&mut self.report, DPI_X_OFFSETS[index], stage.x);
+                write_dpi(&mut self.report, DPI_Y_OFFSETS[index], stage.y);
+                self.report[DPI_STAGE_ENABLED_OFFSETS[index]] = 0x01;
+                self.report[DPI_STAGE_COLOR_OFFSETS[index]..DPI_STAGE_COLOR_OFFSETS[index] + 3]
+                    .copy_from_slice(&stage.color.bytes());
+            } else {
+                self.report[DPI_X_OFFSETS[index]..DPI_X_OFFSETS[index] + 2].fill(0);
+                self.report[DPI_Y_OFFSETS[index]..DPI_Y_OFFSETS[index] + 2].fill(0);
+                self.report[DPI_STAGE_ENABLED_OFFSETS[index]] = 0x00;
+                self.report[DPI_STAGE_COLOR_OFFSETS[index]..DPI_STAGE_COLOR_OFFSETS[index] + 3]
+                    .fill(0);
+            }
+        }
+        self.report[ACTIVE_DPI_STAGE_OFFSET] = dpi_profile.active_stage as u8;
+
+        Ok(())
+    }
+
+    /// Produce the confirmed host-write form without transmitting it.
+    pub fn to_write_report(&self) -> [u8; DIRECT_REPORT_LENGTH] {
+        let mut report = self.report;
+        report[1] = PROFILE_WRITE_OPCODE;
+        report
+    }
+
     pub const fn as_bytes(&self) -> &[u8; DIRECT_REPORT_LENGTH] {
         &self.report
     }
@@ -178,6 +254,31 @@ fn read_dpi(report: &[u8; DIRECT_REPORT_LENGTH], offset: usize) -> u32 {
 
 fn read_color(report: &[u8; DIRECT_REPORT_LENGTH], offset: usize) -> RgbColor {
     RgbColor::new(report[offset], report[offset + 1], report[offset + 2])
+}
+
+fn validate_dpi(stage: usize, axis: DpiAxis, dpi: u32) -> Result<(), PerformanceProfileError> {
+    if !(MIN_DPI..=MAX_DPI).contains(&dpi) {
+        return Err(PerformanceProfileError::DpiOutOfRange {
+            stage: stage + 1,
+            axis,
+            dpi,
+        });
+    }
+    if dpi % DPI_UNIT != 0 {
+        return Err(PerformanceProfileError::DpiNotStepAligned {
+            stage: stage + 1,
+            axis,
+            dpi,
+        });
+    }
+    Ok(())
+}
+
+fn write_dpi(report: &mut [u8; DIRECT_REPORT_LENGTH], offset: usize, dpi: u32) {
+    let encoded = u16::try_from(dpi / DPI_UNIT)
+        .expect("validated Pulsefire Raid DPI always fits in u16")
+        .to_be_bytes();
+    report[offset..offset + 2].copy_from_slice(&encoded);
 }
 
 /// Encode Pulsefire Raid's volatile two-LED direct RGB feature report.
@@ -355,6 +456,130 @@ mod tests {
     }
 
     #[test]
+    fn offline_stage_two_patch_matches_forward_and_reverse_captures() {
+        let original = captured_five_stage_profile();
+        let mut profile = PerformanceProfile::parse(&original).unwrap();
+        let mut dpi = profile.dpi_profile().unwrap();
+        dpi.stages[1].x = 1700;
+        dpi.stages[1].y = 1700;
+        dpi.active_stage = 1;
+
+        profile.set_dpi_profile(&dpi).unwrap();
+
+        assert_eq!(
+            changed_offsets(&original, profile.as_bytes()),
+            vec![0x1C, 0x28, 0x31]
+        );
+        assert_eq!(profile.as_bytes()[0x1C], 0x22);
+        assert_eq!(profile.as_bytes()[0x28], 0x22);
+        assert_eq!(profile.as_bytes()[0x31], 0x01);
+
+        dpi.stages[1].x = 1600;
+        dpi.stages[1].y = 1600;
+        dpi.active_stage = 0;
+        profile.set_dpi_profile(&dpi).unwrap();
+        assert_eq!(profile.as_bytes(), &original);
+    }
+
+    #[test]
+    fn offline_removal_of_fifth_stage_matches_capture() {
+        let original = captured_five_stage_profile();
+        let mut profile = PerformanceProfile::parse(&original).unwrap();
+        let mut dpi = profile.dpi_profile().unwrap();
+        dpi.stages.pop();
+
+        profile.set_dpi_profile(&dpi).unwrap();
+
+        assert_eq!(
+            changed_offsets(&original, profile.as_bytes()),
+            vec![0x21, 0x22, 0x2D, 0x2E, 0x36, 0x75, 0x76, 0x77]
+        );
+        assert!(profile.as_bytes()[0x21..0x23]
+            .iter()
+            .chain(&profile.as_bytes()[0x2D..0x2F])
+            .chain(&profile.as_bytes()[0x36..0x37])
+            .chain(&profile.as_bytes()[0x75..0x78])
+            .all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn offline_profile_patch_validates_every_value_before_mutating() {
+        let original = captured_five_stage_profile();
+        let mut profile = PerformanceProfile::parse(&original).unwrap();
+        let mut dpi = profile.dpi_profile().unwrap();
+        dpi.stages[2].x = 1625;
+
+        assert_eq!(
+            profile.set_dpi_profile(&dpi),
+            Err(PerformanceProfileError::DpiNotStepAligned {
+                stage: 3,
+                axis: DpiAxis::X,
+                dpi: 1625,
+            })
+        );
+        assert_eq!(profile.as_bytes(), &original);
+
+        dpi.stages[2].x = 16_050;
+        assert_eq!(
+            profile.set_dpi_profile(&dpi),
+            Err(PerformanceProfileError::DpiOutOfRange {
+                stage: 3,
+                axis: DpiAxis::X,
+                dpi: 16_050,
+            })
+        );
+        assert_eq!(profile.as_bytes(), &original);
+
+        dpi.stages[2].x = 150;
+        assert_eq!(
+            profile.set_dpi_profile(&dpi),
+            Err(PerformanceProfileError::DpiOutOfRange {
+                stage: 3,
+                axis: DpiAxis::X,
+                dpi: 150,
+            })
+        );
+        assert_eq!(profile.as_bytes(), &original);
+
+        dpi.stages[2].x = 200;
+        profile.set_dpi_profile(&dpi).unwrap();
+        assert_eq!(&profile.as_bytes()[0x1D..0x1F], &[0x00, 0x04]);
+    }
+
+    #[test]
+    fn offline_profile_patch_validates_stage_count_and_active_index() {
+        let original = captured_five_stage_profile();
+        let mut profile = PerformanceProfile::parse(&original).unwrap();
+        let mut dpi = profile.dpi_profile().unwrap();
+        dpi.stages.clear();
+        assert_eq!(
+            profile.set_dpi_profile(&dpi),
+            Err(PerformanceProfileError::InvalidDpiStageCount(0))
+        );
+
+        dpi.stages.push(DpiStage::new(800, 800, RgbColor::BLACK));
+        dpi.active_stage = 1;
+        assert_eq!(
+            profile.set_dpi_profile(&dpi),
+            Err(PerformanceProfileError::InvalidActiveDpiStage {
+                active: 1,
+                stage_count: 1,
+            })
+        );
+        assert_eq!(profile.as_bytes(), &original);
+    }
+
+    #[test]
+    fn write_report_changes_only_the_confirmed_opcode() {
+        let original = captured_five_stage_profile();
+        let profile = PerformanceProfile::parse(&original).unwrap();
+        let write_report = profile.to_write_report();
+
+        assert_eq!(changed_offsets(&original, &write_report), vec![0x01]);
+        assert_eq!(&write_report[..3], &[0x07, 0x01, 0x04]);
+    }
+
+    #[test]
     fn validates_dpi_stage_flags_and_active_index() {
         let mut report = profile_fixture(ProfileImageKind::HostWrite, ProfileSection::Runtime);
         report[DPI_STAGE_ENABLED_OFFSETS[1]] = 0;
@@ -428,5 +653,14 @@ mod tests {
             profile.polling_rate(),
             Err(PerformanceProfileError::UnknownPollingInterval(0x03))
         );
+    }
+
+    fn changed_offsets(before: &[u8], after: &[u8]) -> Vec<usize> {
+        before
+            .iter()
+            .zip(after)
+            .enumerate()
+            .filter_map(|(index, (before, after))| (before != after).then_some(index))
+            .collect()
     }
 }

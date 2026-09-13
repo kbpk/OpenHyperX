@@ -172,6 +172,23 @@ DPI and white, independently confirming `0x0140 * 50 = 16000`. Separate X/Y
 editing has not been tested, so the UI's axis-control behavior remains
 unknown.
 
+Isolated edits on stages 2 through 4 confirmed the same encoding at each
+mapped offset:
+
+| Transition | X change | Y change | Active-index change |
+| --- | --- | --- | --- |
+| stage 2: `1600 -> 1700` | `0x1C: 20 -> 22` | `0x28: 20 -> 22` | `0x31: 00 -> 01` |
+| stage 2: `1700 -> 1600` | `0x1C: 22 -> 20` | `0x28: 22 -> 20` | none |
+| stage 3: `3200 -> 3300` | `0x1E: 40 -> 42` | `0x2A: 40 -> 42` | `0x31: 01 -> 02` |
+| stage 3: `3300 -> 3200` | `0x1E: 42 -> 40` | `0x2A: 42 -> 40` | none |
+| stage 4: `6400 -> 6500` | `0x20: 80 -> 82` | `0x2C: 80 -> 82` | `0x31: 02 -> 03` |
+| stage 4: `6500 -> 6400` | `0x20: 82 -> 80` | `0x2C: 82 -> 80` | none |
+
+The reverse captures affected only the two DPI bytes plus the normal opcode
+change. Editing a different level also selected it, accounting for the active
+index in each forward capture. These pairs, together with the repeated stage-1
+captures and exact stage-5 add/remove pair, cover all five mapped DPI slots.
+
 The active stage is a zero-based index at offset `0x31`: isolated `1 -> 2`
 and `2 -> 3` UI transitions changed it from `00 -> 01 -> 02`. Stage enabled
 flags are bytes `0x32..0x36`, one byte per stage, with `00` disabled and `01`
@@ -200,6 +217,14 @@ it to 16000 DPI and white. Removing stage 5 cleared its X value at
 reverses. NGENUITY emitted an additional no-op read/write transaction before
 the actual removal transaction; the no-op changed only the response/write
 opcode.
+
+OpenHyperX now has an offline profile patcher for DPI values, active stage,
+stage count and colors. NGENUITY locally exposed a minimum of 200 DPI; the
+manufacturer documents a maximum of 16000 DPI, and captures confirm a 50-DPI
+step. The patcher therefore accepts multiples of 50 in the inclusive
+`200..=16000` range and preserves unrelated profile bytes. It is not connected
+to the HID driver; no interpolated profile is transmitted while the
+surrounding command sequence remains unresolved.
 
 Observed configuration sequence:
 
@@ -332,7 +357,7 @@ persistent-lighting encoder.
 | direct RGB transport | accepted locally; NGENUITY Solid and Cycle both use it, and lighting returns to rainbow without keepalive | isolate timeout/revert timing and confirm both physical LED zones |
 | RGB off semantics | unknown | compare NGENUITY static black vs explicit lighting-off capture |
 | persistent RGB/effects | Solid color and Cycle are software-rendered; red/green save captures did not persist lighting | determine whether Raid firmware exposes any hardware-lighting mode before claiming support; otherwise provide an explicit foreground engine |
-| DPI and stages | five big-endian X/Y values, 50-DPI units, active index, enable flags and per-stage colors confirmed; parser remains offline/read-only | capture DPI edits on stages 2-5 and min/max boundaries; determine whether independent X/Y values are supported; understand the surrounding transaction before exposing writes |
+| DPI and stages | five big-endian X/Y values, 200-16000 DPI range in 50-DPI units, active index, enable flags and per-stage colors confirmed; forward/reverse edits cover stages 1-4 and add/remove covers stage 5; patcher remains offline | determine whether independent X/Y values are supported; understand the surrounding transaction before exposing writes |
 | polling | all four interval codes captured; 1000 Hz persisted through save and power-cycle | implement only after the complete save transaction is understood; verify with an external rate tester |
 | button bindings | unknown | isolated Back, Forward, Volume Up, Volume Down and Disabled captures |
 | onboard save | repeated transaction captured; read-modify-write and performance persistence confirmed | identify the three `0x18` packets, acknowledgements, timing and failure behavior before replay |

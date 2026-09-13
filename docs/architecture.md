@@ -28,8 +28,10 @@ hidapi / Windows HID
 ```
 
 The current implementation includes discovery, standard report-descriptor
-reads, and the capture-backed volatile RGB operation. It does not expose
-setters whose packets are still unknown.
+reads, the capture-backed volatile RGB operation, and an offline Pulsefire
+Raid performance-profile parser/patcher. The patcher cannot perform I/O;
+device-driver setters whose surrounding transactions are still unknown remain
+absent.
 
 ## Crate responsibilities
 
