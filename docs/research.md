@@ -12,7 +12,8 @@ command without a capture or an independently reviewed implementation.
   lists 11 programmable buttons, Pixart PMW3389, up to 16,000 DPI, three
   factory DPI presets, RGB, USB 2.0 and one onboard profile.
 - [HyperX user guide](https://media.kingston.com/support/downloads/HyperX-Pulsefire-Raid-User-guide.pdf)
-  identifies part number `HX-MC005B`.
+  identifies part number `HX-MC005B`, documents the factory button layout and
+  warns that the hardware factory reset clears onboard memory.
 - [OpenRGB new-device issue #2097](https://gitlab.com/CalcProgrammer1/OpenRGB/-/issues/2097)
   reports `HID\\VID_0951&PID_16E4&REV_1124&MI_00`.
 - [OpenRGB detector at the inspected revision](https://gitlab.com/CalcProgrammer1/OpenRGB/-/blob/1da6a652fd0ee484be5b5844f8673f8590257cbb/Controllers/HyperXMouseController/HyperXMouseControllerDetect.cpp)
@@ -28,6 +29,10 @@ command without a capture or an independently reviewed implementation.
 - [USB HID reverse-engineering guide](https://santeri.pikarinen.com/pages/usb_hid_reverse_engineering/)
   gives a practical Windows/USBPcap/Wireshark workflow from an OpenRGB HyperX
   contributor.
+- [USB-IF HID Usage Tables](https://www.usb.org/hid) define the standard
+  Keyboard/Keypad and Consumer usage IDs used to interpret captured binding
+  records. The USB-IF document is the source of truth for those usage values;
+  it does not by itself prove the surrounding HyperX record format.
 
 OpenHyperX does not copy OpenRGB code. Names, IDs, observed report layout and
 USB behavior are recorded as attributed interoperability facts. Any later
@@ -90,6 +95,9 @@ Feature reports for the configuration collection use class control transfers
 on endpoint 0, with `wIndex = 1`. During the 2026-09-12 capture session the
 device was address 7 on `\\.\USBPcap1`; both values are transient and must be
 re-enumerated after reconnect or reboot.
+
+After a later reboot, the 2026-09-13 button session used transient address 31
+on the same capture interface.
 
 ## Known RGB report from OpenRGB
 
@@ -371,12 +379,53 @@ Repeat and Hold Repeat. NGENUITY became unresponsive while many inputs were
 clicked in the macro recorder, so no packet inference is made from that UI
 session and no macro capture was retained as protocol evidence.
 
-These observations define application-level binding types only. No binding
-code, button-slot offset or macro-event encoding is confirmed yet. A bounded
-capture set should use one side button and one representative from each class,
-then restore its original binding. Additional enum members may be interpolated
-offline only after the class/record structure is consistent; inferred values
-must not reach the HID transport.
+The official manual confirms that the apparent `Forward`, `Back`, `Mute`,
+`Volume Up` and `Volume Down` side assignments are the factory layout, not
+necessarily accidental user edits. It labels them Button 5, Button 4, Button
+8, Button 7 and Button 6 respectively. It also documents the factory-reset
+gesture as holding the DPI and wheel buttons for five seconds, explicitly
+stating that this clears onboard memory. That gesture was not used during
+research because the current profile was intentionally preserved.
+
+On 2026-09-13, isolated runtime-profile captures changed physical Button 5
+through `Forward -> Disabled -> Forward -> Back -> Volume Up -> Copy -> A ->
+Forward`. Every UI edit performed one `07 81 04 ...` profile read followed by
+one `07 01 04 ...` write. Apart from the expected opcode byte, only Button 5's
+four-byte record at `0x8C..0x8F` changed:
+
+| Binding | Four-byte record | Evidence |
+| --- | --- | --- |
+| Disabled | `00 00 00 00` | isolated forward/reverse capture |
+| Mouse Forward | `02 F9 00 04` | isolated forward/reverse capture; an existing functional record used `02 F9 00 00` |
+| Mouse Back | `02 F8 00 03` | isolated capture; an existing functional record used `02 F8 00 00` |
+| Multimedia Volume Up | `04 00 00 E9` | isolated capture; `E9` is USB HID Consumer Volume Increment |
+| Windows Shortcut Copy | `23 E0 06 00` | isolated capture; `E0`/`06` are Left Control and keyboard C usages |
+| Keyboard A | `00 04 00 00` | isolated capture; `04` is the keyboard A usage |
+
+The read profile and the manual's named factory layout correlate the 11
+physical controls with these record starts:
+
+| Control | Offset | Confidence |
+| --- | --- | --- |
+| left click | `0x7C` | correlated profile record `02 F0 00 00` |
+| right click | `0x80` | correlated profile record `02 F2 00 00` |
+| middle click | `0x84` | correlated profile record `02 F1 00 00` |
+| Button 4 / factory Back | `0x88` | manual plus functional captured profile |
+| Button 5 / factory Forward | `0x8C` | isolated local remapping sequence |
+| Button 7 / factory Volume Up | `0x90` | manual plus functional captured profile |
+| Button 6 / factory Volume Down | `0x94` | manual plus functional captured profile |
+| Button 8 / factory Mute | `0x98` | manual plus functional captured profile |
+| DPI button | `0x9C` | position correlated; captured profile had been remapped to A |
+| wheel tilt left | `0xA0` | position inferred from remaining records and `02 F5 00 00` |
+| wheel tilt right | `0xA4` | position inferred from remaining records and `02 F6 00 00` |
+
+The protocol crate now decodes these known records and has an offline patcher.
+The other keyboard, consumer-control and Windows shortcut values are derived
+from standard USB HID usage IDs after their record families were established;
+they remain offline inference and are not sent by the device driver. Left and
+right click are restricted to swapping those two functions, matching the UI.
+`DPI Toggle` and macro records remain rejected because their encodings are not
+yet captured.
 
 ## Unknowns and required evidence
 
@@ -389,7 +438,7 @@ must not reach the HID transport.
 | persistent RGB/effects | Solid color and Cycle are software-rendered; red/green save captures did not persist lighting | determine whether Raid firmware exposes any hardware-lighting mode before claiming support; otherwise provide an explicit foreground engine |
 | DPI and stages | five big-endian X/Y values, 200-16000 DPI range in 50-DPI units, active index, enable flags and per-stage colors confirmed; forward/reverse edits cover stages 1-4 and add/remove covers stage 5; patcher remains offline | determine whether independent X/Y values are supported; understand the surrounding transaction before exposing writes |
 | polling | all four interval codes captured; 1000 Hz persisted through save and power-cycle | implement only after the complete save transaction is understood; verify with an external rate tester |
-| button bindings | UI categories and legal actions recorded; no profile offsets or action codes known | on one side button capture its default to Disabled, then representative Mouse, Multimedia, Keyboard and Windows Shortcut actions; analyze a minimal one-key macro separately |
+| button bindings | 11 record offsets correlated; Button 5 isolated across Disabled, Forward, Back, Volume Up, Copy and A; offline decoder/patcher added | capture `DPI Toggle`; repeat one inferred multimedia/shortcut value; analyze a minimal one-key macro separately; do not expose hardware writes yet |
 | onboard save | repeated transaction captured; read-modify-write and performance persistence confirmed | identify the three `0x18` packets, acknowledgements, timing and failure behavior before replay |
 | NGENUITY locking | unknown | run `devices`, then future read-only `info`, with NGENUITY open and closed; record open errors |
 | admin requirement | configuration collection opens without elevation | retest on a second Windows machine/account |

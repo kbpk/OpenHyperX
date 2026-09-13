@@ -1,4 +1,7 @@
-use hyperx_core::{DpiProfile, DpiStage, PollingRate, RgbColor};
+use hyperx_core::{
+    ButtonBinding, DpiProfile, DpiStage, KeyboardUsage, MouseFunction, MultimediaFunction,
+    PollingRate, RgbColor, WindowsShortcut,
+};
 use thiserror::Error;
 
 pub const DIRECT_REPORT_ID: u8 = 0x07;
@@ -16,6 +19,7 @@ const DPI_Y_OFFSETS: [usize; 5] = [0x25, 0x27, 0x29, 0x2B, 0x2D];
 const ACTIVE_DPI_STAGE_OFFSET: usize = 0x31;
 const DPI_STAGE_ENABLED_OFFSETS: [usize; 5] = [0x32, 0x33, 0x34, 0x35, 0x36];
 const DPI_STAGE_COLOR_OFFSETS: [usize; 5] = [0x69, 0x6C, 0x6F, 0x72, 0x75];
+const BUTTON_RECORD_LENGTH: usize = 4;
 const DPI_UNIT: u32 = 50;
 const MIN_DPI: u32 = 200;
 const MAX_DPI: u32 = 16_000;
@@ -30,6 +34,48 @@ pub enum ProfileImageKind {
 pub enum ProfileSection {
     Onboard,
     Runtime,
+}
+
+/// Physical controls shown in the Pulsefire Raid button editor.
+///
+/// Kingston's manual supplies the numbered side-button names. The profile
+/// offsets were established from the locally captured runtime profile and an
+/// isolated Button 5 remapping sequence.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PulsefireRaidControl {
+    LeftClick,
+    RightClick,
+    MiddleClick,
+    Button4,
+    Button5,
+    Button7,
+    Button6,
+    Button8,
+    Dpi,
+    WheelTiltLeft,
+    WheelTiltRight,
+}
+
+impl PulsefireRaidControl {
+    const fn profile_offset(self) -> usize {
+        match self {
+            Self::LeftClick => 0x7C,
+            Self::RightClick => 0x80,
+            Self::MiddleClick => 0x84,
+            Self::Button4 => 0x88,
+            Self::Button5 => 0x8C,
+            Self::Button7 => 0x90,
+            Self::Button6 => 0x94,
+            Self::Button8 => 0x98,
+            Self::Dpi => 0x9C,
+            Self::WheelTiltLeft => 0xA0,
+            Self::WheelTiltRight => 0xA4,
+        }
+    }
+
+    const fn is_primary_click(self) -> bool {
+        matches!(self, Self::LeftClick | Self::RightClick)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -73,6 +119,20 @@ pub enum PerformanceProfileError {
         axis: DpiAxis,
         dpi: u32,
     },
+    #[error("unknown Pulsefire Raid binding record {record:02X?} for {control:?}")]
+    UnknownButtonBinding {
+        control: PulsefireRaidControl,
+        record: [u8; BUTTON_RECORD_LENGTH],
+    },
+    #[error("keyboard usage 0x{0:04X} is outside the captured one-byte binding range 0x01..=0xFF")]
+    KeyboardUsageOutOfRange(u16),
+    #[error("binding {binding:?} is not legal for Pulsefire Raid control {control:?}")]
+    ButtonBindingNotAllowed {
+        control: PulsefireRaidControl,
+        binding: ButtonBinding,
+    },
+    #[error("binding {0:?} does not yet have a capture-backed Pulsefire Raid encoding")]
+    UnconfirmedButtonBinding(ButtonBinding),
 }
 
 /// Axis identifying an invalid DPI value in a profile.
@@ -236,6 +296,47 @@ impl PerformanceProfile {
         Ok(())
     }
 
+    /// Decode one physical control's four-byte binding record.
+    pub fn button_binding(
+        &self,
+        control: PulsefireRaidControl,
+    ) -> Result<ButtonBinding, PerformanceProfileError> {
+        let offset = control.profile_offset();
+        let record: [u8; BUTTON_RECORD_LENGTH] = self.report[offset..offset + BUTTON_RECORD_LENGTH]
+            .try_into()
+            .expect("all Pulsefire Raid button offsets fit the fixed report");
+
+        decode_button_binding(control, record)
+    }
+
+    /// Patch one confirmed four-byte button record in an existing profile.
+    ///
+    /// This is an offline operation. Inferred members use standard USB HID
+    /// usage IDs, but no profile produced here is sent by the device driver
+    /// while the surrounding save transaction remains unresolved.
+    pub fn set_button_binding(
+        &mut self,
+        control: PulsefireRaidControl,
+        binding: &ButtonBinding,
+    ) -> Result<(), PerformanceProfileError> {
+        if control.is_primary_click()
+            && !matches!(
+                binding,
+                ButtonBinding::Mouse(MouseFunction::LeftClick | MouseFunction::RightClick)
+            )
+        {
+            return Err(PerformanceProfileError::ButtonBindingNotAllowed {
+                control,
+                binding: binding.clone(),
+            });
+        }
+
+        let record = encode_button_binding(binding)?;
+        let offset = control.profile_offset();
+        self.report[offset..offset + BUTTON_RECORD_LENGTH].copy_from_slice(&record);
+        Ok(())
+    }
+
     /// Produce the confirmed host-write form without transmitting it.
     pub fn to_write_report(&self) -> [u8; DIRECT_REPORT_LENGTH] {
         let mut report = self.report;
@@ -279,6 +380,107 @@ fn write_dpi(report: &mut [u8; DIRECT_REPORT_LENGTH], offset: usize, dpi: u32) {
         .expect("validated Pulsefire Raid DPI always fits in u16")
         .to_be_bytes();
     report[offset..offset + 2].copy_from_slice(&encoded);
+}
+
+fn decode_button_binding(
+    control: PulsefireRaidControl,
+    record: [u8; BUTTON_RECORD_LENGTH],
+) -> Result<ButtonBinding, PerformanceProfileError> {
+    let binding = match record {
+        [0x00, 0x00, 0x00, 0x00] => ButtonBinding::Disabled,
+        [0x00, usage, 0x00, 0x00] => ButtonBinding::Keyboard(KeyboardUsage(u16::from(usage))),
+        [0x02, 0xF0, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::LeftClick),
+        [0x02, 0xF1, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::MiddleClick),
+        [0x02, 0xF2, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::RightClick),
+        [0x02, 0xF3, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::ScrollUp),
+        [0x02, 0xF4, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::ScrollDown),
+        [0x02, 0xF5, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::TiltLeft),
+        [0x02, 0xF6, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::TiltRight),
+        [0x02, 0xF8, 0x00, 0x00] | [0x02, 0xF8, 0x00, 0x03] => {
+            ButtonBinding::Mouse(MouseFunction::Back)
+        }
+        [0x02, 0xF9, 0x00, 0x00] | [0x02, 0xF9, 0x00, 0x04] => {
+            ButtonBinding::Mouse(MouseFunction::Forward)
+        }
+        [0x04, 0x00, 0x00, 0xCD] => ButtonBinding::Multimedia(MultimediaFunction::PlayPause),
+        [0x04, 0x00, 0x00, 0xB7] => ButtonBinding::Multimedia(MultimediaFunction::Stop),
+        [0x04, 0x00, 0x00, 0xB5] => ButtonBinding::Multimedia(MultimediaFunction::NextTrack),
+        [0x04, 0x00, 0x00, 0xB6] => ButtonBinding::Multimedia(MultimediaFunction::PreviousTrack),
+        [0x04, 0x00, 0x00, 0xE2] => ButtonBinding::Multimedia(MultimediaFunction::MuteVolume),
+        [0x04, 0x00, 0x00, 0xE9] => ButtonBinding::Multimedia(MultimediaFunction::VolumeUp),
+        [0x04, 0x00, 0x00, 0xEA] => ButtonBinding::Multimedia(MultimediaFunction::VolumeDown),
+        [0x23, 0xE2, 0x29, 0x00] => ButtonBinding::WindowsShortcut(WindowsShortcut::CycleApps),
+        [0x23, 0xE2, 0x2B, 0x00] => ButtonBinding::WindowsShortcut(WindowsShortcut::SwitchApps),
+        [0x23, 0xE0, 0x1B, 0x00] => ButtonBinding::WindowsShortcut(WindowsShortcut::Cut),
+        [0x23, 0xE0, 0x06, 0x00] => ButtonBinding::WindowsShortcut(WindowsShortcut::Copy),
+        [0x23, 0xE0, 0x19, 0x00] => ButtonBinding::WindowsShortcut(WindowsShortcut::Paste),
+        [0x23, 0xE0, 0x1D, 0x00] => ButtonBinding::WindowsShortcut(WindowsShortcut::Undo),
+        _ => {
+            return Err(PerformanceProfileError::UnknownButtonBinding { control, record });
+        }
+    };
+
+    Ok(binding)
+}
+
+fn encode_button_binding(
+    binding: &ButtonBinding,
+) -> Result<[u8; BUTTON_RECORD_LENGTH], PerformanceProfileError> {
+    let record = match binding {
+        ButtonBinding::Disabled => [0x00, 0x00, 0x00, 0x00],
+        ButtonBinding::Keyboard(KeyboardUsage(usage)) => {
+            let usage = u8::try_from(*usage)
+                .ok()
+                .filter(|usage| *usage != 0)
+                .ok_or(PerformanceProfileError::KeyboardUsageOutOfRange(*usage))?;
+            [0x00, usage, 0x00, 0x00]
+        }
+        ButtonBinding::Mouse(function) => match function {
+            MouseFunction::LeftClick => [0x02, 0xF0, 0x00, 0x00],
+            MouseFunction::MiddleClick => [0x02, 0xF1, 0x00, 0x00],
+            MouseFunction::RightClick => [0x02, 0xF2, 0x00, 0x00],
+            MouseFunction::ScrollUp => [0x02, 0xF3, 0x00, 0x00],
+            MouseFunction::ScrollDown => [0x02, 0xF4, 0x00, 0x00],
+            MouseFunction::TiltLeft => [0x02, 0xF5, 0x00, 0x00],
+            MouseFunction::TiltRight => [0x02, 0xF6, 0x00, 0x00],
+            MouseFunction::Back => [0x02, 0xF8, 0x00, 0x03],
+            MouseFunction::Forward => [0x02, 0xF9, 0x00, 0x04],
+            MouseFunction::DpiToggle => {
+                return Err(PerformanceProfileError::UnconfirmedButtonBinding(
+                    binding.clone(),
+                ));
+            }
+        },
+        ButtonBinding::Multimedia(function) => [
+            0x04,
+            0x00,
+            0x00,
+            match function {
+                MultimediaFunction::PlayPause => 0xCD,
+                MultimediaFunction::Stop => 0xB7,
+                MultimediaFunction::NextTrack => 0xB5,
+                MultimediaFunction::PreviousTrack => 0xB6,
+                MultimediaFunction::MuteVolume => 0xE2,
+                MultimediaFunction::VolumeUp => 0xE9,
+                MultimediaFunction::VolumeDown => 0xEA,
+            },
+        ],
+        ButtonBinding::WindowsShortcut(shortcut) => match shortcut {
+            WindowsShortcut::CycleApps => [0x23, 0xE2, 0x29, 0x00],
+            WindowsShortcut::SwitchApps => [0x23, 0xE2, 0x2B, 0x00],
+            WindowsShortcut::Cut => [0x23, 0xE0, 0x1B, 0x00],
+            WindowsShortcut::Copy => [0x23, 0xE0, 0x06, 0x00],
+            WindowsShortcut::Paste => [0x23, 0xE0, 0x19, 0x00],
+            WindowsShortcut::Undo => [0x23, 0xE0, 0x1D, 0x00],
+        },
+        ButtonBinding::Macro(_) => {
+            return Err(PerformanceProfileError::UnconfirmedButtonBinding(
+                binding.clone(),
+            ));
+        }
+    };
+
+    Ok(record)
 }
 
 /// Encode Pulsefire Raid's volatile two-LED direct RGB feature report.
@@ -346,6 +548,27 @@ mod tests {
             0x0F, 0x0F, 0x00, 0x0F, 0x0F, 0x00, 0x00, 0x00, // 0x60
             0x02, 0x2B, 0x00, 0xFF, 0xCD, 0x00, 0xFF, 0x32, // 0x68
             0xFF, 0x00, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0xFF, // 0x70
+        ]);
+        report
+    }
+
+    fn captured_button_profile() -> [u8; DIRECT_REPORT_LENGTH] {
+        let mut report = profile_fixture(
+            ProfileImageKind::DeviceReadResponse,
+            ProfileSection::Runtime,
+        );
+        report[0x7C..0xA8].copy_from_slice(&[
+            0x02, 0xF0, 0x00, 0x00, // left click
+            0x02, 0xF2, 0x00, 0x00, // right click
+            0x02, 0xF1, 0x00, 0x00, // middle click
+            0x02, 0xF8, 0x00, 0x00, // Button 4: Back
+            0x02, 0xF9, 0x00, 0x00, // Button 5: Forward
+            0x04, 0x00, 0x00, 0xE9, // Button 7: Volume Up
+            0x04, 0x00, 0x00, 0xEA, // Button 6: Volume Down
+            0x04, 0x00, 0x00, 0xE2, // Button 8: Mute
+            0x00, 0x04, 0x00, 0x00, // DPI control remapped to keyboard A
+            0x02, 0xF5, 0x00, 0x00, // wheel tilt left
+            0x02, 0xF6, 0x00, 0x00, // wheel tilt right
         ]);
         report
     }
@@ -432,6 +655,233 @@ mod tests {
             .collect();
         assert_eq!(changed_offsets, vec![POLLING_INTERVAL_OFFSET]);
         assert_eq!(profile.as_bytes()[POLLING_INTERVAL_OFFSET], 0x08);
+    }
+
+    #[test]
+    fn decodes_captured_button_records() {
+        let profile = PerformanceProfile::parse(&captured_button_profile()).unwrap();
+
+        assert_eq!(
+            profile
+                .button_binding(PulsefireRaidControl::Button4)
+                .unwrap(),
+            ButtonBinding::Mouse(MouseFunction::Back)
+        );
+        assert_eq!(
+            profile
+                .button_binding(PulsefireRaidControl::Button5)
+                .unwrap(),
+            ButtonBinding::Mouse(MouseFunction::Forward)
+        );
+        assert_eq!(
+            profile
+                .button_binding(PulsefireRaidControl::Button7)
+                .unwrap(),
+            ButtonBinding::Multimedia(MultimediaFunction::VolumeUp)
+        );
+        assert_eq!(
+            profile
+                .button_binding(PulsefireRaidControl::Button6)
+                .unwrap(),
+            ButtonBinding::Multimedia(MultimediaFunction::VolumeDown)
+        );
+        assert_eq!(
+            profile
+                .button_binding(PulsefireRaidControl::Button8)
+                .unwrap(),
+            ButtonBinding::Multimedia(MultimediaFunction::MuteVolume)
+        );
+        assert_eq!(
+            profile.button_binding(PulsefireRaidControl::Dpi).unwrap(),
+            ButtonBinding::Keyboard(KeyboardUsage(0x04))
+        );
+    }
+
+    #[test]
+    fn golden_button_five_sequence_matches_local_captures() {
+        let original = captured_button_profile();
+        let mut profile = PerformanceProfile::parse(&original).unwrap();
+
+        profile
+            .set_button_binding(PulsefireRaidControl::Button5, &ButtonBinding::Disabled)
+            .unwrap();
+        assert_eq!(
+            changed_offsets(&original, profile.as_bytes()),
+            vec![0x8C, 0x8D]
+        );
+        assert_eq!(&profile.as_bytes()[0x8C..0x90], &[0x00; 4]);
+
+        let before = *profile.as_bytes();
+        profile
+            .set_button_binding(
+                PulsefireRaidControl::Button5,
+                &ButtonBinding::Mouse(MouseFunction::Forward),
+            )
+            .unwrap();
+        assert_eq!(
+            changed_offsets(&before, profile.as_bytes()),
+            vec![0x8C, 0x8D, 0x8F]
+        );
+        assert_eq!(&profile.as_bytes()[0x8C..0x90], &[0x02, 0xF9, 0x00, 0x04]);
+
+        let before = *profile.as_bytes();
+        profile
+            .set_button_binding(
+                PulsefireRaidControl::Button5,
+                &ButtonBinding::Mouse(MouseFunction::Back),
+            )
+            .unwrap();
+        assert_eq!(
+            changed_offsets(&before, profile.as_bytes()),
+            vec![0x8D, 0x8F]
+        );
+        assert_eq!(&profile.as_bytes()[0x8C..0x90], &[0x02, 0xF8, 0x00, 0x03]);
+
+        let before = *profile.as_bytes();
+        profile
+            .set_button_binding(
+                PulsefireRaidControl::Button5,
+                &ButtonBinding::Multimedia(MultimediaFunction::VolumeUp),
+            )
+            .unwrap();
+        assert_eq!(
+            changed_offsets(&before, profile.as_bytes()),
+            vec![0x8C, 0x8D, 0x8F]
+        );
+        assert_eq!(&profile.as_bytes()[0x8C..0x90], &[0x04, 0x00, 0x00, 0xE9]);
+
+        let before = *profile.as_bytes();
+        profile
+            .set_button_binding(
+                PulsefireRaidControl::Button5,
+                &ButtonBinding::WindowsShortcut(WindowsShortcut::Copy),
+            )
+            .unwrap();
+        assert_eq!(
+            changed_offsets(&before, profile.as_bytes()),
+            vec![0x8C, 0x8D, 0x8E, 0x8F]
+        );
+        assert_eq!(&profile.as_bytes()[0x8C..0x90], &[0x23, 0xE0, 0x06, 0x00]);
+
+        let before = *profile.as_bytes();
+        profile
+            .set_button_binding(
+                PulsefireRaidControl::Button5,
+                &ButtonBinding::Keyboard(KeyboardUsage(0x04)),
+            )
+            .unwrap();
+        assert_eq!(
+            changed_offsets(&before, profile.as_bytes()),
+            vec![0x8C, 0x8D, 0x8E]
+        );
+        assert_eq!(&profile.as_bytes()[0x8C..0x90], &[0x00, 0x04, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn standard_hid_binding_families_round_trip_offline() {
+        let mut profile = PerformanceProfile::parse(&captured_button_profile()).unwrap();
+        let bindings = [
+            ButtonBinding::Mouse(MouseFunction::LeftClick),
+            ButtonBinding::Mouse(MouseFunction::RightClick),
+            ButtonBinding::Mouse(MouseFunction::MiddleClick),
+            ButtonBinding::Mouse(MouseFunction::Back),
+            ButtonBinding::Mouse(MouseFunction::Forward),
+            ButtonBinding::Mouse(MouseFunction::TiltLeft),
+            ButtonBinding::Mouse(MouseFunction::TiltRight),
+            ButtonBinding::Mouse(MouseFunction::ScrollUp),
+            ButtonBinding::Mouse(MouseFunction::ScrollDown),
+            ButtonBinding::Keyboard(KeyboardUsage(0x2C)),
+            ButtonBinding::Multimedia(MultimediaFunction::PlayPause),
+            ButtonBinding::Multimedia(MultimediaFunction::Stop),
+            ButtonBinding::Multimedia(MultimediaFunction::NextTrack),
+            ButtonBinding::Multimedia(MultimediaFunction::PreviousTrack),
+            ButtonBinding::Multimedia(MultimediaFunction::MuteVolume),
+            ButtonBinding::Multimedia(MultimediaFunction::VolumeUp),
+            ButtonBinding::Multimedia(MultimediaFunction::VolumeDown),
+            ButtonBinding::WindowsShortcut(WindowsShortcut::CycleApps),
+            ButtonBinding::WindowsShortcut(WindowsShortcut::SwitchApps),
+            ButtonBinding::WindowsShortcut(WindowsShortcut::Cut),
+            ButtonBinding::WindowsShortcut(WindowsShortcut::Copy),
+            ButtonBinding::WindowsShortcut(WindowsShortcut::Paste),
+            ButtonBinding::WindowsShortcut(WindowsShortcut::Undo),
+            ButtonBinding::Disabled,
+        ];
+
+        for binding in bindings {
+            profile
+                .set_button_binding(PulsefireRaidControl::Button5, &binding)
+                .unwrap();
+            assert_eq!(
+                profile
+                    .button_binding(PulsefireRaidControl::Button5)
+                    .unwrap(),
+                binding
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_unconfirmed_or_illegal_button_bindings_without_mutating() {
+        use hyperx_core::{MacroBinding, MacroPlayback};
+
+        let original = captured_button_profile();
+        let mut profile = PerformanceProfile::parse(&original).unwrap();
+
+        let disabled = ButtonBinding::Disabled;
+        assert_eq!(
+            profile.set_button_binding(PulsefireRaidControl::LeftClick, &disabled),
+            Err(PerformanceProfileError::ButtonBindingNotAllowed {
+                control: PulsefireRaidControl::LeftClick,
+                binding: disabled,
+            })
+        );
+        assert_eq!(profile.as_bytes(), &original);
+
+        for usage in [0, 0x100] {
+            assert_eq!(
+                profile.set_button_binding(
+                    PulsefireRaidControl::Button5,
+                    &ButtonBinding::Keyboard(KeyboardUsage(usage)),
+                ),
+                Err(PerformanceProfileError::KeyboardUsageOutOfRange(usage))
+            );
+            assert_eq!(profile.as_bytes(), &original);
+        }
+
+        let dpi_toggle = ButtonBinding::Mouse(MouseFunction::DpiToggle);
+        assert_eq!(
+            profile.set_button_binding(PulsefireRaidControl::Button5, &dpi_toggle),
+            Err(PerformanceProfileError::UnconfirmedButtonBinding(
+                dpi_toggle
+            ))
+        );
+
+        let macro_binding = ButtonBinding::Macro(MacroBinding {
+            id: "capture-required".to_owned(),
+            playback: MacroPlayback::Once,
+        });
+        assert_eq!(
+            profile.set_button_binding(PulsefireRaidControl::Button5, &macro_binding),
+            Err(PerformanceProfileError::UnconfirmedButtonBinding(
+                macro_binding
+            ))
+        );
+        assert_eq!(profile.as_bytes(), &original);
+    }
+
+    #[test]
+    fn reports_unknown_button_records_without_guessing() {
+        let mut report = captured_button_profile();
+        report[0x8C..0x90].copy_from_slice(&[0xFF, 0xEE, 0xDD, 0xCC]);
+        let profile = PerformanceProfile::parse(&report).unwrap();
+
+        assert_eq!(
+            profile.button_binding(PulsefireRaidControl::Button5),
+            Err(PerformanceProfileError::UnknownButtonBinding {
+                control: PulsefireRaidControl::Button5,
+                record: [0xFF, 0xEE, 0xDD, 0xCC],
+            })
+        );
     }
 
     #[test]

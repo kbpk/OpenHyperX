@@ -29,9 +29,9 @@ hidapi / Windows HID
 
 The current implementation includes discovery, standard report-descriptor
 reads, the capture-backed volatile RGB operation, and an offline Pulsefire
-Raid performance-profile parser/patcher. The patcher cannot perform I/O;
-device-driver setters whose surrounding transactions are still unknown remain
-absent.
+Raid profile parser/patcher for performance and confirmed button-record
+families. The patcher cannot perform I/O; device-driver setters whose
+surrounding transactions are still unknown remain absent.
 
 ## Crate responsibilities
 

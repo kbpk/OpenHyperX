@@ -18,7 +18,8 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
 - protocol-independent `HidTransport` plus `MockHidTransport` for packet tests
 - volatile static/off RGB for wheel and logo with optional foreground keepalive
 - raw hex capture parser/diff for protocol research
-- no unknown device-info query and no DPI/polling/button/onboard writes yet
+- offline DPI-stage, polling and button-profile parser/patcher with golden tests
+- no unknown device-info query and no DPI/polling/button/onboard hardware writes yet
 
 The implementation stops wherever protocol evidence stops. Known facts and
 their confidence level are recorded in [docs/research.md](docs/research.md).

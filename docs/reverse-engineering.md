@@ -23,7 +23,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -File "$(wslpath -w "$PWD/scripts/capture-windows.ps1")" \
   -Interface '\\.\USBPcap1' \
   -DeviceAddress 7 \
-  -DurationSeconds 20 \
+  -DurationSeconds 5 \
   -OutputPath '%TEMP%\openhyperx-dpi-800-900.pcapng'
 ```
 
