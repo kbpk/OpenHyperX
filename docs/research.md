@@ -348,6 +348,36 @@ persists a lighting effect, despite its `0x18` color payloads. Treat those
 payloads as unknown until their purpose is isolated; do not use them as a
 persistent-lighting encoder.
 
+### Button-remapping UI observations
+
+The Pulsefire Raid page in NGENUITY `5.38.0.0` exposed all 11 physical
+controls: left and right click, five side buttons, the DPI button below the
+wheel, wheel click, wheel tilt left and wheel tilt right. The left and right
+buttons were restricted to swapping left/right click. The other nine controls
+offered these binding categories:
+
+- Keyboard Function: one searchable keyboard key;
+- Mouse Function: Left Click, Right Click, Middle, Back, Forward, Tilt L,
+  Tilt R, DPI Toggle, Scroll Up and Scroll Down;
+- Multimedia: Play/Pause, Stop, Next, Previous, Mute Volume, Volume Up and
+  Volume Down;
+- Macro;
+- Windows Shortcut: Cycle Apps, Switch Apps, Cut, Copy, Paste and Undo;
+- Disabled.
+
+The macro UI offered `Add Macro`, recording of keyboard and mouse-button
+events, a default 20 ms timing value, and playback policies Play Once, Toggle
+Repeat and Hold Repeat. NGENUITY became unresponsive while many inputs were
+clicked in the macro recorder, so no packet inference is made from that UI
+session and no macro capture was retained as protocol evidence.
+
+These observations define application-level binding types only. No binding
+code, button-slot offset or macro-event encoding is confirmed yet. A bounded
+capture set should use one side button and one representative from each class,
+then restore its original binding. Additional enum members may be interpolated
+offline only after the class/record structure is consistent; inferred values
+must not reach the HID transport.
+
 ## Unknowns and required evidence
 
 | Area | Current state | Required next experiment |
@@ -359,7 +389,7 @@ persistent-lighting encoder.
 | persistent RGB/effects | Solid color and Cycle are software-rendered; red/green save captures did not persist lighting | determine whether Raid firmware exposes any hardware-lighting mode before claiming support; otherwise provide an explicit foreground engine |
 | DPI and stages | five big-endian X/Y values, 200-16000 DPI range in 50-DPI units, active index, enable flags and per-stage colors confirmed; forward/reverse edits cover stages 1-4 and add/remove covers stage 5; patcher remains offline | determine whether independent X/Y values are supported; understand the surrounding transaction before exposing writes |
 | polling | all four interval codes captured; 1000 Hz persisted through save and power-cycle | implement only after the complete save transaction is understood; verify with an external rate tester |
-| button bindings | unknown | isolated Back, Forward, Volume Up, Volume Down and Disabled captures |
+| button bindings | UI categories and legal actions recorded; no profile offsets or action codes known | on one side button capture its default to Disabled, then representative Mouse, Multimedia, Keyboard and Windows Shortcut actions; analyze a minimal one-key macro separately |
 | onboard save | repeated transaction captured; read-modify-write and performance persistence confirmed | identify the three `0x18` packets, acknowledgements, timing and failure behavior before replay |
 | NGENUITY locking | unknown | run `devices`, then future read-only `info`, with NGENUITY open and closed; record open errors |
 | admin requirement | configuration collection opens without elevation | retest on a second Windows machine/account |
