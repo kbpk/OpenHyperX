@@ -144,17 +144,62 @@ Changing the first DPI stage caused a read-modify-write sequence involving
 starts with `07 01 04`; offsets are relative to the complete report including
 the report ID.
 
-| First stage | Offset `0x1A` | Offset `0x26` |
+| First stage | X low byte `0x1A` | Y low byte `0x26` |
 | --- | --- | --- |
 | 800 DPI | `0x10` | `0x10` |
 | 900 DPI | `0x12` | `0x12` |
 | 1000 DPI | `0x14` | `0x14` |
 
 The `900 -> 1000` and `1000 -> 900` transitions changed only these two bytes,
-and a repeated `900 -> 1000` transition produced the same result. This
-confirms a 50-DPI unit for the first stage and strongly indicates paired X/Y
-values. Separate X/Y editing has not been tested, so the axis interpretation
-remains a hypothesis.
+and a repeated `900 -> 1000` transition produced the same result. Later
+stage-addition captures showed that each value is an unsigned 16-bit
+big-endian integer in 50-DPI units. The zero high bytes for the initial values
+had made the first captures look like single-byte fields.
+
+Five DPI stages were mapped locally on 2026-09-13. Offsets point to the high
+byte of each two-byte value:
+
+| Stage | X offset | Y offset | Captured bytes | DPI |
+| --- | --- | --- | --- | --- |
+| 1 | `0x19` | `0x25` | `00 14` | 1000 |
+| 2 | `0x1B` | `0x27` | `00 20` | 1600 |
+| 3 | `0x1D` | `0x29` | `00 40` | 3200 |
+| 4 | `0x1F` | `0x2B` | `00 80` | 6400 |
+| 5 | `0x21` | `0x2D` | `01 40` | 16000 |
+
+NGENUITY displayed these same five values. The fifth level displayed 16000
+DPI and white, independently confirming `0x0140 * 50 = 16000`. Separate X/Y
+editing has not been tested, so the UI's axis-control behavior remains
+unknown.
+
+The active stage is a zero-based index at offset `0x31`: isolated `1 -> 2`
+and `2 -> 3` UI transitions changed it from `00 -> 01 -> 02`. Stage enabled
+flags are bytes `0x32..0x36`, one byte per stage, with `00` disabled and `01`
+enabled. NGENUITY keeps enabled stages contiguous. Starting with three enabled
+levels, `Add level` set `0x35` for stage 4 and then `0x36` for stage 5. The UI
+no longer offered `Add level` after the fifth stage.
+
+Each DPI level has a three-byte RGB color at these offsets:
+
+| Stage | RGB offsets | Locally captured color |
+| --- | --- | --- |
+| 1 | `0x69..0x6B` | `#2B00FF` |
+| 2 | `0x6C..0x6E` | `#CD00FF` |
+| 3 | `0x6F..0x71` | `#32FF00` |
+| 4 | `0x72..0x74` | `#FF0000` |
+| 5 | `0x75..0x77` | `#FFFFFF` |
+
+The first three exact colors reflect the deliberately selected test values,
+not claims about factory defaults. Isolated color changes affected only the
+corresponding RGB triplet plus the normal profile opcode change.
+
+Adding stage 4 initialized it to 6400 DPI and red. Adding stage 5 initialized
+it to 16000 DPI and white. Removing stage 5 cleared its X value at
+`0x21..0x22`, Y value at `0x2D..0x2E`, enable flag at `0x36`, and color at
+`0x75..0x77`. The captured `4 -> 5` and `5 -> 4` byte changes are exact
+reverses. NGENUITY emitted an additional no-op read/write transaction before
+the actual removal transaction; the no-op changed only the response/write
+opcode.
 
 Observed configuration sequence:
 
@@ -287,7 +332,7 @@ persistent-lighting encoder.
 | direct RGB transport | accepted locally; NGENUITY Solid and Cycle both use it, and lighting returns to rainbow without keepalive | isolate timeout/revert timing and confirm both physical LED zones |
 | RGB off semantics | unknown | compare NGENUITY static black vs explicit lighting-off capture |
 | persistent RGB/effects | Solid color and Cycle are software-rendered; red/green save captures did not persist lighting | determine whether Raid firmware exposes any hardware-lighting mode before claiming support; otherwise provide an explicit foreground engine |
-| DPI and stages | first-stage 800/900/1000 values confirmed in profile image | map other stage offsets, stage count/active index, and the surrounding transaction |
+| DPI and stages | five big-endian X/Y values, 50-DPI units, active index, enable flags and per-stage colors confirmed; parser remains offline/read-only | capture DPI edits on stages 2-5 and min/max boundaries; determine whether independent X/Y values are supported; understand the surrounding transaction before exposing writes |
 | polling | all four interval codes captured; 1000 Hz persisted through save and power-cycle | implement only after the complete save transaction is understood; verify with an external rate tester |
 | button bindings | unknown | isolated Back, Forward, Volume Up, Volume Down and Disabled captures |
 | onboard save | repeated transaction captured; read-modify-write and performance persistence confirmed | identify the three `0x18` packets, acknowledgements, timing and failure behavior before replay |
