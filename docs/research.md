@@ -1,6 +1,6 @@
 # Pulsefire Raid research
 
-Last updated: 2026-09-13.
+Last updated: 2026-09-14.
 
 This document separates manufacturer facts, public implementation evidence,
 local observations and hypotheses. Do not promote a hypothesis into a device
@@ -98,6 +98,10 @@ re-enumerated after reconnect or reboot.
 
 After a later reboot, the 2026-09-13 button session used transient address 31
 on the same capture interface.
+
+After the next reboot, the 2026-09-14 button session used transient address 37
+on `\\.\USBPcap1`. Querying each extcap interface separately was necessary to
+attribute the device tree correctly.
 
 ## Known RGB report from OpenRGB
 
@@ -401,6 +405,16 @@ four-byte record at `0x8C..0x8F` changed:
 | Multimedia Volume Up | `04 00 00 E9` | isolated capture; `E9` is USB HID Consumer Volume Increment |
 | Windows Shortcut Copy | `23 E0 06 00` | isolated capture; `E0`/`06` are Left Control and keyboard C usages |
 | Keyboard A | `00 04 00 00` | isolated capture; `04` is the keyboard A usage |
+| Mouse DPI Toggle | `71 F0 00 00` | isolated captures on the DPI control and Button 5 |
+
+On 2026-09-14, a first isolated capture changed the DPI control from Keyboard
+A to DPI Toggle. A second capture read DPI Toggle from Button 5 and then
+changed that control back to Forward. Both slots contained the exact record
+`71 F0 00 00`; the reverse Button 5 write restored `02 F9 00 04`. This also
+left Button 5 on its factory Forward action after the experiment. The physical
+DPI switch was reported as mechanically unreliable, which does not affect the
+record evidence but makes a working side button a useful alternate DPI Toggle
+target.
 
 The read profile and the manual's named factory layout correlate the 11
 physical controls with these record starts:
@@ -424,7 +438,8 @@ The other keyboard, consumer-control and Windows shortcut values are derived
 from standard USB HID usage IDs after their record families were established;
 they remain offline inference and are not sent by the device driver. Left and
 right click are restricted to swapping those two functions, matching the UI.
-`DPI Toggle` and macro records remain rejected because their encodings are not
+The capture-backed `DPI Toggle` record is also decoded and patched offline.
+Macro records remain rejected because their encoding and event storage are not
 yet captured.
 
 ## Unknowns and required evidence
@@ -438,7 +453,7 @@ yet captured.
 | persistent RGB/effects | Solid color and Cycle are software-rendered; red/green save captures did not persist lighting | determine whether Raid firmware exposes any hardware-lighting mode before claiming support; otherwise provide an explicit foreground engine |
 | DPI and stages | five big-endian X/Y values, 200-16000 DPI range in 50-DPI units, active index, enable flags and per-stage colors confirmed; forward/reverse edits cover stages 1-4 and add/remove covers stage 5; patcher remains offline | determine whether independent X/Y values are supported; understand the surrounding transaction before exposing writes |
 | polling | all four interval codes captured; 1000 Hz persisted through save and power-cycle | implement only after the complete save transaction is understood; verify with an external rate tester |
-| button bindings | 11 record offsets correlated; Button 5 isolated across Disabled, Forward, Back, Volume Up, Copy and A; offline decoder/patcher added | capture `DPI Toggle`; repeat one inferred multimedia/shortcut value; analyze a minimal one-key macro separately; do not expose hardware writes yet |
+| button bindings | 11 record offsets correlated; Button 5 isolated across Disabled, Forward, Back, Volume Up, Copy, A and DPI Toggle; DPI Toggle independently repeated on the DPI slot; offline decoder/patcher added | repeat one inferred multimedia/shortcut value; analyze a minimal one-key macro separately; do not expose hardware writes yet |
 | onboard save | repeated transaction captured; read-modify-write and performance persistence confirmed | identify the three `0x18` packets, acknowledgements, timing and failure behavior before replay |
 | NGENUITY locking | unknown | run `devices`, then future read-only `info`, with NGENUITY open and closed; record open errors |
 | admin requirement | configuration collection opens without elevation | retest on a second Windows machine/account |

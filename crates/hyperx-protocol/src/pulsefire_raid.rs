@@ -402,6 +402,7 @@ fn decode_button_binding(
         [0x02, 0xF9, 0x00, 0x00] | [0x02, 0xF9, 0x00, 0x04] => {
             ButtonBinding::Mouse(MouseFunction::Forward)
         }
+        [0x71, 0xF0, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::DpiToggle),
         [0x04, 0x00, 0x00, 0xCD] => ButtonBinding::Multimedia(MultimediaFunction::PlayPause),
         [0x04, 0x00, 0x00, 0xB7] => ButtonBinding::Multimedia(MultimediaFunction::Stop),
         [0x04, 0x00, 0x00, 0xB5] => ButtonBinding::Multimedia(MultimediaFunction::NextTrack),
@@ -445,11 +446,7 @@ fn encode_button_binding(
             MouseFunction::TiltRight => [0x02, 0xF6, 0x00, 0x00],
             MouseFunction::Back => [0x02, 0xF8, 0x00, 0x03],
             MouseFunction::Forward => [0x02, 0xF9, 0x00, 0x04],
-            MouseFunction::DpiToggle => {
-                return Err(PerformanceProfileError::UnconfirmedButtonBinding(
-                    binding.clone(),
-                ));
-            }
+            MouseFunction::DpiToggle => [0x71, 0xF0, 0x00, 0x00],
         },
         ButtonBinding::Multimedia(function) => [
             0x04,
@@ -778,6 +775,49 @@ mod tests {
     }
 
     #[test]
+    fn golden_dpi_toggle_record_matches_two_local_control_slots() {
+        let original = captured_button_profile();
+        let dpi_toggle = ButtonBinding::Mouse(MouseFunction::DpiToggle);
+        let mut profile = PerformanceProfile::parse(&original).unwrap();
+
+        profile
+            .set_button_binding(PulsefireRaidControl::Dpi, &dpi_toggle)
+            .unwrap();
+        assert_eq!(
+            changed_offsets(&original, profile.as_bytes()),
+            vec![0x9C, 0x9D]
+        );
+        assert_eq!(&profile.as_bytes()[0x9C..0xA0], &[0x71, 0xF0, 0x00, 0x00]);
+        assert_eq!(
+            profile.button_binding(PulsefireRaidControl::Dpi).unwrap(),
+            dpi_toggle
+        );
+
+        let before = *profile.as_bytes();
+        profile
+            .set_button_binding(PulsefireRaidControl::Button5, &dpi_toggle)
+            .unwrap();
+        assert_eq!(
+            changed_offsets(&before, profile.as_bytes()),
+            vec![0x8C, 0x8D]
+        );
+        assert_eq!(&profile.as_bytes()[0x8C..0x90], &[0x71, 0xF0, 0x00, 0x00]);
+
+        let before = *profile.as_bytes();
+        profile
+            .set_button_binding(
+                PulsefireRaidControl::Button5,
+                &ButtonBinding::Mouse(MouseFunction::Forward),
+            )
+            .unwrap();
+        assert_eq!(
+            changed_offsets(&before, profile.as_bytes()),
+            vec![0x8C, 0x8D, 0x8F]
+        );
+        assert_eq!(&profile.as_bytes()[0x8C..0x90], &[0x02, 0xF9, 0x00, 0x04]);
+    }
+
+    #[test]
     fn standard_hid_binding_families_round_trip_offline() {
         let mut profile = PerformanceProfile::parse(&captured_button_profile()).unwrap();
         let bindings = [
@@ -788,6 +828,7 @@ mod tests {
             ButtonBinding::Mouse(MouseFunction::Forward),
             ButtonBinding::Mouse(MouseFunction::TiltLeft),
             ButtonBinding::Mouse(MouseFunction::TiltRight),
+            ButtonBinding::Mouse(MouseFunction::DpiToggle),
             ButtonBinding::Mouse(MouseFunction::ScrollUp),
             ButtonBinding::Mouse(MouseFunction::ScrollDown),
             ButtonBinding::Keyboard(KeyboardUsage(0x2C)),
@@ -847,14 +888,6 @@ mod tests {
             );
             assert_eq!(profile.as_bytes(), &original);
         }
-
-        let dpi_toggle = ButtonBinding::Mouse(MouseFunction::DpiToggle);
-        assert_eq!(
-            profile.set_button_binding(PulsefireRaidControl::Button5, &dpi_toggle),
-            Err(PerformanceProfileError::UnconfirmedButtonBinding(
-                dpi_toggle
-            ))
-        );
 
         let macro_binding = ButtonBinding::Macro(MacroBinding {
             id: "capture-required".to_owned(),
