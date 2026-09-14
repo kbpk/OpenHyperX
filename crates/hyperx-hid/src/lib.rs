@@ -240,6 +240,20 @@ pub mod testing {
         }
 
         fn get_feature_report(&mut self, report: &mut [u8]) -> Result<usize, HidError> {
+            let expected_report_id = self
+                .feature_rx
+                .front()
+                .and_then(|response| response.first())
+                .copied()
+                .ok_or_else(|| {
+                    HidError::Transport("no non-empty mock feature response is queued".to_owned())
+                })?;
+            if report.first().copied() != Some(expected_report_id) {
+                return Err(HidError::Transport(format!(
+                    "feature GET_REPORT ID mismatch: expected 0x{expected_report_id:02X}, got {:?}",
+                    report.first()
+                )));
+            }
             Self::receive(&mut self.feature_rx, report)
         }
 
@@ -274,6 +288,7 @@ mod tests {
             3
         );
         let mut response = [0_u8; 8];
+        response[0] = 0x07;
         assert_eq!(transport.get_feature_report(&mut response).unwrap(), 2);
         assert_eq!(&response[..2], &[0x07, 0x01]);
         transport.assert_drained();
@@ -286,5 +301,27 @@ mod tests {
 
         let error = transport.send_feature_report(&[0x07, 0x0B]).unwrap_err();
         assert!(error.to_string().contains("report mismatch"));
+    }
+
+    #[test]
+    fn mock_transport_verifies_feature_report_id_on_get() {
+        let mut transport = MockHidTransport::new(1);
+        transport.queue_feature_response([0x07, 0x81]);
+        let mut response = [0_u8; 8];
+        response[0] = 0x06;
+
+        let error = transport.get_feature_report(&mut response).unwrap_err();
+        assert!(error.to_string().contains("GET_REPORT ID mismatch"));
+    }
+
+    #[test]
+    fn mock_input_reports_do_not_require_a_prefilled_report_id() {
+        let mut transport = MockHidTransport::new(1);
+        transport.queue_input_report([0x03, 0xAA]);
+        let mut response = [0_u8; 8];
+
+        assert_eq!(transport.read_timeout(&mut response, 50).unwrap(), 2);
+        assert_eq!(&response[..2], &[0x03, 0xAA]);
+        transport.assert_drained();
     }
 }

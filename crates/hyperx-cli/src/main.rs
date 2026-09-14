@@ -8,13 +8,17 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use clap::{ArgAction, Parser, Subcommand};
-use hyperx_core::{DeviceDescriptor, HidInterfaceInfo, RgbColor, UsbId};
+use hyperx_core::{
+    ButtonBinding, DeviceDescriptor, HidInterfaceInfo, MouseFunction, MultimediaFunction, RgbColor,
+    UsbId, WindowsShortcut,
+};
 use hyperx_devices::{find_supported_device, PulsefireRaid, PULSEFIRE_RAID};
 use hyperx_hid::{HidApiDiscovery, HidApiTransport, HidDiscovery, HidTransport};
 use hyperx_protocol::{
     capture::{diff_captures, parse_hex_capture},
     format_hex,
     hid_descriptor::parse_report_layouts,
+    pulsefire_raid::{PerformanceProfile, PulsefireRaidControl},
 };
 use tracing_subscriber::EnvFilter;
 
@@ -45,7 +49,7 @@ enum Command {
         #[arg(long)]
         all: bool,
     },
-    /// Open the safe vendor collection and show its HID report descriptor.
+    /// Show the HID descriptor and read the current runtime profile.
     Info {
         /// Print the complete raw HID report descriptor in hexadecimal.
         #[arg(long)]
@@ -204,7 +208,124 @@ fn info(discovery: &dyn HidDiscovery, show_descriptor: bool) -> Result<()> {
         println!("  {}", format_hex(&descriptor));
     }
 
+    let mut device = PulsefireRaid::new(transport)?;
+    let profile = device
+        .runtime_profile()
+        .context("failed to read the Pulsefire Raid runtime profile; close NGENUITY and retry")?;
+    print_runtime_profile(&profile);
+
     Ok(())
+}
+
+fn print_runtime_profile(profile: &PerformanceProfile) {
+    println!("Runtime profile:");
+    match profile.polling_rate() {
+        Ok(polling_rate) => println!("  Polling rate: {} Hz", polling_rate.hz()),
+        Err(error) => println!("  Polling rate: <decode error: {error}>"),
+    }
+
+    println!("  DPI stages:");
+    match profile.dpi_profile() {
+        Ok(dpi_profile) => {
+            for (index, stage) in dpi_profile.stages.iter().enumerate() {
+                let active = if index == dpi_profile.active_stage {
+                    "*"
+                } else {
+                    " "
+                };
+                let resolution = if stage.x == stage.y {
+                    format!("{} DPI", stage.x)
+                } else {
+                    format!("{}x{} DPI", stage.x, stage.y)
+                };
+                println!(
+                    "    {active} {}: {resolution}, color #{:02X}{:02X}{:02X}",
+                    index + 1,
+                    stage.color.red,
+                    stage.color.green,
+                    stage.color.blue,
+                );
+            }
+        }
+        Err(error) => println!("    <decode error: {error}>"),
+    }
+
+    println!("  Buttons:");
+    for control in PulsefireRaidControl::ALL {
+        if profile.has_confirmed_macro_reference(control) {
+            println!(
+                "    {:<17} Macro reference (definition is not present in the runtime profile)",
+                format!("{}:", control.name())
+            );
+            continue;
+        }
+        match profile.button_binding(control) {
+            Ok(binding) => println!(
+                "    {:<17} {}",
+                format!("{}:", control.name()),
+                format_button_binding(&binding)
+            ),
+            Err(error) => println!(
+                "    {:<17} <decode error: {error}>",
+                format!("{}:", control.name())
+            ),
+        }
+    }
+}
+
+fn format_button_binding(binding: &ButtonBinding) -> String {
+    match binding {
+        ButtonBinding::Mouse(function) => format!("Mouse: {}", mouse_function_name(*function)),
+        ButtonBinding::Keyboard(usage) => format!("Keyboard HID usage 0x{:04X}", usage.0),
+        ButtonBinding::Multimedia(function) => {
+            format!("Multimedia: {}", multimedia_function_name(*function))
+        }
+        ButtonBinding::Macro(macro_binding) => {
+            format!("Macro: {} ({:?})", macro_binding.id, macro_binding.playback)
+        }
+        ButtonBinding::WindowsShortcut(shortcut) => {
+            format!("Windows shortcut: {}", windows_shortcut_name(*shortcut))
+        }
+        ButtonBinding::Disabled => "Disabled".to_owned(),
+    }
+}
+
+const fn mouse_function_name(function: MouseFunction) -> &'static str {
+    match function {
+        MouseFunction::LeftClick => "left click",
+        MouseFunction::RightClick => "right click",
+        MouseFunction::MiddleClick => "middle click",
+        MouseFunction::Back => "back",
+        MouseFunction::Forward => "forward",
+        MouseFunction::TiltLeft => "tilt left",
+        MouseFunction::TiltRight => "tilt right",
+        MouseFunction::DpiToggle => "DPI toggle",
+        MouseFunction::ScrollUp => "scroll up",
+        MouseFunction::ScrollDown => "scroll down",
+    }
+}
+
+const fn multimedia_function_name(function: MultimediaFunction) -> &'static str {
+    match function {
+        MultimediaFunction::PlayPause => "play/pause",
+        MultimediaFunction::Stop => "stop",
+        MultimediaFunction::NextTrack => "next track",
+        MultimediaFunction::PreviousTrack => "previous track",
+        MultimediaFunction::MuteVolume => "mute volume",
+        MultimediaFunction::VolumeUp => "volume up",
+        MultimediaFunction::VolumeDown => "volume down",
+    }
+}
+
+const fn windows_shortcut_name(shortcut: WindowsShortcut) -> &'static str {
+    match shortcut {
+        WindowsShortcut::CycleApps => "cycle apps",
+        WindowsShortcut::SwitchApps => "switch apps",
+        WindowsShortcut::Cut => "cut",
+        WindowsShortcut::Copy => "copy",
+        WindowsShortcut::Paste => "paste",
+        WindowsShortcut::Undo => "undo",
+    }
 }
 
 fn rgb(color: RgbColor, duration_seconds: u64) -> Result<()> {

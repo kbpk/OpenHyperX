@@ -246,6 +246,22 @@ Observed configuration sequence:
 4. feature write containing the modified full profile image, prefix
    `07 01 04`.
 
+On 2026-09-15, TShark timestamps were checked for both complete repetitions in
+`openhyperx-macro-ab-play-once-timing-20-create-1.pcapng`. The first-to-second
+write intervals were 63.696 ms and 63.682 ms; the second-write-to-GET intervals
+were 107.264 ms and 108.546 ms. The read-only driver therefore waits a
+conservative 65 ms and 110 ms, respectively, requests report ID `0x07` once,
+and rejects anything other than an exact 264-byte `07 81 04` response. It does
+not retry and does not transmit the subsequent `07 01 04` profile write.
+The OpenHyperX read path was then validated on the Windows host against the
+physical `0951:16E4`, release `1124` unit with NGENUITY and its helper closed.
+The device returned an exact 264-byte `07 81 04` response. The CLI decoded
+1000 Hz polling, four DPI stages (800 active, 1600, 3200 and 6400), their four
+captured colors, ten ordinary button records, and the confirmed Button 5 macro
+reference. The runtime profile cannot by itself reveal that macro's event
+definition, so the CLI deliberately labels it as a reference rather than
+guessing its keys or timing.
+
 The purpose and allowed values of the two prelude writes are unknown. No DPI
 command may replay this sequence until they and the profile framing are
 understood well enough to preserve every unrelated field.

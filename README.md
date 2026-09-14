@@ -3,8 +3,9 @@
 OpenHyperX is an experimental, open-source replacement for HyperX NGENUITY,
 starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
 
-> **Experimental software:** discovery and report-descriptor reads are safe;
-> direct RGB is a confirmed but volatile hardware write.
+> **Experimental software:** discovery, report-descriptor reads and the
+> capture-backed runtime-profile query are read-only; direct RGB is a confirmed
+> but volatile hardware write.
 > Firmware update, bootloader and DFU operations are deliberately out of scope.
 > No current command writes firmware or onboard profile data.
 
@@ -15,12 +16,13 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
 - Pulsefire Raid recognition (`0951:16E4`)
 - display of every HID collection, usage page, usage and device path
 - optional `-v`, `-vv` and `--trace` diagnostics
-- read-only `info` with raw HID descriptor and parsed report sizes
+- read-only `info` with raw HID descriptor, current polling rate, DPI stages
+  and button bindings
 - protocol-independent `HidTransport` plus `MockHidTransport` for packet tests
 - volatile static/off RGB for wheel and logo with optional foreground keepalive
 - raw hex capture parser/diff for protocol research
 - offline DPI-stage, polling and button-profile parser/patcher with golden tests
-- no unknown device-info query and no DPI/polling/button/onboard hardware writes yet
+- no DPI/polling/button/onboard hardware writes yet
 
 The implementation stops wherever protocol evidence stops. Known facts and
 their confidence level are recorded in [docs/research.md](docs/research.md).
@@ -61,13 +63,17 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
   run --target x86_64-pc-windows-msvc --bin hyperx-cli -- --trace devices
 ```
 
-Read the standard HID report descriptor without sending a vendor command:
+Read the standard HID report descriptor and the current runtime profile:
 
 ```bash
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
   run --target x86_64-pc-windows-msvc --bin hyperx-cli -- info --descriptor
 ```
+
+`info` sends only the repeated, capture-backed runtime-profile read sequence;
+it does not send the profile-write packet. Close NGENUITY first so two programs
+do not access the configuration collection concurrently.
 
 Apply volatile RGB once, or keep it active in the foreground for 30 seconds:
 
@@ -108,8 +114,9 @@ publishing them.
 
 1. **Discovery (implemented):** enumerate and recognize Pulsefire Raid without
    opening its standard mouse collection.
-2. **Safe device info (partially implemented):** standard descriptor reads are
-   available; no unknown vendor query is sent.
+2. **Safe device info (implemented for known fields):** standard descriptor and
+   capture-backed runtime-profile reads expose polling, DPI stages/colors and
+   button bindings.
 3. **RGB proof of concept (implemented):** typed static/off direct reports and
    explicit foreground keepalive.
 4. **Protocol exploration:** DPI, polling rate, bindings and onboard profiles,

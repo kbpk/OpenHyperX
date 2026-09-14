@@ -8,6 +8,8 @@ pub const DIRECT_REPORT_ID: u8 = 0x07;
 pub const DIRECT_REPORT_LENGTH: usize = 264;
 const DIRECT_START: u8 = 0x0A;
 const DIRECT_END: u8 = 0xA0;
+const PROFILE_ACCESS_OPCODE: u8 = 0x03;
+const PROFILE_ACCESS_TRAILER: u8 = 0x64;
 
 const PROFILE_WRITE_OPCODE: u8 = 0x01;
 const PROFILE_READ_RESPONSE_OPCODE: u8 = 0x81;
@@ -60,6 +62,36 @@ pub enum PulsefireRaidControl {
 }
 
 impl PulsefireRaidControl {
+    pub const ALL: [Self; 11] = [
+        Self::LeftClick,
+        Self::RightClick,
+        Self::MiddleClick,
+        Self::Button4,
+        Self::Button5,
+        Self::Button7,
+        Self::Button6,
+        Self::Button8,
+        Self::Dpi,
+        Self::WheelTiltLeft,
+        Self::WheelTiltRight,
+    ];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::LeftClick => "Left click",
+            Self::RightClick => "Right click",
+            Self::MiddleClick => "Wheel click",
+            Self::Button4 => "Button 4",
+            Self::Button5 => "Button 5",
+            Self::Button7 => "Button 7",
+            Self::Button6 => "Button 6",
+            Self::Button8 => "Button 8",
+            Self::Dpi => "DPI button",
+            Self::WheelTiltLeft => "Wheel tilt left",
+            Self::WheelTiltRight => "Wheel tilt right",
+        }
+    }
+
     const fn profile_offset(self) -> usize {
         match self {
             Self::LeftClick => 0x7C,
@@ -341,6 +373,18 @@ impl PerformanceProfile {
         decode_button_binding(control, record)
     }
 
+    /// Identify the exact captured Button 5 macro reference.
+    ///
+    /// The runtime profile contains only this reference, not the macro event
+    /// report, so callers must not infer its keys or timing from this result.
+    pub fn has_confirmed_macro_reference(&self, control: PulsefireRaidControl) -> bool {
+        if control != PulsefireRaidControl::Button5 {
+            return false;
+        }
+        let offset = control.profile_offset();
+        self.report[offset..offset + BUTTON_RECORD_LENGTH] == CONFIRMED_MACRO_BINDING
+    }
+
     /// Patch one confirmed four-byte button record in an existing profile.
     ///
     /// This is an offline operation. Inferred members use standard USB HID
@@ -481,8 +525,7 @@ impl ConfirmedMacro {
     }
 
     pub fn is_bound_in(&self, profile: &PerformanceProfile) -> bool {
-        let offset = self.control().profile_offset();
-        profile.report[offset..offset + BUTTON_RECORD_LENGTH] == CONFIRMED_MACRO_BINDING
+        profile.has_confirmed_macro_reference(self.control())
     }
 
     pub const fn as_bytes(&self) -> &[u8; DIRECT_REPORT_LENGTH] {
@@ -660,6 +703,28 @@ pub fn encode_direct_rgb(wheel: RgbColor, logo: RgbColor) -> [u8; DIRECT_REPORT_
     report
 }
 
+/// Encode the fixed runtime-profile access prelude observed before reads.
+///
+/// Its individual fields are not generalized: only the exact locally
+/// repeated `07 03 04 64` report is exposed.
+pub fn encode_runtime_profile_read_prelude() -> [u8; DIRECT_REPORT_LENGTH] {
+    let mut report = [0_u8; DIRECT_REPORT_LENGTH];
+    report[..4].copy_from_slice(&[
+        DIRECT_REPORT_ID,
+        PROFILE_ACCESS_OPCODE,
+        RUNTIME_PROFILE_SECTION,
+        PROFILE_ACCESS_TRAILER,
+    ]);
+    report
+}
+
+/// Encode the fixed feature-report request observed before runtime reads.
+pub fn encode_profile_read_request() -> [u8; DIRECT_REPORT_LENGTH] {
+    let mut report = [0_u8; DIRECT_REPORT_LENGTH];
+    report[..2].copy_from_slice(&[DIRECT_REPORT_ID, PROFILE_READ_RESPONSE_OPCODE]);
+    report
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -755,6 +820,17 @@ mod tests {
     }
 
     #[test]
+    fn golden_runtime_profile_read_reports_match_local_captures() {
+        let prelude = encode_runtime_profile_read_prelude();
+        assert_eq!(&prelude[..4], &[0x07, 0x03, 0x04, 0x64]);
+        assert!(prelude[4..].iter().all(|byte| *byte == 0));
+
+        let request = encode_profile_read_request();
+        assert_eq!(&request[..2], &[0x07, 0x81]);
+        assert!(request[2..].iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
     fn golden_minimal_macro_report_matches_repeated_local_captures() {
         let a_events = keyboard_a_events(20);
         let macro_definition = ConfirmedMacro::button5_keyboard_once(&a_events).unwrap();
@@ -808,6 +884,8 @@ mod tests {
             vec![0x8C, 0x8D]
         );
         assert_eq!(&profile.as_bytes()[0x8C..0x90], &[0x53, 0x00, 0x00, 0x04]);
+        assert!(profile.has_confirmed_macro_reference(PulsefireRaidControl::Button5));
+        assert!(!profile.has_confirmed_macro_reference(PulsefireRaidControl::Dpi));
         assert!(macro_definition.is_bound_in(&profile));
 
         profile
