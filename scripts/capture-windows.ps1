@@ -78,7 +78,10 @@ $captureOptions = @{
 $capture = Start-Process @captureOptions
 
 try {
-    Start-Sleep -Seconds $DurationSeconds
+    $exitedEarly = $capture.WaitForExit($DurationSeconds * 1000)
+    if ($exitedEarly) {
+        throw "USBPcap exited before the requested duration (exit code $($capture.ExitCode))."
+    }
 }
 finally {
     if (-not $capture.HasExited) {
@@ -97,4 +100,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $file = Get-Item -LiteralPath $fullOutputPath
+if ($file.Length -le 24) {
+    throw "USBPcap created only an empty pcapng header ($($file.Length) bytes). Re-enumerate the capture interface and device address."
+}
 Write-Output "Capture saved: $($file.FullName) ($($file.Length) bytes)"

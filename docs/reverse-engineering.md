@@ -33,7 +33,8 @@ capture every device, refuses to overwrite an existing file, stops after at
 most 300 seconds, expands Windows `%NAME%` environment variables in the output
 path, and requests elevation only for the bounded capture process. Using
 `%TEMP%` avoids hard-coding a Windows account name when invoking PowerShell
-from Bash.
+from Bash. A header-only pcapng is treated as a failed capture and tells the
+operator to re-enumerate the transient interface and device address.
 
 USBPcap may contain traffic from other devices on the same host controller.
 Treat raw captures as potentially sensitive. The repository ignores `*.pcap`,
