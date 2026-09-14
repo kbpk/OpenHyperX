@@ -378,10 +378,12 @@ offered these binding categories:
 - Disabled.
 
 The macro UI offered `Add Macro`, recording of keyboard and mouse-button
-events, a default 20 ms timing value, and playback policies Play Once, Toggle
-Repeat and Hold Repeat. NGENUITY became unresponsive while many inputs were
-clicked in the macro recorder, so no packet inference is made from that UI
-session and no macro capture was retained as protocol evidence.
+events, and playback policies Play Once, Toggle Repeat and Hold Repeat.
+`Standard Timing` is a separate optional numeric setting rather than a
+playback enum. Its field accepts at least four digits and appeared to permit
+`0..9999`, but that range has not been boundary-tested. NGENUITY became
+unresponsive while many inputs were clicked in the first macro-recorder
+exploration, so no packet inference is made from that earlier session.
 
 The official manual confirms that the apparent `Forward`, `Back`, `Mute`,
 `Volume Up` and `Volume Down` side assignments are the factory layout, not
@@ -439,8 +441,62 @@ from standard USB HID usage IDs after their record families were established;
 they remain offline inference and are not sent by the device driver. Left and
 right click are restricted to swapping those two functions, matching the UI.
 The capture-backed `DPI Toggle` record is also decoded and patched offline.
-Macro records remain rejected because their encoding and event storage are not
-yet captured.
+The ordinary binding API still rejects generic macro references; the one exact
+minimal macro captured below is handled through a separate evidence-gated
+type.
+
+### Minimal macro observations
+
+On 2026-09-14, a new macro named `openhyperx-a` was recorded with only one
+press/release of keyboard `A`, Standard Timing set to 20 ms and Play Once.
+Assigning it to Button 5 was captured twice. Both assignments produced the
+same ordered non-RGB transaction:
+
+1. `SET_REPORT` prefix `07 03 04 64`;
+2. zero-filled `SET_REPORT` prefix `07 81`;
+3. `GET_REPORT` returning the runtime profile with prefix `07 81 04`;
+4. the exact 264-byte macro-definition `SET_REPORT` shown below;
+5. the runtime profile write with prefix `07 01 04` and Button 5 record
+   `53 00 00 04`.
+
+The repeated macro-definition report was:
+
+```text
+07 05 04 04 00 00 00 00 00 01 80 14 04 00 14 04
+```
+
+All bytes after this 16-byte prefix were zero. The selected UI values and
+functional test correlate `0x04` with keyboard usage `A`; pressing Button 5
+emitted lowercase `a`, as expected for that usage without Shift. Byte
+`0x09 = 01` correlates with Play Once, and byte `0x03 = 04` correlates with
+Button 5 and the final `04` in its binding record. These interpretations remain
+hypotheses until key, playback and target control are changed independently.
+
+An isolated edit kept the same key, control and playback mode while changing
+Standard Timing from 20 to 300 ms. The repeated event bytes changed as follows:
+
+```text
+press:   80 14 04 -> 81 2C 04
+release: 00 14 04 -> 01 2C 04
+```
+
+`20 = 0x0014` and `300 = 0x012C`. This confirms that each event stores the
+timing as seven high bits plus an eight-bit low byte, while bit 7 of the high
+byte distinguishes press from release. The representation has 15 payload bits,
+but neither the device's accepted range nor the apparent NGENUITY `0..9999`
+range has been boundary-tested.
+
+A separate isolated reversal from this macro to Mouse Forward omitted the
+`0x05` macro-definition report. Its read/write profile comparison changed only
+the normal opcode plus `0x8C: 53 -> 02` and `0x8D: 00 -> F9`; offset `0x8F`
+remained `04`. No `Save to mouse` action was used, so these observations cover
+the runtime profile only.
+
+The protocol crate contains an offline evidence-gated codec for this one
+confirmed macro and its Button 5 reference. It accepts only the independently
+captured 20 and 300 ms timings and rejects every other timing, changed key,
+playback-like byte, nonzero padding or onboard profile. Generic macros and all
+device I/O remain unavailable until the fields above are isolated.
 
 ## Unknowns and required evidence
 
@@ -453,7 +509,7 @@ yet captured.
 | persistent RGB/effects | Solid color and Cycle are software-rendered; red/green save captures did not persist lighting | determine whether Raid firmware exposes any hardware-lighting mode before claiming support; otherwise provide an explicit foreground engine |
 | DPI and stages | five big-endian X/Y values, 200-16000 DPI range in 50-DPI units, active index, enable flags and per-stage colors confirmed; forward/reverse edits cover stages 1-4 and add/remove covers stage 5; patcher remains offline | determine whether independent X/Y values are supported; understand the surrounding transaction before exposing writes |
 | polling | all four interval codes captured; 1000 Hz persisted through save and power-cycle | implement only after the complete save transaction is understood; verify with an external rate tester |
-| button bindings | 11 record offsets correlated; Button 5 isolated across Disabled, Forward, Back, Volume Up, Copy, A and DPI Toggle; DPI Toggle independently repeated on the DPI slot; offline decoder/patcher added | repeat one inferred multimedia/shortcut value; analyze a minimal one-key macro separately; do not expose hardware writes yet |
+| button bindings | 11 record offsets correlated; Button 5 isolated across Disabled, Forward, Back, Volume Up, Copy, A, DPI Toggle and one working minimal macro; macro report repeated, 20/300 ms timing encoding isolated and recognized offline | capture one-key `B` with unchanged timing/mode, isolate playback and target-control bytes, then boundary-test the UI timing range; repeat one inferred multimedia/shortcut value; do not expose hardware writes yet |
 | onboard save | repeated transaction captured; read-modify-write and performance persistence confirmed | identify the three `0x18` packets, acknowledgements, timing and failure behavior before replay |
 | NGENUITY locking | unknown | run `devices`, then future read-only `info`, with NGENUITY open and closed; record open errors |
 | admin requirement | configuration collection opens without elevation | retest on a second Windows machine/account |

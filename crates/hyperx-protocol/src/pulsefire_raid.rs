@@ -20,6 +20,10 @@ const ACTIVE_DPI_STAGE_OFFSET: usize = 0x31;
 const DPI_STAGE_ENABLED_OFFSETS: [usize; 5] = [0x32, 0x33, 0x34, 0x35, 0x36];
 const DPI_STAGE_COLOR_OFFSETS: [usize; 5] = [0x69, 0x6C, 0x6F, 0x72, 0x75];
 const BUTTON_RECORD_LENGTH: usize = 4;
+const CONFIRMED_MACRO_HEADER: [u8; 10] =
+    [0x07, 0x05, 0x04, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
+const CONFIRMED_MACRO_TIMINGS_MS: [u16; 2] = [20, 300];
+const CONFIRMED_MACRO_BINDING: [u8; BUTTON_RECORD_LENGTH] = [0x53, 0x00, 0x00, 0x04];
 const DPI_UNIT: u32 = 50;
 const MIN_DPI: u32 = 200;
 const MAX_DPI: u32 = 16_000;
@@ -83,6 +87,36 @@ pub struct PerformanceProfile {
     report: [u8; DIRECT_REPORT_LENGTH],
     kind: ProfileImageKind,
     section: ProfileSection,
+}
+
+/// The one Pulsefire Raid macro definition whose complete report is confirmed.
+///
+/// This intentionally represents only Button 5 typing keyboard `A` once with
+/// one of the independently captured Standard Timing values. Captures have not
+/// yet established which individual bytes generalize to other keys or
+/// playback modes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConfirmedMacro {
+    report: [u8; DIRECT_REPORT_LENGTH],
+    timing_ms: u16,
+}
+
+#[derive(Clone, Debug, Error, Eq, PartialEq)]
+pub enum ConfirmedMacroError {
+    #[error("expected a 264-byte Pulsefire Raid macro report, got {0} bytes")]
+    WrongLength(usize),
+    #[error(
+        "byte 0x{offset:02X} is not part of the confirmed minimal macro: expected 0x{expected:02X}, got 0x{actual:02X}"
+    )]
+    UnconfirmedByte {
+        offset: usize,
+        expected: u8,
+        actual: u8,
+    },
+    #[error("Standard Timing {0} ms has not been confirmed for Pulsefire Raid macros")]
+    UnconfirmedTiming(u16),
+    #[error("minimal macro binding is confirmed only for the runtime profile")]
+    UnsupportedProfileSection,
 }
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
@@ -349,6 +383,120 @@ impl PerformanceProfile {
     }
 }
 
+impl ConfirmedMacro {
+    /// Build a confirmed Button 5 → keyboard `A`, Play Once report without I/O.
+    ///
+    /// Only timing values captured independently on the target unit are
+    /// accepted. This keeps the UI's unverified numeric bounds out of packets.
+    pub fn button5_keyboard_a_once(timing_ms: u16) -> Result<Self, ConfirmedMacroError> {
+        if !CONFIRMED_MACRO_TIMINGS_MS.contains(&timing_ms) {
+            return Err(ConfirmedMacroError::UnconfirmedTiming(timing_ms));
+        }
+
+        let mut report = [0_u8; DIRECT_REPORT_LENGTH];
+        report[..CONFIRMED_MACRO_HEADER.len()].copy_from_slice(&CONFIRMED_MACRO_HEADER);
+        let [timing_high, timing_low] = timing_ms.to_be_bytes();
+        report[0x0A..0x10].copy_from_slice(&[
+            0x80 | timing_high,
+            timing_low,
+            0x04,
+            timing_high,
+            timing_low,
+            0x04,
+        ]);
+        Ok(Self { report, timing_ms })
+    }
+
+    /// Recognize only the exact, repeated local capture.
+    ///
+    /// Reports for other keys or macro modes stay rejected until isolated
+    /// differential captures establish their fields.
+    pub fn parse(report: &[u8]) -> Result<Self, ConfirmedMacroError> {
+        let report: [u8; DIRECT_REPORT_LENGTH] = report
+            .try_into()
+            .map_err(|_| ConfirmedMacroError::WrongLength(report.len()))?;
+        for timing_ms in CONFIRMED_MACRO_TIMINGS_MS {
+            let expected = Self::button5_keyboard_a_once(timing_ms)
+                .expect("the confirmed timing table contains only supported values");
+            if report == expected.report {
+                return Ok(Self { report, timing_ms });
+            }
+        }
+
+        let timing_ms = (u16::from(report[0x0D] & 0x7F) << 8) | u16::from(report[0x0E]);
+        if report[0x0A] == (0x80 | report[0x0D])
+            && report[0x0B] == report[0x0E]
+            && !CONFIRMED_MACRO_TIMINGS_MS.contains(&timing_ms)
+        {
+            let reference = Self::button5_keyboard_a_once(20)
+                .expect("20 ms is a confirmed minimal macro timing");
+            let variable_offsets = [0x0A, 0x0B, 0x0D, 0x0E];
+            if report.iter().enumerate().all(|(offset, actual)| {
+                variable_offsets.contains(&offset) || *actual == reference.report[offset]
+            }) {
+                return Err(ConfirmedMacroError::UnconfirmedTiming(timing_ms));
+            }
+        }
+
+        let expected =
+            Self::button5_keyboard_a_once(20).expect("20 ms is a confirmed minimal macro timing");
+        let (offset, (&actual, &expected)) = report
+            .iter()
+            .zip(expected.report.iter())
+            .enumerate()
+            .find(|(_, (actual, expected))| actual != expected)
+            .expect("an exact 20 ms report would already have returned");
+        Err(ConfirmedMacroError::UnconfirmedByte {
+            offset,
+            expected,
+            actual,
+        })
+    }
+
+    pub const fn control(&self) -> PulsefireRaidControl {
+        PulsefireRaidControl::Button5
+    }
+
+    pub const fn keyboard_usage(&self) -> KeyboardUsage {
+        KeyboardUsage(0x04)
+    }
+
+    pub const fn playback(&self) -> hyperx_core::MacroPlayback {
+        hyperx_core::MacroPlayback::Once
+    }
+
+    pub const fn timing_ms(&self) -> u16 {
+        self.timing_ms
+    }
+
+    /// Patch the exact captured macro reference into a runtime profile image.
+    ///
+    /// This remains offline. A complete profile transaction is not exposed by
+    /// the device driver, and onboard use is deliberately rejected.
+    pub fn apply_to_profile(
+        &self,
+        profile: &mut PerformanceProfile,
+    ) -> Result<(), ConfirmedMacroError> {
+        if profile.section != ProfileSection::Runtime {
+            return Err(ConfirmedMacroError::UnsupportedProfileSection);
+        }
+
+        let offset = self.control().profile_offset();
+        profile.report[offset..offset + BUTTON_RECORD_LENGTH]
+            .copy_from_slice(&CONFIRMED_MACRO_BINDING);
+        Ok(())
+    }
+
+    pub fn is_bound_in(&self, profile: &PerformanceProfile) -> bool {
+        let offset = self.control().profile_offset();
+        profile.report[offset..offset + BUTTON_RECORD_LENGTH] == CONFIRMED_MACRO_BINDING
+    }
+
+    pub const fn as_bytes(&self) -> &[u8; DIRECT_REPORT_LENGTH] {
+        &self.report
+    }
+}
+
 fn read_dpi(report: &[u8; DIRECT_REPORT_LENGTH], offset: usize) -> u32 {
     u32::from(u16::from_be_bytes([report[offset], report[offset + 1]])) * DPI_UNIT
 }
@@ -587,6 +735,111 @@ mod tests {
         let report = encode_direct_rgb(RgbColor::BLACK, RgbColor::BLACK);
         assert_eq!(&report[..9], &[0x07, 0x0A, 0, 0, 0, 0, 0, 0, 0xA0]);
         assert!(report[9..].iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn golden_minimal_macro_report_matches_repeated_local_captures() {
+        let macro_definition = ConfirmedMacro::button5_keyboard_a_once(20).unwrap();
+        let mut expected = [0_u8; DIRECT_REPORT_LENGTH];
+        expected[..16].copy_from_slice(&[
+            0x07, 0x05, 0x04, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x80, 0x14, 0x04, 0x00,
+            0x14, 0x04,
+        ]);
+
+        assert_eq!(macro_definition.as_bytes(), &expected);
+        assert_eq!(ConfirmedMacro::parse(&expected).unwrap(), macro_definition);
+        assert_eq!(macro_definition.control(), PulsefireRaidControl::Button5);
+        assert_eq!(macro_definition.keyboard_usage(), KeyboardUsage(0x04));
+        assert_eq!(
+            macro_definition.playback(),
+            hyperx_core::MacroPlayback::Once
+        );
+        assert_eq!(macro_definition.timing_ms(), 20);
+
+        let macro_300ms = ConfirmedMacro::button5_keyboard_a_once(300).unwrap();
+        let mut expected_300ms = expected;
+        expected_300ms[0x0A..0x10].copy_from_slice(&[0x81, 0x2C, 0x04, 0x01, 0x2C, 0x04]);
+        assert_eq!(macro_300ms.as_bytes(), &expected_300ms);
+        assert_eq!(ConfirmedMacro::parse(&expected_300ms).unwrap(), macro_300ms);
+        assert_eq!(macro_300ms.timing_ms(), 300);
+    }
+
+    #[test]
+    fn minimal_macro_binding_matches_forward_reverse_captures() {
+        let macro_definition = ConfirmedMacro::button5_keyboard_a_once(20).unwrap();
+        let mut profile = PerformanceProfile::parse(&captured_button_profile()).unwrap();
+        profile
+            .set_button_binding(
+                PulsefireRaidControl::Button5,
+                &ButtonBinding::Mouse(MouseFunction::Forward),
+            )
+            .unwrap();
+        let before = *profile.as_bytes();
+
+        macro_definition.apply_to_profile(&mut profile).unwrap();
+
+        assert_eq!(
+            changed_offsets(&before, profile.as_bytes()),
+            vec![0x8C, 0x8D]
+        );
+        assert_eq!(&profile.as_bytes()[0x8C..0x90], &[0x53, 0x00, 0x00, 0x04]);
+        assert!(macro_definition.is_bound_in(&profile));
+
+        profile
+            .set_button_binding(
+                PulsefireRaidControl::Button5,
+                &ButtonBinding::Mouse(MouseFunction::Forward),
+            )
+            .unwrap();
+        assert_eq!(profile.as_bytes(), &before);
+        assert!(!macro_definition.is_bound_in(&profile));
+    }
+
+    #[test]
+    fn minimal_macro_rejects_unconfirmed_variants_and_onboard_binding() {
+        assert_eq!(
+            ConfirmedMacro::parse(&[0_u8; 16]),
+            Err(ConfirmedMacroError::WrongLength(16))
+        );
+
+        assert_eq!(
+            ConfirmedMacro::button5_keyboard_a_once(50),
+            Err(ConfirmedMacroError::UnconfirmedTiming(50))
+        );
+
+        let mut unconfirmed_timing = *ConfirmedMacro::button5_keyboard_a_once(20)
+            .unwrap()
+            .as_bytes();
+        unconfirmed_timing[0x0A..0x10].copy_from_slice(&[0x80, 0x32, 0x04, 0x00, 0x32, 0x04]);
+        assert_eq!(
+            ConfirmedMacro::parse(&unconfirmed_timing),
+            Err(ConfirmedMacroError::UnconfirmedTiming(50))
+        );
+
+        for (offset, actual) in [(0x09, 0x02), (0x0C, 0x05), (0x20, 0x01)] {
+            let mut report = *ConfirmedMacro::button5_keyboard_a_once(20)
+                .unwrap()
+                .as_bytes();
+            let expected = report[offset];
+            report[offset] = actual;
+            assert_eq!(
+                ConfirmedMacro::parse(&report),
+                Err(ConfirmedMacroError::UnconfirmedByte {
+                    offset,
+                    expected,
+                    actual,
+                })
+            );
+        }
+
+        let macro_definition = ConfirmedMacro::button5_keyboard_a_once(20).unwrap();
+        let original = profile_fixture(ProfileImageKind::HostWrite, ProfileSection::Onboard);
+        let mut onboard = PerformanceProfile::parse(&original).unwrap();
+        assert_eq!(
+            macro_definition.apply_to_profile(&mut onboard),
+            Err(ConfirmedMacroError::UnsupportedProfileSection)
+        );
+        assert_eq!(onboard.as_bytes(), &original);
     }
 
     #[test]
