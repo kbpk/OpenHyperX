@@ -54,6 +54,42 @@ pub enum WindowsShortcut {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct KeyboardUsage(pub u16);
 
+/// Press/release state for one keyboard event in a macro.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KeyState {
+    Pressed,
+    Released,
+}
+
+/// One keyboard event and its associated timing value.
+///
+/// Device protocols decide whether the timing is applied before or after the
+/// event. Keeping it on each event supports both fixed and recorded timings.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct KeyboardMacroEvent {
+    pub usage: KeyboardUsage,
+    pub state: KeyState,
+    pub timing_ms: u16,
+}
+
+impl KeyboardMacroEvent {
+    pub const fn pressed(usage: KeyboardUsage, timing_ms: u16) -> Self {
+        Self {
+            usage,
+            state: KeyState::Pressed,
+            timing_ms,
+        }
+    }
+
+    pub const fn released(usage: KeyboardUsage, timing_ms: u16) -> Self {
+        Self {
+            usage,
+            state: KeyState::Released,
+            timing_ms,
+        }
+    }
+}
+
 /// Reference to an application or onboard macro and its playback policy.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MacroBinding {
@@ -89,5 +125,18 @@ mod tests {
 
         assert_eq!(bindings.len(), 6);
         assert_ne!(bindings[0], bindings[5]);
+    }
+
+    #[test]
+    fn macro_timings_are_stored_per_event() {
+        let events = [
+            KeyboardMacroEvent::pressed(KeyboardUsage(0x04), 20),
+            KeyboardMacroEvent::released(KeyboardUsage(0x04), 40),
+        ];
+
+        assert_eq!(events[0].state, KeyState::Pressed);
+        assert_eq!(events[0].timing_ms, 20);
+        assert_eq!(events[1].state, KeyState::Released);
+        assert_eq!(events[1].timing_ms, 40);
     }
 }

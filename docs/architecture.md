@@ -30,10 +30,11 @@ hidapi / Windows HID
 The current implementation includes discovery, standard report-descriptor
 reads, the capture-backed volatile RGB operation, and an offline Pulsefire
 Raid profile parser/patcher for performance and confirmed button-record
-families. It also recognizes and reproduces the repeated minimal keyboard-A
-macro at its two independently captured timing values without generalizing the
-still-unknown fields. The patchers cannot perform I/O; device-driver setters
-whose surrounding transactions are still unknown remain absent.
+families. It also recognizes and reproduces the confirmed keyboard-A and
+keyboard-A-then-B macro fixtures. Macro timing is represented per press/release
+event even though only uniform Standard Timing captures are currently accepted.
+The patchers cannot perform I/O; device-driver setters whose surrounding
+transactions are still unknown remain absent.
 
 ## Crate responsibilities
 

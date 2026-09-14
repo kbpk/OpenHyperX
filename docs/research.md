@@ -486,15 +486,37 @@ byte distinguishes press from release. The representation has 15 payload bits,
 but neither the device's accepted range nor the apparent NGENUITY `0..9999`
 range has been boundary-tested.
 
+A separate macro recorded `A` followed by `B`, still using Play Once and
+Standard Timing 20 ms. NGENUITY emitted the same complete transaction twice
+during the single `Done` action. Both macro reports had this nonzero prefix:
+
+```text
+07 05 04 04 00 00 00 00 00 01
+80 14 04 00 14 04
+80 14 05 00 14 05
+```
+
+The first six event bytes are the previously captured A press/release pair;
+the next six append B press/release with standard keyboard usage `0x05`.
+Button 5 then typed lowercase `ab`, functionally confirming the ordering.
+Offset `0x09` remained `01` when the macro grew from one key to two, proving
+that it is not an event or key count and strengthening its correlation with
+the unchanged Play Once mode.
+
+NGENUITY can disable Standard Timing and retain different timing values between
+events. The protocol model therefore stores timing on every keyboard event,
+not as one global macro property. Nonuniform timing has not yet been captured,
+so the exact codec continues to reject it.
+
 A separate isolated reversal from this macro to Mouse Forward omitted the
 `0x05` macro-definition report. Its read/write profile comparison changed only
 the normal opcode plus `0x8C: 53 -> 02` and `0x8D: 00 -> F9`; offset `0x8F`
 remained `04`. No `Save to mouse` action was used, so these observations cover
 the runtime profile only.
 
-The protocol crate contains an offline evidence-gated codec for this one
-confirmed macro and its Button 5 reference. It accepts only the independently
-captured 20 and 300 ms timings and rejects every other timing, changed key,
+The protocol crate contains an offline evidence-gated codec for the confirmed
+Button 5 macro reference and three exact event lists: A at 20 ms, A at 300 ms,
+and A then B at 20 ms. It rejects every other event list, nonuniform timing,
 playback-like byte, nonzero padding or onboard profile. Generic macros and all
 device I/O remain unavailable until the fields above are isolated.
 
@@ -509,7 +531,7 @@ device I/O remain unavailable until the fields above are isolated.
 | persistent RGB/effects | Solid color and Cycle are software-rendered; red/green save captures did not persist lighting | determine whether Raid firmware exposes any hardware-lighting mode before claiming support; otherwise provide an explicit foreground engine |
 | DPI and stages | five big-endian X/Y values, 200-16000 DPI range in 50-DPI units, active index, enable flags and per-stage colors confirmed; forward/reverse edits cover stages 1-4 and add/remove covers stage 5; patcher remains offline | determine whether independent X/Y values are supported; understand the surrounding transaction before exposing writes |
 | polling | all four interval codes captured; 1000 Hz persisted through save and power-cycle | implement only after the complete save transaction is understood; verify with an external rate tester |
-| button bindings | 11 record offsets correlated; Button 5 isolated across Disabled, Forward, Back, Volume Up, Copy, A, DPI Toggle and one working minimal macro; macro report repeated, 20/300 ms timing encoding isolated and recognized offline | capture one-key `B` with unchanged timing/mode, isolate playback and target-control bytes, then boundary-test the UI timing range; repeat one inferred multimedia/shortcut value; do not expose hardware writes yet |
+| button bindings | 11 record offsets correlated; Button 5 isolated across Disabled, Forward, Back, Volume Up, Copy, A, DPI Toggle and working A/A→B macros; keyboard event append format and 20/300 ms timing encoding confirmed offline | capture one nonuniform-timing A→B macro, isolate playback and target-control bytes, then boundary-test the UI timing range; repeat one inferred multimedia/shortcut value; do not expose hardware writes yet |
 | onboard save | repeated transaction captured; read-modify-write and performance persistence confirmed | identify the three `0x18` packets, acknowledgements, timing and failure behavior before replay |
 | NGENUITY locking | unknown | run `devices`, then future read-only `info`, with NGENUITY open and closed; record open errors |
 | admin requirement | configuration collection opens without elevation | retest on a second Windows machine/account |
