@@ -7,7 +7,7 @@ pub mod pulsefire_raid;
 
 use hyperx_core::{DeviceDescriptor, UsbId};
 
-pub use pulsefire_raid::{PulsefireRaid, PulsefireRaidError, PULSEFIRE_RAID};
+pub use pulsefire_raid::{PulsefireRaid, PulsefireRaidError, PULSEFIRE_RAID, PULSEFIRE_RAID_DPI};
 
 pub static SUPPORTED_DEVICES: &[DeviceDescriptor] = &[PULSEFIRE_RAID];
 

@@ -10,7 +10,10 @@ pub use button::{
     ButtonBinding, KeyState, KeyboardMacroEvent, KeyboardUsage, MacroBinding, MacroPlayback,
     MouseFunction, MultimediaFunction, WindowsShortcut,
 };
-pub use capability::{Capability, CapabilitySet, LightingZone, PollingRate};
+pub use capability::{
+    Capability, CapabilitySet, DpiCapabilities, DpiValidationError, LightingZone, PollingRate,
+    PollingRateParseError,
+};
 pub use color::{ColorParseError, RgbColor};
 pub use device::{DeviceDescriptor, HidInterfaceInfo, InterfaceSelector, UsbId};
 pub use performance::{DpiProfile, DpiStage};

@@ -9,10 +9,10 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use clap::{ArgAction, Parser, Subcommand};
 use hyperx_core::{
-    ButtonBinding, DeviceDescriptor, HidInterfaceInfo, MouseFunction, MultimediaFunction, RgbColor,
-    UsbId, WindowsShortcut,
+    ButtonBinding, DeviceDescriptor, DpiProfile, HidInterfaceInfo, MouseFunction,
+    MultimediaFunction, PollingRate, RgbColor, UsbId, WindowsShortcut,
 };
-use hyperx_devices::{find_supported_device, PulsefireRaid, PULSEFIRE_RAID};
+use hyperx_devices::{find_supported_device, PulsefireRaid, PULSEFIRE_RAID, PULSEFIRE_RAID_DPI};
 use hyperx_hid::{HidApiDiscovery, HidApiTransport, HidDiscovery, HidTransport};
 use hyperx_protocol::{
     capture::{diff_captures, parse_hex_capture},
@@ -60,6 +60,16 @@ enum Command {
         #[command(subcommand)]
         command: RgbCommand,
     },
+    /// Read or change the active runtime DPI stage.
+    Dpi {
+        #[command(subcommand)]
+        command: DpiCommand,
+    },
+    /// Read or change the runtime USB polling rate.
+    Polling {
+        #[command(subcommand)]
+        command: PollingCommand,
+    },
     /// Compare two text files containing one raw hexadecimal report per line.
     DecodeCapture {
         /// Baseline capture exported as hex lines.
@@ -87,6 +97,29 @@ enum RgbCommand {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum DpiCommand {
+    /// Show all DPI stages and the active stage.
+    Get,
+    /// Change both axes of the active stage; does not save onboard.
+    Set {
+        /// DPI from 200 through 16000 in steps of 50.
+        #[arg(value_parser = parse_dpi)]
+        dpi: u32,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PollingCommand {
+    /// Show the current runtime polling rate.
+    Get,
+    /// Change the runtime polling rate; does not save onboard.
+    Set {
+        /// Polling rate in Hz: 125, 250, 500 or 1000.
+        rate: PollingRate,
+    },
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     init_logging(cli.verbose, cli.trace)?;
@@ -98,8 +131,19 @@ fn main() -> Result<()> {
             RgbCommand::Static { color, duration } => rgb(color, duration),
             RgbCommand::Off { duration } => rgb(RgbColor::BLACK, duration),
         },
+        Command::Dpi { command } => dpi(command),
+        Command::Polling { command } => polling(command),
         Command::DecodeCapture { before, after } => decode_capture(&before, &after),
     }
+}
+
+fn parse_dpi(input: &str) -> Result<u32, String> {
+    let dpi = input
+        .parse::<u32>()
+        .map_err(|_| format!("DPI must be an integer; got {input}"))?;
+    PULSEFIRE_RAID_DPI
+        .validate(dpi)
+        .map_err(|error| error.to_string())
 }
 
 fn init_logging(verbosity: u8, trace: bool) -> Result<()> {
@@ -226,27 +270,7 @@ fn print_runtime_profile(profile: &PerformanceProfile) {
 
     println!("  DPI stages:");
     match profile.dpi_profile() {
-        Ok(dpi_profile) => {
-            for (index, stage) in dpi_profile.stages.iter().enumerate() {
-                let active = if index == dpi_profile.active_stage {
-                    "*"
-                } else {
-                    " "
-                };
-                let resolution = if stage.x == stage.y {
-                    format!("{} DPI", stage.x)
-                } else {
-                    format!("{}x{} DPI", stage.x, stage.y)
-                };
-                println!(
-                    "    {active} {}: {resolution}, color #{:02X}{:02X}{:02X}",
-                    index + 1,
-                    stage.color.red,
-                    stage.color.green,
-                    stage.color.blue,
-                );
-            }
-        }
+        Ok(dpi_profile) => print_dpi_profile(&dpi_profile),
         Err(error) => println!("    <decode error: {error}>"),
     }
 
@@ -270,6 +294,28 @@ fn print_runtime_profile(profile: &PerformanceProfile) {
                 format!("{}:", control.name())
             ),
         }
+    }
+}
+
+fn print_dpi_profile(dpi_profile: &DpiProfile) {
+    for (index, stage) in dpi_profile.stages.iter().enumerate() {
+        let active = if index == dpi_profile.active_stage {
+            "*"
+        } else {
+            " "
+        };
+        let resolution = if stage.x == stage.y {
+            format!("{} DPI", stage.x)
+        } else {
+            format!("{}x{} DPI", stage.x, stage.y)
+        };
+        println!(
+            "    {active} {}: {resolution}, color #{:02X}{:02X}{:02X}",
+            index + 1,
+            stage.color.red,
+            stage.color.green,
+            stage.color.blue,
+        );
     }
 }
 
@@ -328,11 +374,54 @@ const fn windows_shortcut_name(shortcut: WindowsShortcut) -> &'static str {
     }
 }
 
-fn rgb(color: RgbColor, duration_seconds: u64) -> Result<()> {
-    if duration_seconds > 3600 {
-        return Err(anyhow!("--duration cannot exceed 3600 seconds"));
+fn dpi(command: DpiCommand) -> Result<()> {
+    let mut device = open_pulsefire_raid()?;
+    match command {
+        DpiCommand::Get => {
+            let profile = device.runtime_profile().context(
+                "failed to read the Pulsefire Raid runtime profile; close NGENUITY and retry",
+            )?;
+            let dpi_profile = profile.dpi_profile()?;
+            println!("DPI stages:");
+            print_dpi_profile(&dpi_profile);
+        }
+        DpiCommand::Set { dpi } => {
+            let dpi_profile = device.set_runtime_active_dpi(dpi).context(
+                "failed to update the active runtime DPI stage; the setting may be unchanged",
+            )?;
+            println!(
+                "Updated active runtime DPI stage {} to {dpi} DPI.",
+                dpi_profile.active_stage + 1
+            );
+            println!("DPI stages:");
+            print_dpi_profile(&dpi_profile);
+            println!("The onboard profile was not written.");
+        }
     }
+    Ok(())
+}
 
+fn polling(command: PollingCommand) -> Result<()> {
+    let mut device = open_pulsefire_raid()?;
+    match command {
+        PollingCommand::Get => {
+            let profile = device.runtime_profile().context(
+                "failed to read the Pulsefire Raid runtime profile; close NGENUITY and retry",
+            )?;
+            println!("Polling rate: {} Hz", profile.polling_rate()?.hz());
+        }
+        PollingCommand::Set { rate } => {
+            device.set_runtime_polling_rate(rate).context(
+                "failed to update the runtime polling rate; the setting may be unchanged",
+            )?;
+            println!("Updated runtime polling rate to {} Hz.", rate.hz());
+            println!("The onboard profile was not written.");
+        }
+    }
+    Ok(())
+}
+
+fn open_pulsefire_raid() -> Result<PulsefireRaid<HidApiTransport>> {
     let discovery = HidApiDiscovery;
     let interfaces = discovery.enumerate()?;
     let configuration = select_configuration_interface(&interfaces)?;
@@ -342,7 +431,15 @@ fn rgb(color: RgbColor, duration_seconds: u64) -> Result<()> {
             configuration.path
         )
     })?;
-    let mut device = PulsefireRaid::new(transport)?;
+    Ok(PulsefireRaid::new(transport)?)
+}
+
+fn rgb(color: RgbColor, duration_seconds: u64) -> Result<()> {
+    if duration_seconds > 3600 {
+        return Err(anyhow!("--duration cannot exceed 3600 seconds"));
+    }
+
+    let mut device = open_pulsefire_raid()?;
     let deadline = Instant::now() + Duration::from_secs(duration_seconds);
 
     loop {
@@ -521,6 +618,24 @@ mod tests {
             first_value(&interfaces, |info| &info.product),
             Some("HyperX Pulsefire Raid")
         );
+    }
+
+    #[test]
+    fn cli_validates_dpi_before_running_the_command() {
+        for valid in ["200", "900", "16000"] {
+            assert!(Cli::try_parse_from(["hyperx-cli", "dpi", "set", valid]).is_ok());
+        }
+        for invalid in ["199", "225", "16050", "not-a-number"] {
+            assert!(Cli::try_parse_from(["hyperx-cli", "dpi", "set", invalid]).is_err());
+        }
+    }
+
+    #[test]
+    fn cli_accepts_only_confirmed_polling_rates() {
+        for valid in ["125", "250", "500", "1000"] {
+            assert!(Cli::try_parse_from(["hyperx-cli", "polling", "set", valid]).is_ok());
+        }
+        assert!(Cli::try_parse_from(["hyperx-cli", "polling", "set", "2000"]).is_err());
     }
 
     fn fixture() -> HidInterfaceInfo {

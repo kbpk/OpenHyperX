@@ -230,13 +230,14 @@ reverses. NGENUITY emitted an additional no-op read/write transaction before
 the actual removal transaction; the no-op changed only the response/write
 opcode.
 
-OpenHyperX now has an offline profile patcher for DPI values, active stage,
-stage count and colors. NGENUITY locally exposed a minimum of 200 DPI; the
-manufacturer documents a maximum of 16000 DPI, and captures confirm a 50-DPI
-step. The patcher therefore accepts multiples of 50 in the inclusive
-`200..=16000` range and preserves unrelated profile bytes. It is not connected
-to the HID driver; no interpolated profile is transmitted while the
-surrounding command sequence remains unresolved.
+OpenHyperX has a profile patcher for DPI values, active stage, stage count and
+colors. NGENUITY locally exposed a minimum of 200 DPI; the manufacturer
+documents a maximum of 16000 DPI, and captures confirm a 50-DPI step. The
+patcher therefore accepts multiples of 50 in the inclusive `200..=16000` range
+and preserves unrelated profile bytes. The device driver exposes only changing
+both axes of the already-active runtime stage; stage count, active-index and
+color writes remain offline until they receive their own CLI design and
+hardware validation.
 
 Observed configuration sequence:
 
@@ -262,9 +263,22 @@ reference. The runtime profile cannot by itself reveal that macro's event
 definition, so the CLI deliberately labels it as a reference rather than
 guessing its keys or timing.
 
-The purpose and allowed values of the two prelude writes are unknown. No DPI
-command may replay this sequence until they and the profile framing are
-understood well enough to preserve every unrelated field.
+The independent `1600 -> 1700` DPI capture placed its `07 01 04` write 0.039 ms
+after the GET response; the control-transfer response arrived 0.379 ms later.
+An independent `500 -> 1000` polling capture reproduced the same framing. No
+additional acknowledgement payload or post-write command was observed. The
+driver therefore sends one full write immediately after patching the response,
+does not retry, and preserves every byte except the response/write opcode and
+the selected setting field.
+
+On the physical release-`1124` unit, OpenHyperX successfully performed and
+read back `800 -> 900 -> 800` on both axes of active DPI stage 1. It then
+performed and read back `1000 -> 500 -> 1000 Hz`. The final runtime state was
+the original 800 DPI and 1000 Hz, and no onboard-save sequence was sent.
+
+The detailed semantics and allowed variants of the two fixed prelude writes
+remain unknown. They are not generalized: the driver exposes only the exact
+runtime read/modify/write sequence confirmed above.
 
 ### Polling-rate profile observations
 
@@ -283,8 +297,9 @@ changed only this byte. The initial `0x02 -> 0x01` capture was therefore
 `500 -> 1000`, not the initially assumed reverse direction. The software UI
 confirmed that the setting remained selected. Persistence of the `0x01` value
 through an explicit onboard save and power-cycle was subsequently confirmed.
-The surrounding transaction still needs to be implemented safely before
-exposing a setter.
+The runtime setter now uses the complete confirmed read/modify/write
+transaction and preserves all non-polling bytes. It does not invoke the
+separate onboard-save transaction.
 
 ### Onboard save observations
 
@@ -545,8 +560,8 @@ device I/O remain unavailable until the fields above are isolated.
 | direct RGB transport | accepted locally; NGENUITY Solid and Cycle both use it, and lighting returns to rainbow without keepalive | isolate timeout/revert timing and confirm both physical LED zones |
 | RGB off semantics | unknown | compare NGENUITY static black vs explicit lighting-off capture |
 | persistent RGB/effects | Solid color and Cycle are software-rendered; red/green save captures did not persist lighting | determine whether Raid firmware exposes any hardware-lighting mode before claiming support; otherwise provide an explicit foreground engine |
-| DPI and stages | five big-endian X/Y values, 200-16000 DPI range in 50-DPI units, active index, enable flags and per-stage colors confirmed; forward/reverse edits cover stages 1-4 and add/remove covers stage 5; patcher remains offline | determine whether independent X/Y values are supported; understand the surrounding transaction before exposing writes |
-| polling | all four interval codes captured; 1000 Hz persisted through save and power-cycle | implement only after the complete save transaction is understood; verify with an external rate tester |
+| DPI and stages | five big-endian X/Y values, 200-16000 DPI range in 50-DPI units, active index, enable flags and per-stage colors confirmed; active-stage runtime set/readback validated; forward/reverse edits cover stages 1-4 and add/remove covers stage 5 | design explicit stage/index/color commands and determine whether independent X/Y values are supported |
+| polling | all four interval codes captured; runtime 1000→500→1000 set/readback validated; 1000 Hz persisted through a separate NGENUITY save and power-cycle | verify effective USB report rate with an external rate tester |
 | button bindings | 11 record offsets correlated; Button 5 isolated across Disabled, Forward, Back, Volume Up, Copy, A, DPI Toggle and working A/A→B macros; keyboard event append format and 20/300 ms timing encoding confirmed offline | capture one nonuniform-timing A→B macro, isolate playback and target-control bytes, then boundary-test the UI timing range; repeat one inferred multimedia/shortcut value; do not expose hardware writes yet |
 | onboard save | repeated transaction captured; read-modify-write and performance persistence confirmed | identify the three `0x18` packets, acknowledgements, timing and failure behavior before replay |
 | NGENUITY locking | unknown | run `devices`, then future read-only `info`, with NGENUITY open and closed; record open errors |

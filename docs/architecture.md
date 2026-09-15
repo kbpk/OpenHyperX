@@ -29,13 +29,12 @@ hidapi / Windows HID
 
 The current implementation includes discovery, standard report-descriptor
 reads, a capture-backed runtime-profile read, the capture-backed volatile RGB
-operation, and an offline Pulsefire Raid profile patcher for performance and
-confirmed button-record families. It also recognizes and reproduces the
-confirmed keyboard-A and keyboard-A-then-B macro fixtures. Macro timing is
-represented per press/release event even though only uniform Standard Timing
-captures are currently accepted. The patchers cannot perform I/O;
-device-driver setters whose surrounding transactions are still unknown remain
-absent.
+operation, runtime setters for active DPI and polling, and an offline Pulsefire
+Raid profile patcher for other performance and confirmed button-record fields.
+It also recognizes and reproduces the confirmed keyboard-A and
+keyboard-A-then-B macro fixtures. Macro timing is represented per press/release
+event even though only uniform Standard Timing captures are currently
+accepted. Unconfirmed setters remain absent.
 
 ## Crate responsibilities
 
@@ -74,8 +73,9 @@ Raw TX/RX logging is emitted only at `trace` level.
 
 Owns model identities, capability declarations and per-model protocol drivers.
 `pulsefire_raid` is the first module and exposes the confirmed runtime-profile
-read and volatile direct RGB. A model driver may depend on the core, protocol
-and transport traits, but never on CLI/Tauri types.
+read, active-DPI/polling runtime setters and volatile direct RGB. A model driver
+may depend on the core, protocol and transport traits, but never on CLI/Tauri
+types.
 
 ### `hyperx-cli`
 
