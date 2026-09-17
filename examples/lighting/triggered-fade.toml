@@ -1,0 +1,12 @@
+duration_seconds = 10
+frame_interval_ms = 50
+
+[zones.wheel]
+effect = "triggered-fade"
+color = "#FF8000"
+fade_ms = 1000
+
+[zones.logo]
+effect = "triggered-fade"
+color = "#0080FF"
+fade_ms = 1500

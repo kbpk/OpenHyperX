@@ -1,0 +1,12 @@
+duration_seconds = 8
+frame_interval_ms = 50
+
+[zones.wheel]
+effect = "sun"
+period_ms = 6000
+phase_degrees = 0
+
+[zones.logo]
+effect = "twilight"
+period_ms = 6000
+phase_degrees = 180

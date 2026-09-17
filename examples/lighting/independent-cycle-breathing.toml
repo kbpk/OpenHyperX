@@ -1,0 +1,13 @@
+duration_seconds = 8
+frame_interval_ms = 50
+
+[zones.wheel]
+effect = "cycle"
+period_ms = 4000
+phase_degrees = 0
+
+[zones.logo]
+effect = "breathing"
+color = "#8000FF"
+period_ms = 2500
+phase_degrees = 180

@@ -9,9 +9,9 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use hyperx_core::{
-    spectrum_color, ButtonBinding, DeviceDescriptor, DpiProfile, HidInterfaceInfo, MacroDefinition,
-    MouseFunction, MultimediaFunction, PollingRate, RgbColor, UsbId, WindowsShortcut,
-    SPECTRUM_STEPS,
+    ButtonBinding, DeviceDescriptor, DpiProfile, HidInterfaceInfo, MacroDefinition, MouseFunction,
+    MultimediaFunction, PollingRate, RgbColor, SoftwareLightingEffect, SoftwareLightingProgram,
+    UsbId, WindowsShortcut,
 };
 use hyperx_devices::{
     find_supported_device, PulsefireRaid, PulsefireRaidButton5Assignment, PULSEFIRE_RAID,
@@ -122,6 +122,14 @@ enum RgbCommand {
         /// Seconds per complete color cycle, from 1 through 60.
         #[arg(long, default_value_t = 5, value_parser = parse_cycle_period)]
         period: u64,
+        /// Additional logo phase from 0 through 359 degrees.
+        #[arg(long, default_value_t = 0, value_parser = parse_phase_degrees)]
+        logo_phase: u16,
+    },
+    /// Play a validated per-zone software-lighting TOML program in foreground.
+    Play {
+        /// Program containing independent wheel and logo effects.
+        program: PathBuf,
     },
 }
 
@@ -133,11 +141,11 @@ enum RgbTargetArg {
 }
 
 impl RgbTargetArg {
-    const fn colors(self, color: RgbColor) -> (RgbColor, RgbColor) {
+    const fn colors(self, wheel: RgbColor, logo: RgbColor) -> (RgbColor, RgbColor) {
         match self {
-            Self::All => (color, color),
-            Self::Wheel => (color, RgbColor::BLACK),
-            Self::Logo => (RgbColor::BLACK, color),
+            Self::All => (wheel, logo),
+            Self::Wheel => (wheel, RgbColor::BLACK),
+            Self::Logo => (RgbColor::BLACK, logo),
         }
     }
 
@@ -147,6 +155,64 @@ impl RgbTargetArg {
             Self::Wheel => "wheel",
             Self::Logo => "logo",
         }
+    }
+}
+
+#[cfg(windows)]
+struct SystemMouseTrigger {
+    previous: u8,
+}
+
+#[cfg(windows)]
+impl SystemMouseTrigger {
+    const SUPPORTED: bool = true;
+    const BUTTON_KEYS: [i32; 5] = [0x01, 0x02, 0x04, 0x05, 0x06];
+
+    fn new() -> Self {
+        Self {
+            previous: Self::current_buttons(),
+        }
+    }
+
+    fn poll_down_edge(&mut self) -> bool {
+        let current = Self::current_buttons();
+        let down_edge = current & !self.previous != 0;
+        self.previous = current;
+        down_edge
+    }
+
+    fn current_buttons() -> u8 {
+        Self::BUTTON_KEYS
+            .iter()
+            .enumerate()
+            .fold(0_u8, |state, (index, &key)| {
+                // SAFETY: GetAsyncKeyState has no pointer arguments and is
+                // called with documented virtual-key constants only.
+                let pressed = unsafe { GetAsyncKeyState(key) } as u16 & 0x8000 != 0;
+                state | (u8::from(pressed) << index)
+            })
+    }
+}
+
+#[cfg(windows)]
+#[link(name = "user32")]
+extern "system" {
+    fn GetAsyncKeyState(virtual_key: i32) -> i16;
+}
+
+#[cfg(not(windows))]
+struct SystemMouseTrigger;
+
+#[cfg(not(windows))]
+impl SystemMouseTrigger {
+    const SUPPORTED: bool = false;
+
+    const fn new() -> Self {
+        Self
+    }
+
+    const fn poll_down_edge(&mut self) -> bool {
+        false
     }
 }
 
@@ -358,7 +424,12 @@ fn main() -> Result<()> {
                 target,
                 duration,
                 period,
-            } => rgb_cycle(target, duration, period),
+                logo_phase,
+            } => rgb_cycle(target, duration, period, logo_phase),
+            RgbCommand::Play { program } => {
+                let program = load_lighting_program(&program)?;
+                rgb_play(program)
+            }
         },
         Command::Dpi { command } => dpi(command),
         Command::Polling { command } => polling(command),
@@ -408,6 +479,46 @@ fn parse_cycle_period(input: &str) -> Result<u64, String> {
             "cycle period must be between 1 and 60 seconds; got {seconds}"
         ))
     }
+}
+
+fn parse_phase_degrees(input: &str) -> Result<u16, String> {
+    let phase = input
+        .parse::<u16>()
+        .map_err(|_| format!("phase must be an integer; got {input}"))?;
+    if phase < 360 {
+        Ok(phase)
+    } else {
+        Err(format!(
+            "phase must be from 0 through 359 degrees; got {phase}"
+        ))
+    }
+}
+
+fn load_lighting_program(path: &Path) -> Result<SoftwareLightingProgram> {
+    let source = fs::read_to_string(path)
+        .with_context(|| format!("failed to read lighting program {}", path.display()))?;
+    let program: SoftwareLightingProgram = toml::from_str(&source)
+        .with_context(|| format!("failed to parse lighting program {}", path.display()))?;
+    validate_pulsefire_raid_lighting_program(&program)
+        .with_context(|| format!("invalid lighting program {}", path.display()))?;
+    Ok(program)
+}
+
+fn validate_pulsefire_raid_lighting_program(program: &SoftwareLightingProgram) -> Result<()> {
+    program.validate()?;
+    for zone in program.zones.keys() {
+        if zone != "wheel" && zone != "logo" {
+            return Err(anyhow!(
+                "Pulsefire Raid lighting program contains unknown zone {zone:?}; use wheel or logo"
+            ));
+        }
+    }
+    if program.uses_triggers() && !SystemMouseTrigger::SUPPORTED {
+        return Err(anyhow!(
+            "triggered-fade currently requires the Windows system mouse-event adapter"
+        ));
+    }
+    Ok(())
 }
 
 fn resolve_static_rgb(
@@ -836,24 +947,71 @@ fn rgb(wheel: RgbColor, logo: RgbColor, duration_seconds: u64) -> Result<()> {
     Ok(())
 }
 
-fn rgb_cycle(target: RgbTargetArg, duration_seconds: u64, period_seconds: u64) -> Result<()> {
+fn rgb_cycle(
+    target: RgbTargetArg,
+    duration_seconds: u64,
+    period_seconds: u64,
+    logo_phase: u16,
+) -> Result<()> {
     let mut device = open_pulsefire_raid()?;
     let started = Instant::now();
     let duration = Duration::from_secs(duration_seconds);
-    let period_millis = u128::from(period_seconds) * 1000;
+    let wheel_effect = SoftwareLightingEffect::Cycle {
+        period_ms: period_seconds * 1_000,
+        phase_degrees: 0,
+    };
+    let logo_effect = SoftwareLightingEffect::Cycle {
+        period_ms: period_seconds * 1_000,
+        phase_degrees: logo_phase,
+    };
 
     while started.elapsed() < duration {
-        let elapsed_millis = started.elapsed().as_millis();
-        let phase =
-            ((elapsed_millis % period_millis) * u128::from(SPECTRUM_STEPS) / period_millis) as u16;
-        let (wheel, logo) = target.colors(spectrum_color(phase));
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        let wheel = wheel_effect.color_at(elapsed_ms, None)?;
+        let logo = logo_effect.color_at(elapsed_ms, None)?;
+        let (wheel, logo) = target.colors(wheel, logo);
         device.set_volatile_direct_rgb(wheel, logo)?;
         thread::sleep(Duration::from_millis(50));
     }
 
     println!(
-        "Rendered volatile RGB cycle on {} for {duration_seconds} seconds with a {period_seconds}-second period.",
-        target.name()
+        "Rendered volatile RGB cycle on {} for {duration_seconds} seconds with a {period_seconds}-second period and {logo_phase}-degree logo phase.",
+        target.name(),
+    );
+    println!("The previous lighting state may now return.");
+    println!("No onboard profile or firmware data was written.");
+    Ok(())
+}
+
+fn rgb_play(program: SoftwareLightingProgram) -> Result<()> {
+    let wheel_effect = program.zones.get("wheel");
+    let logo_effect = program.zones.get("logo");
+    let mut trigger = SystemMouseTrigger::new();
+    let mut last_trigger_ms = None;
+    let mut device = open_pulsefire_raid()?;
+    let started = Instant::now();
+    let duration = Duration::from_secs(program.duration_seconds);
+
+    while started.elapsed() < duration {
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        if trigger.poll_down_edge() {
+            last_trigger_ms = Some(elapsed_ms);
+        }
+        let wheel = match wheel_effect {
+            Some(effect) => effect.color_at(elapsed_ms, last_trigger_ms)?,
+            None => RgbColor::BLACK,
+        };
+        let logo = match logo_effect {
+            Some(effect) => effect.color_at(elapsed_ms, last_trigger_ms)?,
+            None => RgbColor::BLACK,
+        };
+        device.set_volatile_direct_rgb(wheel, logo)?;
+        thread::sleep(Duration::from_millis(program.frame_interval_ms));
+    }
+
+    println!(
+        "Rendered volatile per-zone lighting program for {} seconds.",
+        program.duration_seconds
     );
     println!("The previous lighting state may now return.");
     println!("No onboard profile or firmware data was written.");
@@ -1064,9 +1222,16 @@ mod tests {
     #[test]
     fn cli_validates_foreground_rgb_cycle() {
         let red = RgbColor::new(255, 0, 0);
-        assert_eq!(RgbTargetArg::All.colors(red), (red, red));
-        assert_eq!(RgbTargetArg::Wheel.colors(red), (red, RgbColor::BLACK));
-        assert_eq!(RgbTargetArg::Logo.colors(red), (RgbColor::BLACK, red));
+        let blue = RgbColor::new(0, 0, 255);
+        assert_eq!(RgbTargetArg::All.colors(red, blue), (red, blue));
+        assert_eq!(
+            RgbTargetArg::Wheel.colors(red, blue),
+            (red, RgbColor::BLACK)
+        );
+        assert_eq!(
+            RgbTargetArg::Logo.colors(red, blue),
+            (RgbColor::BLACK, blue)
+        );
 
         assert!(Cli::try_parse_from(["hyperx-cli", "rgb", "cycle"]).is_ok());
         assert!(Cli::try_parse_from([
@@ -1079,6 +1244,8 @@ mod tests {
             "5",
             "--period",
             "2",
+            "--logo-phase",
+            "180",
         ])
         .is_ok());
 
@@ -1087,12 +1254,63 @@ mod tests {
             ["--duration", "3601"],
             ["--period", "0"],
             ["--period", "61"],
+            ["--logo-phase", "360"],
             ["--target", "not-a-zone"],
         ] {
             assert!(
                 Cli::try_parse_from(["hyperx-cli", "rgb", "cycle", invalid[0], invalid[1],])
                     .is_err()
             );
+        }
+    }
+
+    #[test]
+    fn lighting_toml_parses_every_effect_and_rejects_unknown_zones() {
+        let effects = [
+            "effect = \"off\"",
+            "effect = \"solid\"\ncolor = \"#FF8000\"",
+            "effect = \"cycle\"\nperiod_ms = 5000\nphase_degrees = 180",
+            "effect = \"pulse\"\ncolor = \"FF0000\"\nperiod_ms = 1000\nphase_degrees = 90",
+            "effect = \"breathing\"\ncolor = \"00FF00\"\nperiod_ms = 2000\nphase_degrees = 270",
+            "effect = \"triggered-fade\"\ncolor = \"0000FF\"\nfade_ms = 750",
+            "effect = \"confetti\"\nstep_ms = 200\nseed = 42",
+            "effect = \"sun\"\nperiod_ms = 5000\nphase_degrees = 45",
+            "effect = \"twilight\"\nperiod_ms = 5000\nphase_degrees = 315",
+        ];
+        for effect in effects {
+            let source =
+                format!("duration_seconds = 5\nframe_interval_ms = 50\n[zones.wheel]\n{effect}\n");
+            let program: SoftwareLightingProgram = toml::from_str(&source).unwrap();
+            assert_eq!(program.validate(), Ok(()), "failed effect:\n{effect}");
+        }
+
+        let unknown_zone: SoftwareLightingProgram = toml::from_str(
+            r#"
+                duration_seconds = 5
+                [zones.moon]
+                effect = "solid"
+                color = "FFFFFF"
+            "#,
+        )
+        .unwrap();
+        assert!(validate_pulsefire_raid_lighting_program(&unknown_zone).is_err());
+
+        for source in [
+            r#"
+                duration_seconds = 5
+                typo = true
+                [zones.wheel]
+                effect = "solid"
+                color = "FFFFFF"
+            "#,
+            r#"
+                duration_seconds = 5
+                [zones.wheel]
+                effect = "cycle"
+                phase_degree = 180
+            "#,
+        ] {
+            assert!(toml::from_str::<SoftwareLightingProgram>(source).is_err());
         }
     }
 

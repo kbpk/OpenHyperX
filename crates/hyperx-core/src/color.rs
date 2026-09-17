@@ -1,5 +1,6 @@
-use std::str::FromStr;
+use std::{fmt, str::FromStr};
 
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -49,6 +50,35 @@ impl FromStr for RgbColor {
     }
 }
 
+impl fmt::Display for RgbColor {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "#{:02X}{:02X}{:02X}",
+            self.red, self.green, self.blue
+        )
+    }
+}
+
+impl Serialize for RgbColor {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&format!("{self}"))
+    }
+}
+
+impl<'de> Deserialize<'de> for RgbColor {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        value.parse().map_err(de::Error::custom)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -57,6 +87,7 @@ mod tests {
     fn parses_hash_and_plain_rgb() {
         assert_eq!("FF8000".parse(), Ok(RgbColor::new(0xFF, 0x80, 0x00)));
         assert_eq!("#00ff7F".parse(), Ok(RgbColor::new(0x00, 0xFF, 0x7F)));
+        assert_eq!(RgbColor::new(0x01, 0xA2, 0x0F).to_string(), "#01A20F");
     }
 
     #[test]

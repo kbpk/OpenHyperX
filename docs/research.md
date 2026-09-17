@@ -14,6 +14,9 @@ command without a capture or an independently reviewed implementation.
 - [HyperX user guide](https://media.kingston.com/support/downloads/HyperX-Pulsefire-Raid-User-guide.pdf)
   identifies part number `HX-MC005B`, documents the factory button layout and
   warns that the hardware factory reset clears onboard memory.
+- [HyperX NGENUITY page](https://hyperx.com/pages/ngenuity) confirms built-in
+  dynamic RGB effects but does not document individual animation curves,
+  palettes or timing semantics.
 - [OpenRGB new-device issue #2097](https://gitlab.com/CalcProgrammer1/OpenRGB/-/issues/2097)
   reports `HID\\VID_0951&PID_16E4&REV_1124&MI_00`.
 - [OpenRGB detector at the inspected revision](https://gitlab.com/CalcProgrammer1/OpenRGB/-/blob/1da6a652fd0ee484be5b5844f8673f8590257cbb/Controllers/HyperXMouseController/HyperXMouseControllerDetect.cpp)
@@ -446,6 +449,39 @@ This validates the foreground renderer and sustained direct-report pacing on
 Windows hardware; it does not imply persistence or reproduce NGENUITY's exact
 animation curve.
 
+The generalized program path was then tested with Cycle on the wheel at a
+four-second period and purple Breathing on the logo at a 2.5-second period and
+180-degree phase. Both distinct effects ran simultaneously for the requested
+eight seconds. This confirms independent per-zone effects, periods and phase
+state through the TOML-to-renderer-to-device path.
+
+The Windows `triggered-fade` adapter was also validated on the same unit. With
+the standard mouse HID collection left untouched, system mouse-button down
+edges restarted an orange one-second wheel fade and a blue 1.5-second logo
+fade. Repeated clicks restarted both envelopes, and the mouse continued to
+operate normally. This validates the foreground trigger adapter and independent
+per-zone fade durations; it does not establish NGENUITY's exact fade curve.
+
+Two further eight-second programs exercised the remaining renderer families.
+The first displayed the warm OpenHyperX Sun palette on the wheel and the cool
+purple/blue/magenta Twilight palette on the logo, with independent 180-degree
+phase state. The second displayed a repeating red Pulse on the wheel while the
+logo stepped through deterministic pseudo-random saturated Confetti colors.
+Both pairs ran independently and reverted after the foreground program ended.
+Together with the earlier tests, this hardware-validates the TOML execution
+path for Solid, Cycle, Pulse, Breathing, Triggered Fade, Confetti, Sun and
+Twilight, but not visual parity with NGENUITY's undocumented definitions.
+
+The observed legacy NGENUITY device view exposes Solid, Cycle, Pulse,
+Breathing and a triggered Fade effect. Its Light Sync view exposes Solid,
+Breathing, Cycle, Confetti, Sun and Twilight. HyperX's public material does not
+define these animations. OpenHyperX therefore models the same names as
+portable software effects with explicitly project-defined curves and palettes;
+it does not claim exact visual parity until each NGENUITY output stream is
+captured and compared. Programs can assign a different effect and phase to
+`wheel` and `logo`. Triggered Fade consumes foreground Windows system
+mouse-button down edges and never opens the standard mouse HID collection.
+
 ### Button-remapping UI observations
 
 The Pulsefire Raid page in NGENUITY `5.38.0.0` exposed all 11 physical
@@ -689,7 +725,7 @@ continued to operate normally. No onboard-save transaction was sent.
 | report descriptor for configuration collection | confirmed | optionally dump the two other vendor collections for research without sending reports |
 | direct RGB transport | hardware-validated for independent wheel/logo colors and black/off; NGENUITY Solid and Cycle both use it, and the previous lighting state returns without keepalive | optionally measure the exact timeout/revert interval |
 | RGB off semantics | direct black independently extinguishes both physical LEDs | compare NGENUITY's explicit lighting-off UI, if present, only to determine whether it differs from black |
-| persistent RGB/effects | Solid color and Cycle are software-rendered; OpenHyperX provides an explicit foreground spectrum cycle, while red/green save captures did not persist lighting | determine whether Raid firmware exposes any hardware-lighting mode before claiming persistent support |
+| persistent RGB/effects | OpenHyperX effects are foreground-rendered; a standalone firmware rainbow was observed after NGENUITY stopped, but NGENUITY Solid/Cycle and red/green save captures did not select or persist it | identify a confirmed hardware-mode selector and its save semantics before exposing hardware rainbow or other persistent effects |
 | DPI and stages | runtime read/set, per-stage value/color edits, active-stage selection and final-stage add/remove are implemented and hardware-validated; five big-endian X/Y slots, 200-16000 range and 50-DPI units are confirmed | determine whether independent X/Y values are supported; onboard persistence remains part of the separate save blocker |
 | polling | all four interval codes captured; runtime 1000→500→1000 set/readback validated; 1000 Hz persisted through a separate NGENUITY save and power-cycle | verify effective USB report rate with an external rate tester |
 | button bindings | all 11 mappings are readable; seven exact Button 5 ordinary assignments are writable; bounded Play Once macros support keyboard chords, nonuniform timing and left/right/middle clicks; Forward and AB were hardware-tested before the general encoder | capture target-control changes and repeat inferred multimedia/shortcut values; isolate repeat modes, longer timelines, remaining mouse events and timing boundaries |

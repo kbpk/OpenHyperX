@@ -18,5 +18,8 @@ pub use capability::{
 };
 pub use color::{ColorParseError, RgbColor};
 pub use device::{DeviceDescriptor, HidInterfaceInfo, InterfaceSelector, UsbId};
-pub use lighting::{spectrum_color, SPECTRUM_STEPS};
+pub use lighting::{
+    spectrum_color, SoftwareLightingEffect, SoftwareLightingError, SoftwareLightingProgram,
+    SPECTRUM_STEPS,
+};
 pub use performance::{DpiProfile, DpiStage};

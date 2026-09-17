@@ -20,8 +20,8 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
 - read-only `info` with raw HID descriptor, current polling rate, DPI stages
   and button bindings
 - protocol-independent `HidTransport` plus `MockHidTransport` for packet tests
-- volatile static/off RGB with independent wheel/logo colors, plus an explicit
-  foreground spectrum-cycle renderer
+- volatile RGB with independent wheel/logo colors and foreground Solid, Cycle,
+  Pulse, Breathing, Triggered Fade, Confetti, Sun and Twilight renderers
 - capture-backed runtime DPI and stage management with per-stage colors, a
   200–16000 range, 50-DPI step and up to five contiguous stages
 - capture-backed runtime polling get/set for 125, 250, 500 and 1000 Hz
@@ -172,7 +172,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
   run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
-  rgb cycle --target all --duration 30 --period 5
+  rgb cycle --target all --duration 30 --period 5 --logo-phase 180
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
+  run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
+  rgb play examples/lighting/independent-cycle-breathing.toml
 ```
 
 When the positional color is omitted, an unspecified zone is black. Zone
@@ -180,7 +185,8 @@ options also accept `off`; when a positional color is present they override it.
 Direct RGB does not write onboard memory. Close NGENUITY and other device/RGB
 writers before using it. `rgb cycle` is rendered only while the CLI remains in
 the foreground; it does not install a service. Once keepalive ends, the prior
-lighting state may return.
+lighting state may return. Advanced programs assign a different effect and
+phase to each LED; see [docs/lighting.md](docs/lighting.md).
 
 ## Build on macOS
 

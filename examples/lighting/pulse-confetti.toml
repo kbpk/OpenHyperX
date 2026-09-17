@@ -1,0 +1,13 @@
+duration_seconds = 8
+frame_interval_ms = 50
+
+[zones.wheel]
+effect = "pulse"
+color = "#FF0000"
+period_ms = 1500
+phase_degrees = 0
+
+[zones.logo]
+effect = "confetti"
+step_ms = 250
+seed = 73
