@@ -306,6 +306,7 @@ enum ButtonsCommand {
 enum ButtonControlArg {
     Button4,
     Button5,
+    Button7,
     Dpi,
 }
 
@@ -314,6 +315,7 @@ impl ButtonControlArg {
         match self {
             Self::Button4 => PulsefireRaidControl::Button4,
             Self::Button5 => PulsefireRaidControl::Button5,
+            Self::Button7 => PulsefireRaidControl::Button7,
             Self::Dpi => PulsefireRaidControl::Dpi,
         }
     }
@@ -355,6 +357,7 @@ enum ButtonMouseFunctionArg {
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum ButtonMultimediaFunctionArg {
     VolumeUp,
+    VolumeDown,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -387,12 +390,16 @@ impl ButtonAssignmentCommand {
                     "mouse DPI toggle",
                 ),
             },
-            Self::Multimedia {
-                function: ButtonMultimediaFunctionArg::VolumeUp,
-            } => (
-                ButtonBinding::Multimedia(MultimediaFunction::VolumeUp),
-                "multimedia volume-up",
-            ),
+            Self::Multimedia { function } => match function {
+                ButtonMultimediaFunctionArg::VolumeUp => (
+                    ButtonBinding::Multimedia(MultimediaFunction::VolumeUp),
+                    "multimedia volume-up",
+                ),
+                ButtonMultimediaFunctionArg::VolumeDown => (
+                    ButtonBinding::Multimedia(MultimediaFunction::VolumeDown),
+                    "multimedia volume-down",
+                ),
+            },
             Self::WindowsShortcut {
                 shortcut: ButtonWindowsShortcutArg::Copy,
             } => (
@@ -1482,7 +1489,7 @@ mod tests {
             "multimedia",
             "volume-down",
         ])
-        .is_err());
+        .is_ok());
 
         assert!(ButtonAssignmentCommand::Mouse {
             function: ButtonMouseFunctionArg::DpiToggle,
@@ -1515,6 +1522,22 @@ mod tests {
         }
         .into_assignment(PulsefireRaidControl::Button4)
         .is_err());
+        for function in [
+            ButtonMultimediaFunctionArg::VolumeUp,
+            ButtonMultimediaFunctionArg::VolumeDown,
+        ] {
+            assert!(ButtonAssignmentCommand::Multimedia { function }
+                .into_assignment(PulsefireRaidControl::Button7)
+                .is_ok());
+        }
+        assert!(ButtonAssignmentCommand::Multimedia {
+            function: ButtonMultimediaFunctionArg::VolumeDown,
+        }
+        .into_assignment(PulsefireRaidControl::Button5)
+        .is_err());
+        assert!(ButtonAssignmentCommand::Disabled
+            .into_assignment(PulsefireRaidControl::Button7)
+            .is_err());
     }
 
     #[test]

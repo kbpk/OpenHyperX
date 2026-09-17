@@ -140,6 +140,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
   run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
+  buttons set button7 multimedia volume-down
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
+  run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
   buttons set dpi mouse dpi-toggle
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass \

@@ -120,6 +120,12 @@ impl PulsefireRaidRuntimeAssignment {
                     | ButtonBinding::WindowsShortcut(WindowsShortcut::Copy)
                     | ButtonBinding::Keyboard(KeyboardUsage(0x04))
             ),
+            PulsefireRaidControl::Button7 => matches!(
+                &binding,
+                ButtonBinding::Multimedia(
+                    MultimediaFunction::VolumeUp | MultimediaFunction::VolumeDown
+                )
+            ),
             PulsefireRaidControl::Dpi => matches!(
                 &binding,
                 ButtonBinding::Mouse(MouseFunction::DpiToggle)
@@ -1003,6 +1009,35 @@ mod tests {
     }
 
     #[test]
+    fn driver_writes_only_the_captured_button7_record() {
+        let mut response = performance_profile_response();
+        response[0x90..0x94].copy_from_slice(&[0x04, 0x00, 0x00, 0xE9]);
+        let mut expected_write = response;
+        expected_write[1] = 0x01;
+        expected_write[0x90..0x94].copy_from_slice(&[0x04, 0x00, 0x00, 0xEA]);
+
+        let mut transport = MockHidTransport::new(1);
+        transport.expect_feature_report(encode_runtime_profile_read_prelude());
+        transport.expect_feature_report(encode_profile_read_request());
+        transport.queue_feature_response(response);
+        transport.expect_feature_report(expected_write);
+
+        let assignment = PulsefireRaidRuntimeAssignment::ordinary(
+            PulsefireRaidControl::Button7,
+            ButtonBinding::Multimedia(MultimediaFunction::VolumeDown),
+        )
+        .unwrap();
+        let mut device = PulsefireRaid::new(transport).unwrap();
+        assert_eq!(
+            device
+                .set_runtime_button_assignment_with_wait(assignment.clone(), |_| {})
+                .unwrap(),
+            assignment
+        );
+        device.into_transport().assert_drained();
+    }
+
+    #[test]
     fn driver_sends_captured_chord_mouse_macro_before_its_button5_profile_reference() {
         let mut response = performance_profile_response();
         response[0x8C..0x90].copy_from_slice(&[0x02, 0xF9, 0x00, 0x04]);
@@ -1073,12 +1108,23 @@ mod tests {
             )
             .is_ok());
         }
+        for binding in [
+            ButtonBinding::Multimedia(MultimediaFunction::VolumeUp),
+            ButtonBinding::Multimedia(MultimediaFunction::VolumeDown),
+        ] {
+            assert!(PulsefireRaidRuntimeAssignment::ordinary(
+                PulsefireRaidControl::Button7,
+                binding
+            )
+            .is_ok());
+        }
         for (control, binding) in [
             (
                 PulsefireRaidControl::Button4,
                 ButtonBinding::Mouse(MouseFunction::Forward),
             ),
             (PulsefireRaidControl::Dpi, ButtonBinding::Disabled),
+            (PulsefireRaidControl::Button7, ButtonBinding::Disabled),
             (
                 PulsefireRaidControl::Button5,
                 ButtonBinding::Multimedia(MultimediaFunction::VolumeDown),
