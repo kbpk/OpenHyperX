@@ -130,6 +130,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
   run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
+  buttons set button4 mouse back
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
+  run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
   buttons set button5 mouse forward
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass \

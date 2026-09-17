@@ -663,6 +663,19 @@ contact point changed DPI stages normally. Other decoded ordinary bindings
 remain read-only inferences even when their usage IDs come from the USB HID
 standard. No onboard save was sent.
 
+On 2026-09-17, an isolated `Back -> Disabled -> Back` capture for Button 4
+contained three runtime profile writes. Disabling changed only the Button 4
+record at `0x88..0x8B`, from `02 F8 00 03` to `00 00 00 00`; restoring Back
+changed exactly those bytes back to `02 F8 00 03`. The driver and CLI therefore
+expose only Disabled and Mouse Back for Button 4. Other actions on this target
+remain rejected before device discovery. No onboard save was sent.
+
+With NGENUITY and its helper stopped, OpenHyperX then changed Button 4 from
+Mouse Back to Disabled on the physical release-`1124` unit. An independent
+runtime read returned Disabled while the other ten mappings were unchanged. A
+guarded cleanup write restored Mouse Back, and a final independent read
+confirmed the restoration. No onboard save was sent.
+
 The public macro model is no longer shaped like those temporary fixtures. A
 TOML macro contains a playback policy and an ordered timeline of keyboard or
 mouse-button down/up events, each with its own delay. The checked-in AB/20-ms
@@ -736,7 +749,7 @@ continued to operate normally. No onboard-save transaction was sent.
 | persistent RGB/effects | OpenHyperX effects are foreground-rendered; a standalone firmware rainbow was observed after NGENUITY stopped, but NGENUITY Solid/Cycle and red/green save captures did not select or persist it | identify a confirmed hardware-mode selector and its save semantics before exposing hardware rainbow or other persistent effects |
 | DPI and stages | runtime read/set, per-stage value/color edits, active-stage selection and final-stage add/remove are implemented and hardware-validated; five big-endian X/Y slots, 200-16000 range and 50-DPI units are confirmed | determine whether independent X/Y values are supported; onboard persistence remains part of the separate save blocker |
 | polling | all four interval codes captured; runtime 1000→500→1000 set/readback validated; 1000 Hz persisted through a separate NGENUITY save and power-cycle | verify effective USB report rate with an external rate tester |
-| button bindings | all 11 mappings are readable; seven exact Button 5 assignments and the DPI control's captured keyboard-A/DPI-Toggle pair are writable and hardware-tested; bounded Button 5 Play Once macros support keyboard chords, nonuniform timing and left/right/middle clicks; Button 5 Forward, AB and Shift+A were hardware-tested | capture the other target-control changes and repeat inferred multimedia/shortcut values; isolate repeat modes, longer timelines, remaining mouse events and timing boundaries |
+| button bindings | all 11 mappings are readable; Button 4 Disabled/Back, seven exact Button 5 assignments and the DPI control's keyboard-A/DPI-Toggle pair are capture-backed and hardware-tested; bounded Button 5 Play Once macros support keyboard chords, nonuniform timing and left/right/middle clicks; Button 5 Forward, AB and Shift+A were functionally tested | capture the other target-control changes and repeat inferred multimedia/shortcut values; isolate repeat modes, longer timelines, remaining mouse events and timing boundaries |
 | onboard save | repeated transaction, timing and read-modify-write captured; performance persistence confirmed; `0x18[0]` carries two correlated RGB triplets while `0x18[1..2]` were zero for Solid/All Lights | capture isolated wheel/logo and non-Solid saves, then save a profile containing a macro; determine acknowledgements and failure behavior before replay |
 | NGENUITY locking | unknown | run `devices`, then future read-only `info`, with NGENUITY open and closed; record open errors |
 | admin requirement | configuration collection opens without elevation | retest on a second Windows machine/account |

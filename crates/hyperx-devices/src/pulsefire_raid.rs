@@ -106,6 +106,10 @@ impl PulsefireRaidRuntimeAssignment {
         binding: ButtonBinding,
     ) -> Result<Self, PulsefireRaidError> {
         let confirmed = match control {
+            PulsefireRaidControl::Button4 => matches!(
+                &binding,
+                ButtonBinding::Disabled | ButtonBinding::Mouse(MouseFunction::Back)
+            ),
             PulsefireRaidControl::Button5 => matches!(
                 &binding,
                 ButtonBinding::Disabled
@@ -940,6 +944,36 @@ mod tests {
     }
 
     #[test]
+    fn driver_writes_only_the_captured_button4_record() {
+        let mut response = performance_profile_response();
+        response[0x88..0x8C].copy_from_slice(&[0x02, 0xF8, 0x00, 0x03]);
+        assert_eq!(&response[0x88..0x8C], &[0x02, 0xF8, 0x00, 0x03]);
+        let mut expected_write = response;
+        expected_write[1] = 0x01;
+        expected_write[0x88..0x8C].copy_from_slice(&[0x00; 4]);
+
+        let mut transport = MockHidTransport::new(1);
+        transport.expect_feature_report(encode_runtime_profile_read_prelude());
+        transport.expect_feature_report(encode_profile_read_request());
+        transport.queue_feature_response(response);
+        transport.expect_feature_report(expected_write);
+
+        let assignment = PulsefireRaidRuntimeAssignment::ordinary(
+            PulsefireRaidControl::Button4,
+            ButtonBinding::Disabled,
+        )
+        .unwrap();
+        let mut device = PulsefireRaid::new(transport).unwrap();
+        assert_eq!(
+            device
+                .set_runtime_button_assignment_with_wait(assignment.clone(), |_| {})
+                .unwrap(),
+            assignment
+        );
+        device.into_transport().assert_drained();
+    }
+
+    #[test]
     fn driver_writes_only_the_captured_dpi_control_record() {
         let mut response = performance_profile_response();
         response[0x9C..0xA0].copy_from_slice(&[0x00, 0x04, 0x00, 0x00]);
@@ -1029,8 +1063,21 @@ mod tests {
                     .is_ok()
             );
         }
+        for binding in [
+            ButtonBinding::Disabled,
+            ButtonBinding::Mouse(MouseFunction::Back),
+        ] {
+            assert!(PulsefireRaidRuntimeAssignment::ordinary(
+                PulsefireRaidControl::Button4,
+                binding
+            )
+            .is_ok());
+        }
         for (control, binding) in [
-            (PulsefireRaidControl::Button4, ButtonBinding::Disabled),
+            (
+                PulsefireRaidControl::Button4,
+                ButtonBinding::Mouse(MouseFunction::Forward),
+            ),
             (PulsefireRaidControl::Dpi, ButtonBinding::Disabled),
             (
                 PulsefireRaidControl::Button5,

@@ -304,6 +304,7 @@ enum ButtonsCommand {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum ButtonControlArg {
+    Button4,
     Button5,
     Dpi,
 }
@@ -311,6 +312,7 @@ enum ButtonControlArg {
 impl ButtonControlArg {
     const fn protocol_control(self) -> PulsefireRaidControl {
         match self {
+            Self::Button4 => PulsefireRaidControl::Button4,
             Self::Button5 => PulsefireRaidControl::Button5,
             Self::Dpi => PulsefireRaidControl::Dpi,
         }
@@ -1466,8 +1468,11 @@ mod tests {
                 .is_err()
         );
         assert!(
+            Cli::try_parse_from(["hyperx-cli", "buttons", "set", "button4", "disabled",]).is_ok()
+        );
+        assert!(
             Cli::try_parse_from(["hyperx-cli", "buttons", "set", "button4", "mouse", "back",])
-                .is_err()
+                .is_ok()
         );
         assert!(Cli::try_parse_from([
             "hyperx-cli",
@@ -1496,6 +1501,19 @@ mod tests {
             function: ButtonMouseFunctionArg::Forward,
         }
         .into_assignment(PulsefireRaidControl::Dpi)
+        .is_err());
+        assert!(ButtonAssignmentCommand::Disabled
+            .into_assignment(PulsefireRaidControl::Button4)
+            .is_ok());
+        assert!(ButtonAssignmentCommand::Mouse {
+            function: ButtonMouseFunctionArg::Back,
+        }
+        .into_assignment(PulsefireRaidControl::Button4)
+        .is_ok());
+        assert!(ButtonAssignmentCommand::Mouse {
+            function: ButtonMouseFunctionArg::Forward,
+        }
+        .into_assignment(PulsefireRaidControl::Button4)
         .is_err());
     }
 
