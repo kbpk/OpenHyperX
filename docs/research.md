@@ -105,8 +105,9 @@ attribute the device tree correctly.
 
 ## Known RGB report from OpenRGB
 
-Status: confirmed in public OpenRGB code, descriptor-confirmed locally, and
-successfully transmitted by OpenHyperX on 2026-09-07.
+Status: confirmed in public OpenRGB code, descriptor-confirmed locally,
+successfully transmitted by OpenHyperX on 2026-09-07, and independently
+hardware-validated for both physical LEDs on 2026-09-17.
 
 - transport: HID feature report via the `MI_01`, `FF01:0001` collection;
 - total buffer length passed to hidapi: 264 bytes;
@@ -124,12 +125,12 @@ successfully transmitted by OpenHyperX on 2026-09-07.
 
 A five-second local test sent the all-red report eight times at 750 ms
 keepalive intervals. Windows/hidapi accepted every feature report and the HID
-identity remained unchanged. Visual confirmation and a manual check of all
-buttons still require the person at the machine.
+identity remained unchanged. Later independent-color tests visually confirmed
+that the two triplets control separate physical LEDs as OpenRGB describes.
 
-The manufacturer page calls this one RGB lighting zone while OpenRGB exposes
-two logical LEDs. Treat zone semantics as unresolved until checked in NGENUITY
-and on hardware.
+The manufacturer page calls this one RGB lighting zone while the direct
+protocol exposes two independently controllable physical LEDs. OpenHyperX
+uses the more useful physical `wheel` and `logo` zone model.
 
 ## Local NGENUITY captures
 
@@ -418,6 +419,15 @@ persists a lighting effect, despite its `0x18` color payloads. Treat those
 payloads as unknown until their purpose is isolated; do not use them as a
 persistent-lighting encoder.
 
+On 2026-09-17, with NGENUITY, OpenRGB and other device writers stopped,
+OpenHyperX exercised the two direct fields independently on the physical
+release-`1124` unit. For five seconds, `wheel=#FF0000, logo=#000000` lit only
+the scroll wheel red. The reversed test, `wheel=#000000, logo=#0000FF`, lit
+only the HyperX logo blue. After each foreground keepalive ended, both LEDs
+returned to their pre-test red state. This confirms field-to-LED ordering,
+independent colors, per-LED black/off behavior and volatile reversion. Neither
+test sent an onboard-profile write.
+
 ### Button-remapping UI observations
 
 The Pulsefire Raid page in NGENUITY `5.38.0.0` exposed all 11 physical
@@ -659,8 +669,8 @@ continued to operate normally. No onboard-save transaction was sent.
 | --- | --- | --- |
 | firmware/device info query | unknown | capture NGENUITY startup with no setting changes; identify repeated IN/feature queries |
 | report descriptor for configuration collection | confirmed | optionally dump the two other vendor collections for research without sending reports |
-| direct RGB transport | accepted locally; NGENUITY Solid and Cycle both use it, and lighting returns to rainbow without keepalive | isolate timeout/revert timing and confirm both physical LED zones |
-| RGB off semantics | unknown | compare NGENUITY static black vs explicit lighting-off capture |
+| direct RGB transport | hardware-validated for independent wheel/logo colors and black/off; NGENUITY Solid and Cycle both use it, and the previous lighting state returns without keepalive | optionally measure the exact timeout/revert interval |
+| RGB off semantics | direct black independently extinguishes both physical LEDs | compare NGENUITY's explicit lighting-off UI, if present, only to determine whether it differs from black |
 | persistent RGB/effects | Solid color and Cycle are software-rendered; red/green save captures did not persist lighting | determine whether Raid firmware exposes any hardware-lighting mode before claiming support; otherwise provide an explicit foreground engine |
 | DPI and stages | runtime read/set, per-stage value/color edits, active-stage selection and final-stage add/remove are implemented and hardware-validated; five big-endian X/Y slots, 200-16000 range and 50-DPI units are confirmed | determine whether independent X/Y values are supported; onboard persistence remains part of the separate save blocker |
 | polling | all four interval codes captured; runtime 1000→500→1000 set/readback validated; 1000 Hz persisted through a separate NGENUITY save and power-cycle | verify effective USB report rate with an external rate tester |

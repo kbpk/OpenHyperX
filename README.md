@@ -20,7 +20,8 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
 - read-only `info` with raw HID descriptor, current polling rate, DPI stages
   and button bindings
 - protocol-independent `HidTransport` plus `MockHidTransport` for packet tests
-- volatile static/off RGB for wheel and logo with optional foreground keepalive
+- volatile static/off RGB with independent wheel/logo colors and optional
+  foreground keepalive
 - capture-backed runtime DPI and stage management with per-stage colors, a
   200–16000 range, 50-DPI step and up to five contiguous stages
 - capture-backed runtime polling get/set for 125, 250, 500 and 1000 Hz
@@ -146,7 +147,8 @@ buttons. Unsupported keys, playback modes and malformed timelines are rejected
 before the mouse is opened. See [docs/macro-format.md](docs/macro-format.md).
 These commands do not save onboard.
 
-Apply volatile RGB once, or keep it active in the foreground for 30 seconds:
+Apply one volatile color to both zones, set wheel and logo independently, or
+keep the direct colors active in the foreground for 30 seconds:
 
 ```bash
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
@@ -155,9 +157,21 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
+  run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
+  rgb static --wheel FF0000 --logo 0000FF
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
+  run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
+  rgb static --wheel off --logo 00FF00
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
   run --target x86_64-pc-windows-msvc --bin hyperx-cli -- rgb off --duration 30
 ```
 
+When the positional color is omitted, an unspecified zone is black. Zone
+options also accept `off`; when a positional color is present they override it.
 Direct RGB does not write onboard memory. Close NGENUITY and other device/RGB
 writers before using it. Once keepalive ends, the stored effect may return.
 

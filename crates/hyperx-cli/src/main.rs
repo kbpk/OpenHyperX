@@ -89,10 +89,17 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum RgbCommand {
-    /// Set both wheel and logo to one static direct color.
+    /// Set wheel and logo to static direct colors.
     Static {
-        /// Six hexadecimal RGB digits, with optional leading '#'.
-        color: RgbColor,
+        /// Default for both zones: six hexadecimal RGB digits, with optional leading '#'.
+        #[arg(required_unless_present_any = ["wheel", "logo"])]
+        color: Option<RgbColor>,
+        /// Scroll-wheel color, or "off". Overrides COLOR; black if COLOR is omitted.
+        #[arg(long, value_parser = parse_rgb_or_off)]
+        wheel: Option<RgbColor>,
+        /// HyperX-logo color, or "off". Overrides COLOR; black if COLOR is omitted.
+        #[arg(long, value_parser = parse_rgb_or_off)]
+        logo: Option<RgbColor>,
         /// Keep refreshing in the foreground for this many seconds (max 3600).
         #[arg(long, default_value_t = 0)]
         duration: u64,
@@ -299,8 +306,16 @@ fn main() -> Result<()> {
         Command::Devices { all } => devices(&HidApiDiscovery, all),
         Command::Info { descriptor } => info(&HidApiDiscovery, descriptor),
         Command::Rgb { command } => match command {
-            RgbCommand::Static { color, duration } => rgb(color, duration),
-            RgbCommand::Off { duration } => rgb(RgbColor::BLACK, duration),
+            RgbCommand::Static {
+                color,
+                wheel,
+                logo,
+                duration,
+            } => {
+                let (wheel, logo) = resolve_static_rgb(color, wheel, logo)?;
+                rgb(wheel, logo, duration)
+            }
+            RgbCommand::Off { duration } => rgb(RgbColor::BLACK, RgbColor::BLACK, duration),
         },
         Command::Dpi { command } => dpi(command),
         Command::Polling { command } => polling(command),
@@ -316,6 +331,28 @@ fn parse_dpi(input: &str) -> Result<u32, String> {
     PULSEFIRE_RAID_DPI
         .validate(dpi)
         .map_err(|error| error.to_string())
+}
+
+fn parse_rgb_or_off(input: &str) -> Result<RgbColor, String> {
+    if input.eq_ignore_ascii_case("off") {
+        Ok(RgbColor::BLACK)
+    } else {
+        input.parse::<RgbColor>().map_err(|error| error.to_string())
+    }
+}
+
+fn resolve_static_rgb(
+    color: Option<RgbColor>,
+    wheel: Option<RgbColor>,
+    logo: Option<RgbColor>,
+) -> Result<(RgbColor, RgbColor)> {
+    if color.is_none() && wheel.is_none() && logo.is_none() {
+        return Err(anyhow!(
+            "provide COLOR, --wheel COLOR|off, or --logo COLOR|off"
+        ));
+    }
+    let fallback = color.unwrap_or(RgbColor::BLACK);
+    Ok((wheel.unwrap_or(fallback), logo.unwrap_or(fallback)))
 }
 
 fn parse_dpi_stage(input: &str) -> Result<usize, String> {
@@ -699,7 +736,7 @@ fn open_pulsefire_raid() -> Result<PulsefireRaid<HidApiTransport>> {
     Ok(PulsefireRaid::new(transport)?)
 }
 
-fn rgb(color: RgbColor, duration_seconds: u64) -> Result<()> {
+fn rgb(wheel: RgbColor, logo: RgbColor, duration_seconds: u64) -> Result<()> {
     if duration_seconds > 3600 {
         return Err(anyhow!("--duration cannot exceed 3600 seconds"));
     }
@@ -708,7 +745,7 @@ fn rgb(color: RgbColor, duration_seconds: u64) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(duration_seconds);
 
     loop {
-        device.set_volatile_direct_rgb(color, color)?;
+        device.set_volatile_direct_rgb(wheel, logo)?;
         if duration_seconds == 0 || Instant::now() >= deadline {
             break;
         }
@@ -716,8 +753,8 @@ fn rgb(color: RgbColor, duration_seconds: u64) -> Result<()> {
     }
 
     println!(
-        "Applied volatile direct RGB #{:02X}{:02X}{:02X} to wheel and logo.",
-        color.red, color.green, color.blue
+        "Applied volatile direct RGB: wheel=#{:02X}{:02X}{:02X}, logo=#{:02X}{:02X}{:02X}.",
+        wheel.red, wheel.green, wheel.blue, logo.red, logo.green, logo.blue
     );
     if duration_seconds == 0 {
         println!("The mouse may return to its stored effect after about one second.");
@@ -883,6 +920,51 @@ mod tests {
         assert_eq!(
             first_value(&interfaces, |info| &info.product),
             Some("HyperX Pulsefire Raid")
+        );
+    }
+
+    #[test]
+    fn cli_resolves_legacy_and_per_zone_static_rgb() {
+        let orange = RgbColor::new(0xFF, 0x80, 0x00);
+        assert_eq!(
+            resolve_static_rgb(Some(orange), None, None).unwrap(),
+            (orange, orange)
+        );
+        assert_eq!(
+            resolve_static_rgb(
+                None,
+                Some(RgbColor::new(0xFF, 0, 0)),
+                Some(RgbColor::new(0, 0, 0xFF)),
+            )
+            .unwrap(),
+            (RgbColor::new(0xFF, 0, 0), RgbColor::new(0, 0, 0xFF))
+        );
+        assert_eq!(
+            resolve_static_rgb(None, None, Some(RgbColor::new(0, 0xFF, 0))).unwrap(),
+            (RgbColor::BLACK, RgbColor::new(0, 0xFF, 0))
+        );
+        assert!(resolve_static_rgb(None, None, None).is_err());
+
+        assert!(Cli::try_parse_from(["hyperx-cli", "rgb", "static", "FF8000"]).is_ok());
+        assert!(Cli::try_parse_from([
+            "hyperx-cli",
+            "rgb",
+            "static",
+            "--wheel",
+            "FF0000",
+            "--logo",
+            "0000FF",
+            "--duration",
+            "30",
+        ])
+        .is_ok());
+        assert!(
+            Cli::try_parse_from(["hyperx-cli", "rgb", "static", "FFFFFF", "--wheel", "off",])
+                .is_ok()
+        );
+        assert!(Cli::try_parse_from(["hyperx-cli", "rgb", "static"]).is_err());
+        assert!(
+            Cli::try_parse_from(["hyperx-cli", "rgb", "static", "--logo", "not-a-color",]).is_err()
         );
     }
 

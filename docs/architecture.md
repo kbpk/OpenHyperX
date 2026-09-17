@@ -29,9 +29,10 @@ hidapi / Windows HID
 
 The current implementation includes discovery, standard report-descriptor
 reads, a capture-backed runtime-profile read, the capture-backed volatile RGB
-operation, runtime setters for active DPI and polling, and an offline Pulsefire
-Raid profile patcher. Runtime DPI setters can edit values and colors, select a
-stage, append up to five contiguous stages, and remove only the final stage.
+operation with separate wheel/logo colors, runtime setters for active DPI and
+polling, and an offline Pulsefire Raid profile patcher. Runtime DPI setters can
+edit values and colors, select a stage, append up to five contiguous stages,
+and remove only the final stage.
 It also recognizes confirmed button records and exposes a deliberately narrow
 runtime Button 5 setter for seven captured ordinary records. The
 platform-independent macro model stores an ordered key/button down/up timeline

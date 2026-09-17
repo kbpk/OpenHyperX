@@ -609,13 +609,16 @@ mod tests {
     #[test]
     fn driver_sends_exact_direct_rgb_feature_report() {
         let mut expected = [0_u8; DIRECT_REPORT_LENGTH];
-        expected[..9].copy_from_slice(&[0x07, 0x0A, 0xFF, 0x00, 0x00, 0xFF, 0x00, 0x00, 0xA0]);
+        expected[..9].copy_from_slice(&[0x07, 0x0A, 0xFF, 0x80, 0x01, 0x02, 0x40, 0xFE, 0xA0]);
         let mut transport = MockHidTransport::new(1);
         transport.expect_feature_report(expected);
 
         let mut device = PulsefireRaid::new(transport).unwrap();
         device
-            .set_volatile_direct_rgb(RgbColor::new(0xFF, 0, 0), RgbColor::new(0xFF, 0, 0))
+            .set_volatile_direct_rgb(
+                RgbColor::new(0xFF, 0x80, 0x01),
+                RgbColor::new(0x02, 0x40, 0xFE),
+            )
             .unwrap();
         device.into_transport().assert_drained();
     }
