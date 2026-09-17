@@ -1,6 +1,6 @@
 use hyperx_core::{
-    ButtonBinding, DpiProfile, DpiStage, KeyState, KeyboardMacroEvent, KeyboardUsage,
-    MouseFunction, MultimediaFunction, PollingRate, RgbColor, WindowsShortcut,
+    ButtonBinding, DpiProfile, DpiStage, KeyboardUsage, MacroPlayback, MouseFunction,
+    MultimediaFunction, PollingRate, RgbColor, WindowsShortcut,
 };
 use thiserror::Error;
 
@@ -25,6 +25,8 @@ const BUTTON_RECORD_LENGTH: usize = 4;
 const CONFIRMED_MACRO_HEADER: [u8; 10] =
     [0x07, 0x05, 0x04, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
 const CONFIRMED_MACRO_BINDING: [u8; BUTTON_RECORD_LENGTH] = [0x53, 0x00, 0x00, 0x04];
+pub const MAX_CAPTURE_BACKED_MACRO_EVENTS: usize = 14;
+pub const MAX_MACRO_DELAY_MS: u16 = 9_999;
 const DPI_UNIT: u32 = 50;
 const MIN_DPI: u32 = 200;
 const MAX_DPI: u32 = 16_000;
@@ -120,32 +122,101 @@ pub struct PerformanceProfile {
     section: ProfileSection,
 }
 
-/// The one Pulsefire Raid macro definition whose complete report is confirmed.
+/// Mouse inputs confirmed in the Pulsefire Raid macro event stream.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PulsefireRaidMacroMouseButton {
+    Left,
+    Right,
+    Middle,
+}
+
+/// One input carried by a Pulsefire Raid macro event.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PulsefireRaidMacroInput {
+    Keyboard(KeyboardUsage),
+    MouseButton(PulsefireRaidMacroMouseButton),
+}
+
+/// Press/release state in a Pulsefire Raid macro event.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PulsefireRaidMacroState {
+    Pressed,
+    Released,
+}
+
+/// One capture-backed three-byte event in a Pulsefire Raid macro report.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PulsefireRaidMacroEvent {
+    pub input: PulsefireRaidMacroInput,
+    pub state: PulsefireRaidMacroState,
+    pub delay_ms: u16,
+}
+
+impl PulsefireRaidMacroEvent {
+    pub const fn new(
+        input: PulsefireRaidMacroInput,
+        state: PulsefireRaidMacroState,
+        delay_ms: u16,
+    ) -> Self {
+        Self {
+            input,
+            state,
+            delay_ms,
+        }
+    }
+}
+
+/// A validated Button 5, Play Once macro definition.
 ///
-/// This intentionally represents only the independently captured Button 5
-/// keyboard sequences. Macro timing lives on each press/release event even
-/// when NGENUITY's Standard Timing gives every event the same value.
+/// Its header, three-byte event framing, per-event timing, keyboard usages,
+/// modifier chords and three mouse buttons are established by local captures.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ConfirmedMacro {
+pub struct PulsefireRaidMacro {
     report: [u8; DIRECT_REPORT_LENGTH],
-    events: Vec<KeyboardMacroEvent>,
+    events: Vec<PulsefireRaidMacroEvent>,
 }
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
-pub enum ConfirmedMacroError {
+pub enum PulsefireRaidMacroError {
     #[error("expected a 264-byte Pulsefire Raid macro report, got {0} bytes")]
     WrongLength(usize),
     #[error(
-        "byte 0x{offset:02X} is not part of the confirmed minimal macro: expected 0x{expected:02X}, got 0x{actual:02X}"
+        "invalid Pulsefire Raid macro byte at 0x{offset:02X}: expected 0x{expected:02X}, got 0x{actual:02X}"
     )]
-    UnconfirmedByte {
+    InvalidByte {
         offset: usize,
         expected: u8,
         actual: u8,
     },
-    #[error("keyboard macro events {0:?} have not been confirmed for Pulsefire Raid macros")]
-    UnconfirmedEvents(Vec<KeyboardMacroEvent>),
-    #[error("minimal macro binding is confirmed only for the runtime profile")]
+    #[error("a Pulsefire Raid macro must contain at least one event")]
+    EmptyEvents,
+    #[error("Pulsefire Raid macros are capture-backed for at most {maximum} events, got {actual}")]
+    TooManyEvents { actual: usize, maximum: usize },
+    #[error(
+        "macro event {event} delay {delay_ms} ms exceeds the supported maximum of {maximum} ms"
+    )]
+    DelayOutOfRange {
+        event: usize,
+        delay_ms: u16,
+        maximum: u16,
+    },
+    #[error("keyboard usage 0x{0:04X} is not in the capture-backed macro key ranges")]
+    UnsupportedKeyboardUsage(u16),
+    #[error("unknown Pulsefire Raid macro input code 0x{0:02X}")]
+    UnknownInputCode(u8),
+    #[error("macro event {event} presses {input:?} while it is already held")]
+    DuplicatePress {
+        event: usize,
+        input: PulsefireRaidMacroInput,
+    },
+    #[error("macro event {event} releases {input:?} without a matching press")]
+    ReleaseWithoutPress {
+        event: usize,
+        input: PulsefireRaidMacroInput,
+    },
+    #[error("macro ends while these inputs are still held: {0:?}")]
+    UnreleasedInputs(Vec<PulsefireRaidMacroInput>),
+    #[error("macro binding is confirmed only for the runtime profile")]
     UnsupportedProfileSection,
 }
 
@@ -425,34 +496,28 @@ impl PerformanceProfile {
     }
 }
 
-impl ConfirmedMacro {
-    /// Build a confirmed Button 5 keyboard sequence, Play Once report without I/O.
-    ///
-    /// Only exact event lists captured on the target unit are accepted. This
-    /// prevents inferred keys, variable timings and UI bounds reaching a packet.
-    pub fn button5_keyboard_once(
-        events: &[KeyboardMacroEvent],
-    ) -> Result<Self, ConfirmedMacroError> {
-        if !confirmed_macro_event_lists()
-            .iter()
-            .any(|confirmed| confirmed == events)
-        {
-            return Err(ConfirmedMacroError::UnconfirmedEvents(events.to_vec()));
-        }
+impl PulsefireRaidMacro {
+    /// Encode a Button 5, Play Once macro without performing I/O.
+    pub fn button5_play_once(
+        events: &[PulsefireRaidMacroEvent],
+    ) -> Result<Self, PulsefireRaidMacroError> {
+        validate_macro_events(events)?;
 
         let mut report = [0_u8; DIRECT_REPORT_LENGTH];
         report[..CONFIRMED_MACRO_HEADER.len()].copy_from_slice(&CONFIRMED_MACRO_HEADER);
         let mut offset = CONFIRMED_MACRO_HEADER.len();
 
         for event in events {
-            let [timing_high, timing_low] = event.timing_ms.to_be_bytes();
+            let [delay_high, delay_low] = event.delay_ms.to_be_bytes();
             let state = match event.state {
-                KeyState::Pressed => 0x80,
-                KeyState::Released => 0x00,
+                PulsefireRaidMacroState::Pressed => 0x80,
+                PulsefireRaidMacroState::Released => 0x00,
             };
-            let usage = u8::try_from(event.usage.0)
-                .expect("all confirmed macro keyboard usages fit in one byte");
-            report[offset..offset + 3].copy_from_slice(&[state | timing_high, timing_low, usage]);
+            report[offset..offset + 3].copy_from_slice(&[
+                state | delay_high,
+                delay_low,
+                macro_input_code(event.input)?,
+            ]);
             offset += 3;
         }
 
@@ -462,48 +527,71 @@ impl ConfirmedMacro {
         })
     }
 
-    /// Recognize only an exact local capture.
-    ///
-    /// Reports for other event lists or macro modes stay rejected until
-    /// isolated differential captures establish their fields.
-    pub fn parse(report: &[u8]) -> Result<Self, ConfirmedMacroError> {
+    /// Decode the capture-backed Button 5, Play Once event framing.
+    pub fn parse(report: &[u8]) -> Result<Self, PulsefireRaidMacroError> {
         let report: [u8; DIRECT_REPORT_LENGTH] = report
             .try_into()
-            .map_err(|_| ConfirmedMacroError::WrongLength(report.len()))?;
+            .map_err(|_| PulsefireRaidMacroError::WrongLength(report.len()))?;
 
-        for events in confirmed_macro_event_lists() {
-            let expected = Self::button5_keyboard_once(&events)
-                .expect("the confirmed macro table contains only supported events");
-            if report == expected.report {
-                return Ok(Self { report, events });
+        for (offset, (&actual, &expected)) in
+            report.iter().zip(CONFIRMED_MACRO_HEADER.iter()).enumerate()
+        {
+            if actual != expected {
+                return Err(PulsefireRaidMacroError::InvalidByte {
+                    offset,
+                    expected,
+                    actual,
+                });
             }
         }
 
-        let expected = Self::button5_keyboard_once(&keyboard_a_events(20))
-            .expect("the reference macro is a confirmed configuration");
-        let (offset, (&actual, &expected)) = report
-            .iter()
-            .zip(expected.report.iter())
-            .enumerate()
-            .find(|(_, (actual, expected))| actual != expected)
-            .expect("an exact reference report would already have returned");
-        Err(ConfirmedMacroError::UnconfirmedByte {
-            offset,
-            expected,
-            actual,
-        })
+        let mut events = Vec::new();
+        let mut offset = CONFIRMED_MACRO_HEADER.len();
+        while offset + 3 <= report.len() {
+            let record = &report[offset..offset + 3];
+            if record == [0, 0, 0] {
+                if let Some((padding_offset, &actual)) = report[offset..]
+                    .iter()
+                    .enumerate()
+                    .find(|(_, byte)| **byte != 0)
+                {
+                    return Err(PulsefireRaidMacroError::InvalidByte {
+                        offset: offset + padding_offset,
+                        expected: 0,
+                        actual,
+                    });
+                }
+                break;
+            }
+
+            let delay_ms = u16::from_be_bytes([record[0] & 0x7F, record[1]]);
+            let state = if record[0] & 0x80 != 0 {
+                PulsefireRaidMacroState::Pressed
+            } else {
+                PulsefireRaidMacroState::Released
+            };
+            events.push(PulsefireRaidMacroEvent::new(
+                macro_input_from_code(record[2])?,
+                state,
+                delay_ms,
+            ));
+            offset += 3;
+        }
+
+        validate_macro_events(&events)?;
+        Ok(Self { report, events })
     }
 
     pub const fn control(&self) -> PulsefireRaidControl {
         PulsefireRaidControl::Button5
     }
 
-    pub fn events(&self) -> &[KeyboardMacroEvent] {
+    pub fn events(&self) -> &[PulsefireRaidMacroEvent] {
         &self.events
     }
 
-    pub const fn playback(&self) -> hyperx_core::MacroPlayback {
-        hyperx_core::MacroPlayback::Once
+    pub const fn playback(&self) -> MacroPlayback {
+        MacroPlayback::Once
     }
 
     /// Patch the exact captured macro reference into a runtime profile image.
@@ -514,9 +602,9 @@ impl ConfirmedMacro {
     pub fn apply_to_profile(
         &self,
         profile: &mut PerformanceProfile,
-    ) -> Result<(), ConfirmedMacroError> {
+    ) -> Result<(), PulsefireRaidMacroError> {
         if profile.section != ProfileSection::Runtime {
-            return Err(ConfirmedMacroError::UnsupportedProfileSection);
+            return Err(PulsefireRaidMacroError::UnsupportedProfileSection);
         }
 
         let offset = self.control().profile_offset();
@@ -534,28 +622,90 @@ impl ConfirmedMacro {
     }
 }
 
-fn keyboard_a_events(timing_ms: u16) -> Vec<KeyboardMacroEvent> {
-    vec![
-        KeyboardMacroEvent::pressed(KeyboardUsage(0x04), timing_ms),
-        KeyboardMacroEvent::released(KeyboardUsage(0x04), timing_ms),
-    ]
+fn validate_macro_events(
+    events: &[PulsefireRaidMacroEvent],
+) -> Result<(), PulsefireRaidMacroError> {
+    if events.is_empty() {
+        return Err(PulsefireRaidMacroError::EmptyEvents);
+    }
+    if events.len() > MAX_CAPTURE_BACKED_MACRO_EVENTS {
+        return Err(PulsefireRaidMacroError::TooManyEvents {
+            actual: events.len(),
+            maximum: MAX_CAPTURE_BACKED_MACRO_EVENTS,
+        });
+    }
+
+    let mut held = Vec::new();
+    for (index, event) in events.iter().enumerate() {
+        if event.delay_ms > MAX_MACRO_DELAY_MS {
+            return Err(PulsefireRaidMacroError::DelayOutOfRange {
+                event: index + 1,
+                delay_ms: event.delay_ms,
+                maximum: MAX_MACRO_DELAY_MS,
+            });
+        }
+        macro_input_code(event.input)?;
+        match event.state {
+            PulsefireRaidMacroState::Pressed => {
+                if held.contains(&event.input) {
+                    return Err(PulsefireRaidMacroError::DuplicatePress {
+                        event: index + 1,
+                        input: event.input,
+                    });
+                }
+                held.push(event.input);
+            }
+            PulsefireRaidMacroState::Released => {
+                let Some(position) = held.iter().position(|input| *input == event.input) else {
+                    return Err(PulsefireRaidMacroError::ReleaseWithoutPress {
+                        event: index + 1,
+                        input: event.input,
+                    });
+                };
+                held.remove(position);
+            }
+        }
+    }
+    if !held.is_empty() {
+        return Err(PulsefireRaidMacroError::UnreleasedInputs(held));
+    }
+    Ok(())
 }
 
-fn keyboard_ab_events(timing_ms: u16) -> Vec<KeyboardMacroEvent> {
-    let mut events = keyboard_a_events(timing_ms);
-    events.extend([
-        KeyboardMacroEvent::pressed(KeyboardUsage(0x05), timing_ms),
-        KeyboardMacroEvent::released(KeyboardUsage(0x05), timing_ms),
-    ]);
-    events
+fn macro_input_code(input: PulsefireRaidMacroInput) -> Result<u8, PulsefireRaidMacroError> {
+    match input {
+        PulsefireRaidMacroInput::Keyboard(usage) if is_supported_macro_keyboard_usage(usage) => {
+            Ok(u8::try_from(usage.0).expect("validated macro keyboard usages fit in one byte"))
+        }
+        PulsefireRaidMacroInput::Keyboard(usage) => {
+            Err(PulsefireRaidMacroError::UnsupportedKeyboardUsage(usage.0))
+        }
+        PulsefireRaidMacroInput::MouseButton(PulsefireRaidMacroMouseButton::Left) => Ok(0xB7),
+        PulsefireRaidMacroInput::MouseButton(PulsefireRaidMacroMouseButton::Right) => Ok(0xB8),
+        PulsefireRaidMacroInput::MouseButton(PulsefireRaidMacroMouseButton::Middle) => Ok(0xB9),
+    }
 }
 
-fn confirmed_macro_event_lists() -> [Vec<KeyboardMacroEvent>; 3] {
-    [
-        keyboard_a_events(20),
-        keyboard_a_events(300),
-        keyboard_ab_events(20),
-    ]
+fn macro_input_from_code(code: u8) -> Result<PulsefireRaidMacroInput, PulsefireRaidMacroError> {
+    match code {
+        0xB7 => Ok(PulsefireRaidMacroInput::MouseButton(
+            PulsefireRaidMacroMouseButton::Left,
+        )),
+        0xB8 => Ok(PulsefireRaidMacroInput::MouseButton(
+            PulsefireRaidMacroMouseButton::Right,
+        )),
+        0xB9 => Ok(PulsefireRaidMacroInput::MouseButton(
+            PulsefireRaidMacroMouseButton::Middle,
+        )),
+        code if is_supported_macro_keyboard_usage(KeyboardUsage(u16::from(code))) => Ok(
+            PulsefireRaidMacroInput::Keyboard(KeyboardUsage(u16::from(code))),
+        ),
+        code => Err(PulsefireRaidMacroError::UnknownInputCode(code)),
+    }
+}
+
+const fn is_supported_macro_keyboard_usage(usage: KeyboardUsage) -> bool {
+    matches!(usage.0, 0x04..=0xA4 | 0xE0..=0xE7)
 }
 
 fn read_dpi(report: &[u8; DIRECT_REPORT_LENGTH], offset: usize) -> u32 {
@@ -801,6 +951,51 @@ mod tests {
         report
     }
 
+    fn key_event(
+        usage: u16,
+        state: PulsefireRaidMacroState,
+        delay_ms: u16,
+    ) -> PulsefireRaidMacroEvent {
+        PulsefireRaidMacroEvent::new(
+            PulsefireRaidMacroInput::Keyboard(KeyboardUsage(usage)),
+            state,
+            delay_ms,
+        )
+    }
+
+    fn key_tap(usage: u16, delay_ms: u16) -> [PulsefireRaidMacroEvent; 2] {
+        [
+            key_event(usage, PulsefireRaidMacroState::Pressed, delay_ms),
+            key_event(usage, PulsefireRaidMacroState::Released, delay_ms),
+        ]
+    }
+
+    fn captured_coverage_macro_events() -> Vec<PulsefireRaidMacroEvent> {
+        use PulsefireRaidMacroInput::{Keyboard, MouseButton};
+        use PulsefireRaidMacroMouseButton::{Left, Middle, Right};
+        use PulsefireRaidMacroState::{Pressed, Released};
+
+        [
+            (Keyboard(KeyboardUsage(0xE1)), Pressed, 20),
+            (Keyboard(KeyboardUsage(0x04)), Pressed, 953),
+            (Keyboard(KeyboardUsage(0x04)), Released, 141),
+            (Keyboard(KeyboardUsage(0xE1)), Released, 766),
+            (Keyboard(KeyboardUsage(0xE0)), Pressed, 1171),
+            (Keyboard(KeyboardUsage(0x05)), Pressed, 1110),
+            (Keyboard(KeyboardUsage(0x05)), Released, 344),
+            (Keyboard(KeyboardUsage(0xE0)), Released, 453),
+            (MouseButton(Left), Pressed, 1890),
+            (MouseButton(Left), Released, 110),
+            (MouseButton(Right), Pressed, 1203),
+            (MouseButton(Right), Released, 94),
+            (MouseButton(Middle), Pressed, 718),
+            (MouseButton(Middle), Released, 172),
+        ]
+        .into_iter()
+        .map(|(input, state, delay_ms)| PulsefireRaidMacroEvent::new(input, state, delay_ms))
+        .collect()
+    }
+
     #[test]
     fn golden_direct_rgb_packet_has_exact_layout_and_zero_fill() {
         let actual = encode_direct_rgb(
@@ -832,9 +1027,9 @@ mod tests {
     }
 
     #[test]
-    fn golden_minimal_macro_report_matches_repeated_local_captures() {
-        let a_events = keyboard_a_events(20);
-        let macro_definition = ConfirmedMacro::button5_keyboard_once(&a_events).unwrap();
+    fn golden_macro_reports_match_local_captures() {
+        let a_events = key_tap(0x04, 20);
+        let macro_definition = PulsefireRaidMacro::button5_play_once(&a_events).unwrap();
         let mut expected = [0_u8; DIRECT_REPORT_LENGTH];
         expected[..16].copy_from_slice(&[
             0x07, 0x05, 0x04, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x80, 0x14, 0x04, 0x00,
@@ -842,33 +1037,51 @@ mod tests {
         ]);
 
         assert_eq!(macro_definition.as_bytes(), &expected);
-        assert_eq!(ConfirmedMacro::parse(&expected).unwrap(), macro_definition);
+        assert_eq!(
+            PulsefireRaidMacro::parse(&expected).unwrap(),
+            macro_definition
+        );
         assert_eq!(macro_definition.control(), PulsefireRaidControl::Button5);
         assert_eq!(macro_definition.events(), a_events);
-        assert_eq!(
-            macro_definition.playback(),
-            hyperx_core::MacroPlayback::Once
-        );
+        assert_eq!(macro_definition.playback(), MacroPlayback::Once);
 
-        let macro_300ms = ConfirmedMacro::button5_keyboard_once(&keyboard_a_events(300)).unwrap();
+        let macro_300ms = PulsefireRaidMacro::button5_play_once(&key_tap(0x04, 300)).unwrap();
         let mut expected_300ms = expected;
         expected_300ms[0x0A..0x10].copy_from_slice(&[0x81, 0x2C, 0x04, 0x01, 0x2C, 0x04]);
         assert_eq!(macro_300ms.as_bytes(), &expected_300ms);
-        assert_eq!(ConfirmedMacro::parse(&expected_300ms).unwrap(), macro_300ms);
+        assert_eq!(
+            PulsefireRaidMacro::parse(&expected_300ms).unwrap(),
+            macro_300ms
+        );
 
-        let ab_events = keyboard_ab_events(20);
-        let macro_ab = ConfirmedMacro::button5_keyboard_once(&ab_events).unwrap();
+        let ab_events = [key_tap(0x04, 20), key_tap(0x05, 20)].concat();
+        let macro_ab = PulsefireRaidMacro::button5_play_once(&ab_events).unwrap();
         let mut expected_ab = expected;
         expected_ab[0x10..0x16].copy_from_slice(&[0x80, 0x14, 0x05, 0x00, 0x14, 0x05]);
         assert_eq!(macro_ab.as_bytes(), &expected_ab);
-        assert_eq!(ConfirmedMacro::parse(&expected_ab).unwrap(), macro_ab);
+        assert_eq!(PulsefireRaidMacro::parse(&expected_ab).unwrap(), macro_ab);
         assert_eq!(macro_ab.events(), ab_events);
+
+        let coverage_events = captured_coverage_macro_events();
+        let coverage = PulsefireRaidMacro::button5_play_once(&coverage_events).unwrap();
+        let mut expected_coverage = [0_u8; DIRECT_REPORT_LENGTH];
+        expected_coverage[..52].copy_from_slice(&[
+            0x07, 0x05, 0x04, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x80, 0x14, 0xE1, 0x83,
+            0xB9, 0x04, 0x00, 0x8D, 0x04, 0x02, 0xFE, 0xE1, 0x84, 0x93, 0xE0, 0x84, 0x56, 0x05,
+            0x01, 0x58, 0x05, 0x01, 0xC5, 0xE0, 0x87, 0x62, 0xB7, 0x00, 0x6E, 0xB7, 0x84, 0xB3,
+            0xB8, 0x00, 0x5E, 0xB8, 0x82, 0xCE, 0xB9, 0x00, 0xAC, 0xB9,
+        ]);
+        assert_eq!(coverage.as_bytes(), &expected_coverage);
+        assert_eq!(
+            PulsefireRaidMacro::parse(&expected_coverage).unwrap(),
+            coverage
+        );
     }
 
     #[test]
-    fn minimal_macro_binding_matches_forward_reverse_captures() {
-        let macro_definition =
-            ConfirmedMacro::button5_keyboard_once(&keyboard_ab_events(20)).unwrap();
+    fn macro_binding_matches_forward_reverse_captures() {
+        let events = [key_tap(0x04, 20), key_tap(0x05, 20)].concat();
+        let macro_definition = PulsefireRaidMacro::button5_play_once(&events).unwrap();
         let mut profile = PerformanceProfile::parse(&captured_button_profile()).unwrap();
         profile
             .set_button_binding(
@@ -900,56 +1113,79 @@ mod tests {
     }
 
     #[test]
-    fn minimal_macro_rejects_unconfirmed_variants_and_onboard_binding() {
+    fn macro_codec_rejects_invalid_events_padding_and_onboard_binding() {
         assert_eq!(
-            ConfirmedMacro::parse(&[0_u8; 16]),
-            Err(ConfirmedMacroError::WrongLength(16))
+            PulsefireRaidMacro::parse(&[0_u8; 16]),
+            Err(PulsefireRaidMacroError::WrongLength(16))
         );
 
-        let unconfirmed_events = keyboard_a_events(50);
         assert_eq!(
-            ConfirmedMacro::button5_keyboard_once(&unconfirmed_events),
-            Err(ConfirmedMacroError::UnconfirmedEvents(
-                unconfirmed_events.clone()
-            ))
+            PulsefireRaidMacro::button5_play_once(&[]),
+            Err(PulsefireRaidMacroError::EmptyEvents)
         );
 
-        let mut unconfirmed_timing = *ConfirmedMacro::button5_keyboard_once(&keyboard_a_events(20))
-            .unwrap()
-            .as_bytes();
-        unconfirmed_timing[0x0A..0x10].copy_from_slice(&[0x80, 0x32, 0x04, 0x00, 0x32, 0x04]);
+        let too_many = (0..8).flat_map(|_| key_tap(0x04, 20)).collect::<Vec<_>>();
         assert_eq!(
-            ConfirmedMacro::parse(&unconfirmed_timing),
-            Err(ConfirmedMacroError::UnconfirmedByte {
-                offset: 0x0B,
-                expected: 0x14,
-                actual: 0x32,
+            PulsefireRaidMacro::button5_play_once(&too_many),
+            Err(PulsefireRaidMacroError::TooManyEvents {
+                actual: 16,
+                maximum: MAX_CAPTURE_BACKED_MACRO_EVENTS,
             })
         );
 
-        for (offset, actual) in [(0x09, 0x02), (0x0C, 0x05), (0x20, 0x01)] {
-            let mut report = *ConfirmedMacro::button5_keyboard_once(&keyboard_a_events(20))
-                .unwrap()
-                .as_bytes();
-            let expected = report[offset];
-            report[offset] = actual;
-            assert_eq!(
-                ConfirmedMacro::parse(&report),
-                Err(ConfirmedMacroError::UnconfirmedByte {
-                    offset,
-                    expected,
-                    actual,
-                })
-            );
-        }
+        let excessive_delay = key_tap(0x04, MAX_MACRO_DELAY_MS + 1);
+        assert!(matches!(
+            PulsefireRaidMacro::button5_play_once(&excessive_delay),
+            Err(PulsefireRaidMacroError::DelayOutOfRange { event: 1, .. })
+        ));
 
-        let macro_definition =
-            ConfirmedMacro::button5_keyboard_once(&keyboard_a_events(20)).unwrap();
+        let duplicate = [
+            key_event(0x04, PulsefireRaidMacroState::Pressed, 20),
+            key_event(0x04, PulsefireRaidMacroState::Pressed, 20),
+        ];
+        assert!(matches!(
+            PulsefireRaidMacro::button5_play_once(&duplicate),
+            Err(PulsefireRaidMacroError::DuplicatePress { event: 2, .. })
+        ));
+
+        let unsupported = key_tap(0xB7, 20);
+        assert_eq!(
+            PulsefireRaidMacro::button5_play_once(&unsupported),
+            Err(PulsefireRaidMacroError::UnsupportedKeyboardUsage(0xB7))
+        );
+
+        let mut invalid_header = *PulsefireRaidMacro::button5_play_once(&key_tap(0x04, 20))
+            .unwrap()
+            .as_bytes();
+        invalid_header[0x09] = 0x02;
+        assert_eq!(
+            PulsefireRaidMacro::parse(&invalid_header),
+            Err(PulsefireRaidMacroError::InvalidByte {
+                offset: 0x09,
+                expected: 0x01,
+                actual: 0x02,
+            })
+        );
+
+        let mut invalid_padding = *PulsefireRaidMacro::button5_play_once(&key_tap(0x04, 20))
+            .unwrap()
+            .as_bytes();
+        invalid_padding[0x20] = 0x01;
+        assert_eq!(
+            PulsefireRaidMacro::parse(&invalid_padding),
+            Err(PulsefireRaidMacroError::InvalidByte {
+                offset: 0x20,
+                expected: 0,
+                actual: 1,
+            })
+        );
+
+        let macro_definition = PulsefireRaidMacro::button5_play_once(&key_tap(0x04, 20)).unwrap();
         let original = profile_fixture(ProfileImageKind::HostWrite, ProfileSection::Onboard);
         let mut onboard = PerformanceProfile::parse(&original).unwrap();
         assert_eq!(
             macro_definition.apply_to_profile(&mut onboard),
-            Err(ConfirmedMacroError::UnsupportedProfileSection)
+            Err(PulsefireRaidMacroError::UnsupportedProfileSection)
         );
         assert_eq!(onboard.as_bytes(), &original);
     }

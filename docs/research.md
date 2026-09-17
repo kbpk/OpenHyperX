@@ -562,9 +562,8 @@ that it is not an event or key count and strengthening its correlation with
 the unchanged Play Once mode.
 
 NGENUITY can disable Standard Timing and retain different timing values between
-events. The protocol model therefore stores timing on every keyboard event,
-not as one global macro property. Nonuniform timing has not yet been captured,
-so the exact codec continues to reject it.
+events. The protocol model therefore stores timing on every input transition,
+not as one global macro property.
 
 A separate isolated reversal from this macro to Mouse Forward omitted the
 `0x05` macro-definition report. Its read/write profile comparison changed only
@@ -572,11 +571,9 @@ the normal opcode plus `0x8C: 53 -> 02` and `0x8D: 00 -> F9`; offset `0x8F`
 remained `04`. No `Save to mouse` action was used, so these observations cover
 the runtime profile only.
 
-The protocol crate contains an offline evidence-gated codec for the confirmed
-Button 5 macro reference and three exact event lists: A at 20 ms, A at 300 ms,
-and A then B at 20 ms. It rejects every other event list, nonuniform timing,
-playback-like byte, nonzero padding or onboard profile. Generic macros and all
-other macro variants remain unavailable until the fields above are isolated.
+The first protocol implementation contained an offline evidence gate for the
+Button 5 macro reference and those three exact event lists. It rejected other
+event lists until modifier, mouse and nonuniform-timing records were isolated.
 
 On 2026-09-17, OpenHyperX's runtime setter was tested on the physical
 release-`1124` unit with NGENUITY and other writers stopped. The initial read
@@ -590,19 +587,71 @@ confirming the OpenHyperX-generated macro definition and ordering. No
 onboard-save transaction was sent.
 
 The driver exposes only the seven ordinary Button 5 assignments seen in local
-captures (Disabled, Forward, Back, Volume Up, Copy, keyboard A and DPI Toggle)
-plus the three exact macro fixtures. Other decoded bindings remain read-only
-inferences even when their usage IDs come from the USB HID standard.
+captures (Disabled, Forward, Back, Volume Up, Copy, keyboard A and DPI Toggle).
+Other decoded ordinary bindings remain read-only inferences even when their
+usage IDs come from the USB HID standard.
 
 The public macro model is no longer shaped like those temporary fixtures. A
 TOML macro contains a playback policy and an ordered timeline of keyboard or
-mouse-button down/up events, each with its own delay. This can represent held
-modifiers, chords such as `LeftShift+A`, mouse events and nonuniform timing.
-The Pulsefire Raid evidence gate currently recognizes only the three captured
-event timelines and rejects every other valid definition before device
-discovery. The checked-in AB/20-ms example was applied through this TOML path
-on the Windows host; the device accepted the same confirmed macro transaction
-and an independent profile read returned the Button 5 macro reference.
+mouse-button down/up events, each with its own delay. The checked-in AB/20-ms
+example was applied through this TOML path on the Windows host; the device
+accepted the same confirmed macro transaction and an independent profile read
+returned the Button 5 macro reference.
+
+### Chords, recorded timing and primary mouse clicks
+
+On 2026-09-17, after a reboot changed the transient USB address, USBPcap extcap
+topology plus an injected descriptor identified the unit as
+`\\.\USBPcap1`, address `52`, VID/PID `0951:16E4`. The isolated capture
+`openhyperx-macro-coverage-play-once-recorded-timing-20260917.pcapng` assigned
+one Button 5 macro with Standard Timing disabled and Play Once. Its ordered
+inputs were `LeftShift+A`, `LeftControl+B`, left click, right click and middle
+click. NGENUITY's compact view grouped each chord, while Expanded View retained
+the individual down/up transitions.
+
+The complete nonzero macro report was:
+
+```text
+07 05 04 04 00 00 00 00 00 01
+80 14 E1 83 B9 04 00 8D 04 02 FE E1
+84 93 E0 84 56 05 01 58 05 01 C5 E0
+87 62 B7 00 6E B7 84 B3 B8 00 5E B8
+82 CE B9 00 AC B9
+```
+
+All remaining bytes through the 264-byte report were zero. Decoding every
+three-byte record as `state|delay-high, delay-low, input-code` yields:
+
+| Input transition | Delay (ms) | Code |
+| --- | ---: | ---: |
+| Left Shift down / A down / A up / Left Shift up | 20 / 953 / 141 / 766 | `E1 / 04 / 04 / E1` |
+| Left Control down / B down / B up / Left Control up | 1171 / 1110 / 344 / 453 | `E0 / 05 / 05 / E0` |
+| left mouse down / up | 1890 / 110 | `B7 / B7` |
+| right mouse down / up | 1203 / 94 | `B8 / B8` |
+| middle mouse down / up | 718 / 172 | `B9 / B9` |
+
+This independently confirms that modifier chords remain separate transitions
+on the wire, nonuniform timing uses the same 15-bit per-event field, keyboard
+codes are USB HID Keyboard usages for letters and modifiers, and the three
+primary mouse buttons use `B7`, `B8` and `B9`. The runtime profile write again
+used Button 5 reference `53 00 00 04`; no onboard save occurred.
+
+The encoder now accepts balanced Play Once timelines using those established
+event families. It conservatively limits a macro to 14 transitions, the
+largest locally captured timeline. Its `0..9999` ms validation mirrors the
+observed NGENUITY numeric editor and fits the confirmed 15-bit field, but the
+two boundary values have not yet been hardware-tested. Repeat modes, longer
+timelines, other mouse inputs, other target controls and onboard macro storage
+remain blocked.
+
+Later on 2026-09-17, with NGENUITY and other device writers stopped,
+OpenHyperX loaded `examples/macros/shift-a-20ms.toml` and assigned its four
+20-ms transitions (`LeftShift` down, `A` down, `A` up, `LeftShift` up) to
+Button 5 on the physical release-`1124` unit. An independent runtime-profile
+read returned the macro reference and showed the other ten button records
+unchanged. Pressing Button 5 emitted uppercase `A`, functionally confirming
+modifier state, event ordering and the general TOML-to-report path. The mouse
+continued to operate normally. No onboard-save transaction was sent.
 
 ## Unknowns and required evidence
 
@@ -615,7 +664,7 @@ and an independent profile read returned the Button 5 macro reference.
 | persistent RGB/effects | Solid color and Cycle are software-rendered; red/green save captures did not persist lighting | determine whether Raid firmware exposes any hardware-lighting mode before claiming support; otherwise provide an explicit foreground engine |
 | DPI and stages | runtime read/set, per-stage value/color edits, active-stage selection and final-stage add/remove are implemented and hardware-validated; five big-endian X/Y slots, 200-16000 range and 50-DPI units are confirmed | determine whether independent X/Y values are supported; onboard persistence remains part of the separate save blocker |
 | polling | all four interval codes captured; runtime 1000→500→1000 set/readback validated; 1000 Hz persisted through a separate NGENUITY save and power-cycle | verify effective USB report rate with an external rate tester |
-| button bindings | all 11 mappings are readable; seven exact Button 5 ordinary assignments and three exact Play Once macro timelines are writable at runtime; generic TOML models chords/mouse events/nonuniform timing but the driver gates them; Forward was read back and the restored AB macro emitted `ab` on hardware | capture target-control changes and repeat inferred multimedia/shortcut values before expanding writable controls; isolate nonuniform timing, chords, mouse events and playback modes |
+| button bindings | all 11 mappings are readable; seven exact Button 5 ordinary assignments are writable; bounded Play Once macros support keyboard chords, nonuniform timing and left/right/middle clicks; Forward and AB were hardware-tested before the general encoder | capture target-control changes and repeat inferred multimedia/shortcut values; isolate repeat modes, longer timelines, remaining mouse events and timing boundaries |
 | onboard save | repeated transaction, timing and read-modify-write captured; performance persistence confirmed; `0x18[0]` carries two correlated RGB triplets while `0x18[1..2]` were zero for Solid/All Lights | capture isolated wheel/logo and non-Solid saves, then save a profile containing a macro; determine acknowledgements and failure behavior before replay |
 | NGENUITY locking | unknown | run `devices`, then future read-only `info`, with NGENUITY open and closed; record open errors |
 | admin requirement | configuration collection opens without elevation | retest on a second Windows machine/account |

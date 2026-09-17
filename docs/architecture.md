@@ -33,12 +33,12 @@ operation, runtime setters for active DPI and polling, and an offline Pulsefire
 Raid profile patcher. Runtime DPI setters can edit values and colors, select a
 stage, append up to five contiguous stages, and remove only the final stage.
 It also recognizes confirmed button records and exposes a deliberately narrow
-runtime Button 5 setter for seven captured ordinary records and three exact
-keyboard macro fixtures. The platform-independent macro model stores an
-ordered key/button down/up timeline and a delay on every event, so chords and
-nonuniform recording are representable without changing the public model.
-The Raid encoder still accepts only uniform Standard Timing captures.
-Unconfirmed setters remain absent.
+runtime Button 5 setter for seven captured ordinary records. The
+platform-independent macro model stores an ordered key/button down/up timeline
+and a delay on every event. A capture-backed Raid encoder now supports Play
+Once keyboard chords, nonuniform timings and left/right/middle mouse clicks,
+with a conservative 14-transition limit matching the largest local capture.
+Other playback modes, longer macros and unconfirmed mouse events remain absent.
 
 ## Crate responsibilities
 

@@ -2,14 +2,17 @@ use std::time::Duration;
 
 use hyperx_core::{
     ButtonBinding, Capability, CapabilitySet, DeviceDescriptor, DpiCapabilities, DpiProfile,
-    DpiValidationError, InterfaceSelector, KeyboardMacroEvent, KeyboardUsage, LightingZone,
-    MouseFunction, MultimediaFunction, PollingRate, RgbColor, UsbId, WindowsShortcut,
+    DpiValidationError, InterfaceSelector, KeyboardUsage, LightingZone, MacroDefinition,
+    MacroEvent, MacroPlayback, MouseFunction, MultimediaFunction, PollingRate, RgbColor, UsbId,
+    WindowsShortcut,
 };
 use hyperx_hid::{HidError, HidTransport};
 use hyperx_protocol::pulsefire_raid::{
     encode_direct_rgb, encode_profile_read_request, encode_runtime_profile_read_prelude,
-    ConfirmedMacro, ConfirmedMacroError, PerformanceProfile, PerformanceProfileError,
-    ProfileImageKind, ProfileSection, PulsefireRaidControl, DIRECT_REPORT_ID, DIRECT_REPORT_LENGTH,
+    PerformanceProfile, PerformanceProfileError, ProfileImageKind, ProfileSection,
+    PulsefireRaidControl, PulsefireRaidMacro, PulsefireRaidMacroError, PulsefireRaidMacroEvent,
+    PulsefireRaidMacroInput, PulsefireRaidMacroMouseButton, PulsefireRaidMacroState,
+    DIRECT_REPORT_ID, DIRECT_REPORT_LENGTH,
 };
 use thiserror::Error;
 
@@ -81,7 +84,7 @@ pub const PULSEFIRE_RAID: DeviceDescriptor = DeviceDescriptor {
 /// This intentionally excludes inferred members of otherwise recognized HID
 /// binding families. Expand it only after an isolated capture confirms the
 /// exact record or macro report on the target device.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PulsefireRaidButton5Assignment {
     Disabled,
     Forward,
@@ -90,13 +93,21 @@ pub enum PulsefireRaidButton5Assignment {
     Copy,
     KeyboardA,
     DpiToggle,
-    MacroA20Ms,
-    MacroA300Ms,
-    MacroAb20Ms,
+    Macro(MacroDefinition),
 }
 
 impl PulsefireRaidButton5Assignment {
-    fn ordinary_binding(self) -> Option<ButtonBinding> {
+    /// Validate a software macro for the capture-backed Button 5 runtime path.
+    ///
+    /// This performs no discovery or I/O, allowing clients to reject invalid
+    /// files before opening the device.
+    pub fn macro_timeline(definition: MacroDefinition) -> Result<Self, PulsefireRaidError> {
+        let assignment = Self::Macro(definition);
+        assignment.encoded_macro()?;
+        Ok(assignment)
+    }
+
+    fn ordinary_binding(&self) -> Option<ButtonBinding> {
         match self {
             Self::Disabled => Some(ButtonBinding::Disabled),
             Self::Forward => Some(ButtonBinding::Mouse(MouseFunction::Forward)),
@@ -105,31 +116,75 @@ impl PulsefireRaidButton5Assignment {
             Self::Copy => Some(ButtonBinding::WindowsShortcut(WindowsShortcut::Copy)),
             Self::KeyboardA => Some(ButtonBinding::Keyboard(KeyboardUsage(0x04))),
             Self::DpiToggle => Some(ButtonBinding::Mouse(MouseFunction::DpiToggle)),
-            Self::MacroA20Ms | Self::MacroA300Ms | Self::MacroAb20Ms => None,
+            Self::Macro(_) => None,
         }
     }
 
-    fn macro_definition(self) -> Result<Option<ConfirmedMacro>, ConfirmedMacroError> {
-        let events = match self {
-            Self::MacroA20Ms => keyboard_events(&[(0x04, 20)]),
-            Self::MacroA300Ms => keyboard_events(&[(0x04, 300)]),
-            Self::MacroAb20Ms => keyboard_events(&[(0x04, 20), (0x05, 20)]),
-            _ => return Ok(None),
+    fn encoded_macro(&self) -> Result<Option<PulsefireRaidMacro>, PulsefireRaidError> {
+        let Self::Macro(definition) = self else {
+            return Ok(None);
         };
-        ConfirmedMacro::button5_keyboard_once(&events).map(Some)
+        if definition.playback != MacroPlayback::Once {
+            return Err(PulsefireRaidError::UnsupportedMacroPlayback(
+                definition.playback,
+            ));
+        }
+        let events = definition
+            .events
+            .iter()
+            .map(encode_macro_event)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Some(PulsefireRaidMacro::button5_play_once(&events)?))
     }
 }
 
-fn keyboard_events(keys: &[(u16, u16)]) -> Vec<KeyboardMacroEvent> {
-    keys.iter()
-        .flat_map(|&(usage, timing_ms)| {
-            let usage = KeyboardUsage(usage);
-            [
-                KeyboardMacroEvent::pressed(usage, timing_ms),
-                KeyboardMacroEvent::released(usage, timing_ms),
-            ]
-        })
-        .collect()
+fn encode_macro_event(event: &MacroEvent) -> Result<PulsefireRaidMacroEvent, PulsefireRaidError> {
+    let (input, state, delay_ms) = match event {
+        MacroEvent::KeyDown { key, delay_ms } => (
+            PulsefireRaidMacroInput::Keyboard(parse_macro_key(key)?),
+            PulsefireRaidMacroState::Pressed,
+            *delay_ms,
+        ),
+        MacroEvent::KeyUp { key, delay_ms } => (
+            PulsefireRaidMacroInput::Keyboard(parse_macro_key(key)?),
+            PulsefireRaidMacroState::Released,
+            *delay_ms,
+        ),
+        MacroEvent::MouseButtonDown { button, delay_ms } => (
+            PulsefireRaidMacroInput::MouseButton(parse_macro_mouse_button(button)?),
+            PulsefireRaidMacroState::Pressed,
+            *delay_ms,
+        ),
+        MacroEvent::MouseButtonUp { button, delay_ms } => (
+            PulsefireRaidMacroInput::MouseButton(parse_macro_mouse_button(button)?),
+            PulsefireRaidMacroState::Released,
+            *delay_ms,
+        ),
+    };
+    Ok(PulsefireRaidMacroEvent::new(input, state, delay_ms))
+}
+
+fn parse_macro_key(key: &str) -> Result<KeyboardUsage, PulsefireRaidError> {
+    key.parse()
+        .map_err(|_| PulsefireRaidError::UnknownMacroKey(key.to_owned()))
+}
+
+fn parse_macro_mouse_button(
+    button: &str,
+) -> Result<PulsefireRaidMacroMouseButton, PulsefireRaidError> {
+    match button
+        .trim()
+        .to_ascii_lowercase()
+        .replace('_', "-")
+        .as_str()
+    {
+        "left" => Ok(PulsefireRaidMacroMouseButton::Left),
+        "right" => Ok(PulsefireRaidMacroMouseButton::Right),
+        "middle" | "wheel" => Ok(PulsefireRaidMacroMouseButton::Middle),
+        _ => Err(PulsefireRaidError::UnknownMacroMouseButton(
+            button.to_owned(),
+        )),
+    }
 }
 
 #[derive(Debug, Error)]
@@ -153,8 +208,14 @@ pub enum PulsefireRaidError {
     TooManyDpiStages(u8),
     #[error("the only remaining DPI stage cannot be removed")]
     CannotRemoveOnlyDpiStage,
+    #[error("Pulsefire Raid macro playback {0:?} is not capture-backed; only once is supported")]
+    UnsupportedMacroPlayback(MacroPlayback),
+    #[error("unknown macro keyboard key {0:?}")]
+    UnknownMacroKey(String),
+    #[error("unknown or unconfirmed macro mouse button {0:?}; use left, right or middle")]
+    UnknownMacroMouseButton(String),
     #[error(transparent)]
-    InvalidMacro(#[from] ConfirmedMacroError),
+    InvalidMacro(#[from] PulsefireRaidMacroError),
     #[error(transparent)]
     InvalidDpi(#[from] DpiValidationError),
     #[error(transparent)]
@@ -381,9 +442,9 @@ impl<T: HidTransport> PulsefireRaid<T> {
         self.set_runtime_dpi_stage(stage_index, None, None, true)
     }
 
-    /// Assign one exact capture-backed action to Button 5 in runtime memory.
+    /// Assign one capture-backed action to Button 5 in runtime memory.
     ///
-    /// Macro presets transmit their confirmed definition immediately before
+    /// Macros transmit their validated definition immediately before
     /// the profile reference, matching the captured NGENUITY transaction. No
     /// variant writes the onboard profile.
     pub fn set_runtime_button5_assignment(
@@ -398,7 +459,7 @@ impl<T: HidTransport> PulsefireRaid<T> {
         assignment: PulsefireRaidButton5Assignment,
         wait: impl FnMut(Duration),
     ) -> Result<PulsefireRaidButton5Assignment, PulsefireRaidError> {
-        let macro_definition = assignment.macro_definition()?;
+        let macro_definition = assignment.encoded_macro()?;
         let ordinary_binding = assignment.ordinary_binding();
         let mut profile = self.runtime_profile_with_wait(wait)?;
 
@@ -471,6 +532,70 @@ impl<T: HidTransport> PulsefireRaid<T> {
 mod tests {
     use super::*;
     use hyperx_hid::testing::MockHidTransport;
+
+    fn captured_coverage_macro() -> MacroDefinition {
+        MacroDefinition {
+            playback: MacroPlayback::Once,
+            events: vec![
+                MacroEvent::KeyDown {
+                    key: "left-shift".to_owned(),
+                    delay_ms: 20,
+                },
+                MacroEvent::KeyDown {
+                    key: "a".to_owned(),
+                    delay_ms: 953,
+                },
+                MacroEvent::KeyUp {
+                    key: "a".to_owned(),
+                    delay_ms: 141,
+                },
+                MacroEvent::KeyUp {
+                    key: "left-shift".to_owned(),
+                    delay_ms: 766,
+                },
+                MacroEvent::KeyDown {
+                    key: "left-control".to_owned(),
+                    delay_ms: 1171,
+                },
+                MacroEvent::KeyDown {
+                    key: "b".to_owned(),
+                    delay_ms: 1110,
+                },
+                MacroEvent::KeyUp {
+                    key: "b".to_owned(),
+                    delay_ms: 344,
+                },
+                MacroEvent::KeyUp {
+                    key: "left-control".to_owned(),
+                    delay_ms: 453,
+                },
+                MacroEvent::MouseButtonDown {
+                    button: "left".to_owned(),
+                    delay_ms: 1890,
+                },
+                MacroEvent::MouseButtonUp {
+                    button: "left".to_owned(),
+                    delay_ms: 110,
+                },
+                MacroEvent::MouseButtonDown {
+                    button: "right".to_owned(),
+                    delay_ms: 1203,
+                },
+                MacroEvent::MouseButtonUp {
+                    button: "right".to_owned(),
+                    delay_ms: 94,
+                },
+                MacroEvent::MouseButtonDown {
+                    button: "middle".to_owned(),
+                    delay_ms: 718,
+                },
+                MacroEvent::MouseButtonUp {
+                    button: "middle".to_owned(),
+                    delay_ms: 172,
+                },
+            ],
+        }
+    }
 
     #[test]
     fn configuration_collection_matches_openrgb_detector() {
@@ -755,14 +880,16 @@ mod tests {
     }
 
     #[test]
-    fn driver_sends_confirmed_macro_before_its_button5_profile_reference() {
+    fn driver_sends_captured_chord_mouse_macro_before_its_button5_profile_reference() {
         let mut response = performance_profile_response();
         response[0x8C..0x90].copy_from_slice(&[0x02, 0xF9, 0x00, 0x04]);
 
         let mut expected_macro = [0_u8; DIRECT_REPORT_LENGTH];
-        expected_macro[..22].copy_from_slice(&[
-            0x07, 0x05, 0x04, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x80, 0x14, 0x04, 0x00,
-            0x14, 0x04, 0x80, 0x14, 0x05, 0x00, 0x14, 0x05,
+        expected_macro[..52].copy_from_slice(&[
+            0x07, 0x05, 0x04, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x80, 0x14, 0xE1, 0x83,
+            0xB9, 0x04, 0x00, 0x8D, 0x04, 0x02, 0xFE, 0xE1, 0x84, 0x93, 0xE0, 0x84, 0x56, 0x05,
+            0x01, 0x58, 0x05, 0x01, 0xC5, 0xE0, 0x87, 0x62, 0xB7, 0x00, 0x6E, 0xB7, 0x84, 0xB3,
+            0xB8, 0x00, 0x5E, 0xB8, 0x82, 0xCE, 0xB9, 0x00, 0xAC, 0xB9,
         ]);
         let mut expected_write = response;
         expected_write[1] = 0x01;
@@ -775,15 +902,14 @@ mod tests {
         transport.expect_feature_report(expected_macro);
         transport.expect_feature_report(expected_write);
 
+        let assignment =
+            PulsefireRaidButton5Assignment::macro_timeline(captured_coverage_macro()).unwrap();
         let mut device = PulsefireRaid::new(transport).unwrap();
         assert_eq!(
             device
-                .set_runtime_button5_assignment_with_wait(
-                    PulsefireRaidButton5Assignment::MacroAb20Ms,
-                    |_| {},
-                )
+                .set_runtime_button5_assignment_with_wait(assignment.clone(), |_| {})
                 .unwrap(),
-            PulsefireRaidButton5Assignment::MacroAb20Ms
+            assignment
         );
         device.into_transport().assert_drained();
     }
@@ -803,15 +929,19 @@ mod tests {
             .into_iter()
             .all(|assignment| assignment.ordinary_binding().is_some()));
 
-        let macros = [
-            PulsefireRaidButton5Assignment::MacroA20Ms,
-            PulsefireRaidButton5Assignment::MacroA300Ms,
-            PulsefireRaidButton5Assignment::MacroAb20Ms,
-        ];
-        assert!(macros.into_iter().all(|assignment| {
-            assignment.ordinary_binding().is_none()
-                && assignment.macro_definition().unwrap().is_some()
-        }));
+        let macro_assignment =
+            PulsefireRaidButton5Assignment::macro_timeline(captured_coverage_macro()).unwrap();
+        assert!(macro_assignment.ordinary_binding().is_none());
+        assert!(macro_assignment.encoded_macro().unwrap().is_some());
+
+        let mut unsupported_playback = captured_coverage_macro();
+        unsupported_playback.playback = MacroPlayback::ToggleRepeat;
+        assert!(matches!(
+            PulsefireRaidButton5Assignment::macro_timeline(unsupported_playback),
+            Err(PulsefireRaidError::UnsupportedMacroPlayback(
+                MacroPlayback::ToggleRepeat
+            ))
+        ));
     }
 
     #[test]

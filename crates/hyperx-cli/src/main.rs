@@ -9,9 +9,8 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use hyperx_core::{
-    ButtonBinding, DeviceDescriptor, DpiProfile, HidInterfaceInfo, MacroDefinition, MacroEvent,
-    MacroPlayback, MouseFunction, MultimediaFunction, PollingRate, RgbColor, UsbId,
-    WindowsShortcut,
+    ButtonBinding, DeviceDescriptor, DpiProfile, HidInterfaceInfo, MacroDefinition, MouseFunction,
+    MultimediaFunction, PollingRate, RgbColor, UsbId, WindowsShortcut,
 };
 use hyperx_devices::{
     find_supported_device, PulsefireRaid, PulsefireRaidButton5Assignment, PULSEFIRE_RAID,
@@ -287,60 +286,9 @@ fn load_button5_macro(path: &Path) -> Result<(PulsefireRaidButton5Assignment, St
         .with_context(|| format!("failed to read macro file {}", path.display()))?;
     let definition: MacroDefinition = toml::from_str(&source)
         .with_context(|| format!("failed to parse macro file {}", path.display()))?;
-    let assignment = confirmed_button5_macro_assignment(&definition)?;
+    let assignment = PulsefireRaidButton5Assignment::macro_timeline(definition)
+        .with_context(|| format!("unsupported Pulsefire Raid macro in {}", path.display()))?;
     Ok((assignment, format!("macro from {}", path.display())))
-}
-
-fn confirmed_button5_macro_assignment(
-    definition: &MacroDefinition,
-) -> Result<PulsefireRaidButton5Assignment> {
-    if definition.playback != MacroPlayback::Once {
-        return Err(anyhow!(
-            "macro playback {:?} is not capture-backed; only once is currently supported",
-            definition.playback
-        ));
-    }
-
-    let events = definition.events.as_slice();
-    if matches_key_sequence(events, &[(true, "a", 20), (false, "a", 20)]) {
-        return Ok(PulsefireRaidButton5Assignment::MacroA20Ms);
-    }
-    if matches_key_sequence(events, &[(true, "a", 300), (false, "a", 300)]) {
-        return Ok(PulsefireRaidButton5Assignment::MacroA300Ms);
-    }
-    if matches_key_sequence(
-        events,
-        &[
-            (true, "a", 20),
-            (false, "a", 20),
-            (true, "b", 20),
-            (false, "b", 20),
-        ],
-    ) {
-        return Ok(PulsefireRaidButton5Assignment::MacroAb20Ms);
-    }
-
-    Err(anyhow!(
-        "macro event timeline is valid but not capture-backed for Pulsefire Raid; currently supported timelines are A/20 ms, A/300 ms and A then B/20 ms"
-    ))
-}
-
-fn matches_key_sequence(events: &[MacroEvent], expected: &[(bool, &str, u16)]) -> bool {
-    events.len() == expected.len()
-        && events
-            .iter()
-            .zip(expected)
-            .all(
-                |(event, &(pressed, expected_key, expected_delay))| match event {
-                    MacroEvent::KeyDown { key, delay_ms } if pressed => {
-                        key.eq_ignore_ascii_case(expected_key) && *delay_ms == expected_delay
-                    }
-                    MacroEvent::KeyUp { key, delay_ms } if !pressed => {
-                        key.eq_ignore_ascii_case(expected_key) && *delay_ms == expected_delay
-                    }
-                    _ => false,
-                },
-            )
 }
 
 fn main() -> Result<()> {
@@ -923,6 +871,7 @@ fn print_unsupported(interfaces: &[&HidInterfaceInfo]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hyperx_core::{MacroEvent, MacroPlayback};
 
     #[test]
     fn first_value_skips_missing_strings() {
@@ -1062,13 +1011,15 @@ mod tests {
     }
 
     #[test]
-    fn macro_toml_models_event_timelines_but_gates_device_encoding() {
+    fn macro_toml_supports_chords_nonuniform_timings_and_mouse_clicks() {
         let example =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/macros/ab-20ms.toml");
-        assert_eq!(
-            load_button5_macro(&example).unwrap().0,
-            PulsefireRaidButton5Assignment::MacroAb20Ms
-        );
+        let PulsefireRaidButton5Assignment::Macro(example_definition) =
+            load_button5_macro(&example).unwrap().0
+        else {
+            panic!("the TOML example must produce a macro assignment");
+        };
+        assert_eq!(example_definition.events.len(), 4);
 
         let macro_ab: MacroDefinition = toml::from_str(
             r#"
@@ -1092,10 +1043,7 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert_eq!(
-            confirmed_button5_macro_assignment(&macro_ab).unwrap(),
-            PulsefireRaidButton5Assignment::MacroAb20Ms
-        );
+        assert!(PulsefireRaidButton5Assignment::macro_timeline(macro_ab).is_ok());
 
         let shift_a: MacroDefinition = toml::from_str(
             r#"
@@ -1120,7 +1068,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(shift_a.events.len(), 4);
-        assert!(confirmed_button5_macro_assignment(&shift_a).is_err());
+        assert!(PulsefireRaidButton5Assignment::macro_timeline(shift_a).is_ok());
 
         let nonuniform = MacroDefinition {
             playback: MacroPlayback::Once,
@@ -1135,7 +1083,32 @@ mod tests {
                 },
             ],
         };
-        assert!(confirmed_button5_macro_assignment(&nonuniform).is_err());
+        assert!(PulsefireRaidButton5Assignment::macro_timeline(nonuniform).is_ok());
+
+        let mouse_clicks: MacroDefinition = toml::from_str(
+            r#"
+                playback = "once"
+                [[events]]
+                type = "mouse-button-down"
+                button = "left"
+                delay_ms = 25
+                [[events]]
+                type = "mouse-button-up"
+                button = "left"
+                delay_ms = 40
+            "#,
+        )
+        .unwrap();
+        assert!(PulsefireRaidButton5Assignment::macro_timeline(mouse_clicks).is_ok());
+
+        let invalid = MacroDefinition {
+            playback: MacroPlayback::Once,
+            events: vec![MacroEvent::KeyDown {
+                key: "unknown-key".to_owned(),
+                delay_ms: 20,
+            }],
+        };
+        assert!(PulsefireRaidButton5Assignment::macro_timeline(invalid).is_err());
     }
 
     fn fixture() -> HidInterfaceInfo {

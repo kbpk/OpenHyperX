@@ -26,7 +26,8 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
 - capture-backed runtime polling get/set for 125, 250, 500 and 1000 Hz
 - runtime listing of all 11 button mappings
 - capture-backed Button 5 runtime assignments for Disabled, Forward, Back,
-  Volume Up, Copy, keyboard A, DPI Toggle and three exact Play Once timelines
+  Volume Up, Copy, keyboard A and DPI Toggle, plus TOML Play Once macros with
+  keyboard chords, per-event timings and left/right/middle mouse clicks
 - raw hex capture parser/diff for protocol research
 - offline DPI-stage, polling and button-profile parser/patcher with golden tests
 - no general button-remapping or onboard hardware writes yet
@@ -139,11 +140,11 @@ The writable list is deliberately narrower than the mappings the decoder can
 recognize. Each exposed assignment has an exact local capture; inferred HID
 values remain read-only. Macro files model playback plus an ordered timeline of
 individual key/button down/up events and per-event delays, including chords.
-The current Raid encoder accepts only three exact captured timelines: keyboard
-A at 20 or 300 ms, or A then B at 20 ms, all using Play Once. Other valid
-timelines are rejected before the mouse is opened. See
-[docs/macro-format.md](docs/macro-format.md). These commands do not save
-onboard.
+The current Raid encoder accepts Play Once macros of up to 14 balanced
+transitions, common keyboard usages and the three captured primary mouse
+buttons. Unsupported keys, playback modes and malformed timelines are rejected
+before the mouse is opened. See [docs/macro-format.md](docs/macro-format.md).
+These commands do not save onboard.
 
 Apply volatile RGB once, or keep it active in the foreground for 30 seconds:
 
@@ -189,10 +190,10 @@ publishing them.
    button bindings.
 3. **RGB proof of concept (implemented):** typed static/off direct reports and
    explicit foreground keepalive.
-4. **Protocol exploration:** DPI stages/colors and polling runtime control are
-   implemented; exact Button 5 bindings and macro timelines are implemented,
-   while general bindings, general macros and onboard profiles remain
-   capture-gated.
+4. **Protocol exploration:** DPI stages/colors, polling runtime control,
+   capture-backed Button 5 bindings and bounded Play Once macros are
+   implemented; other controls, repeat modes, longer macros and onboard
+   profiles remain capture-gated.
 5. **GUI:** Tauri client using only the public core API.
 
 See [docs/reverse-engineering.md](docs/reverse-engineering.md) for the capture
