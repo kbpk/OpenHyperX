@@ -528,7 +528,7 @@ four-byte record at `0x8C..0x8F` changed:
 | Mouse Back | `02 F8 00 03` | isolated capture; an existing functional record used `02 F8 00 00` |
 | Multimedia Volume Up | `04 00 00 E9` | isolated capture; `E9` is USB HID Consumer Volume Increment |
 | Windows Shortcut Copy | `23 E0 06 00` | isolated capture; `E0`/`06` are Left Control and keyboard C usages |
-| Keyboard A | `00 04 00 00` | isolated capture; `04` is the keyboard A usage |
+| Keyboard key | `00 UU 00 00` | isolated A-to-B capture changed only `UU` from standard Keyboard/Keypad usage `04` to `05` |
 | Mouse DPI Toggle | `71 F0 00 00` | isolated captures on the DPI control and Button 5 |
 
 On 2026-09-14, a first isolated capture changed the DPI control from Keyboard
@@ -558,11 +558,12 @@ physical controls with these record starts:
 | wheel tilt right | `0xA4` | position inferred from remaining records and `02 F6 00 00` |
 
 The protocol crate now decodes these known records and has an offline patcher.
-The other keyboard, consumer-control and Windows shortcut values are derived
-from standard USB HID usage IDs after their record families were established;
-they remain offline inference and are not sent by the device driver. Left and
-right click are restricted to swapping those two functions, matching the UI.
-The capture-backed `DPI Toggle` record is also decoded and patched offline.
+Named keyboard keys are writable as described below. Other consumer-control
+and Windows shortcut values are derived from standard USB HID usage IDs after
+their record families were established; they remain offline inference and are
+not sent by the device driver. Left and right click are restricted to swapping
+those two functions, matching the UI. The capture-backed `DPI Toggle` record
+is also decoded and patched offline.
 The ordinary binding API still rejects generic macro references; the one exact
 minimal macro captured below is handled through a separate evidence-gated
 type.
@@ -650,18 +651,41 @@ mappings unchanged. Pressing Button 5 then emitted lowercase `ab`, functionally
 confirming the OpenHyperX-generated macro definition and ordering. No
 onboard-save transaction was sent.
 
-The driver's target-aware evidence gate exposes the seven ordinary Button 5
-assignments seen in local captures (Disabled, Forward, Back, Volume Up, Copy,
-keyboard A and DPI Toggle). It also exposes keyboard A and DPI Toggle for the
-DPI control, matching the isolated forward transition described above. A mock
-transport test verifies that this second target changes only the runtime write
-opcode and its record at `0x9C..0x9F`. On the physical release-`1124` unit,
+The driver's target-aware evidence gate exposes the capture-derived ordinary
+Button 5 record families (Disabled, Forward, Back, Volume Up, Copy, named
+keyboard keys and DPI Toggle). It also exposes the portable records on the
+other non-primary controls. A mock transport test verifies that the DPI target
+changes only the runtime write opcode and its record at `0x9C..0x9F`. On the
+physical release-`1124` unit,
 OpenHyperX then changed the DPI control from keyboard A to DPI Toggle; an
 independent runtime read returned DPI Toggle while the other ten records were
 unchanged, and pressing the mechanically unreliable control at its working
 contact point changed DPI stages normally. Other decoded ordinary bindings
 remain read-only inferences even when their usage IDs come from the USB HID
 standard. No onboard save was sent.
+
+On 2026-09-18, an eight-second isolated DPI-control capture changed Keyboard A
+to Keyboard B. USBPcap resolved the current unit dynamically as
+`\\.\USBPcap1`, address `61`, VID/PID `0951:16E4`. The capture contained one
+runtime-profile response and one profile write in the 61,610-byte capture
+`openhyperx-dpi-keyboard-a-b-20260918.pcapng`, retained outside Git. Apart from
+the normal opcode change `0x81 -> 0x01`, the only changed byte was
+`0x09D: 04 -> 05`; the complete DPI record changed from `00 04 00 00` to
+`00 05 00 00`. These are the standard USB HID Keyboard/Keypad usages for A and
+B. Together with the previously captured macro letters and modifier usages,
+this confirms the record shape `00 UU 00 00` for named keyboard assignments
+rather than an A-specific enum. The CLI therefore accepts the finite
+human-readable key set parsed by `KeyboardUsage` (letters, digits, punctuation,
+navigation, F1-F24, keypad and modifiers), while rejecting raw numeric and
+unknown usages. No onboard save was sent.
+
+With NGENUITY and its helper stopped, OpenHyperX then read the captured
+Keyboard B state, changed the DPI control to Keyboard A and independently read
+back usage `0x0004`. It changed the same control to Keyboard B and independently
+read back `0x0005`. The other ten mapping records were identical after both
+writes. A guarded cleanup restored DPI Toggle, and a final independent read
+returned `Mouse: DPI toggle` with the other records still unchanged. Every
+operation used the volatile runtime-profile path; no onboard save was sent.
 
 On 2026-09-17, an isolated `Back -> Disabled -> Back` capture for Button 4
 contained three runtime profile writes. Disabling changed only the Button 4
@@ -690,15 +714,16 @@ state and exercised Button 7 through `Volume Down -> Volume Up -> Volume Down
 other ten mappings remained unchanged, and the final state was Volume Up. No
 onboard save was sent.
 
-Together with earlier captures, six ordinary records now repeat byte-for-byte
-on at least two physical controls: Disabled (Buttons 4/5), Mouse Back (Buttons
-4/5), Volume Up (Buttons 5/7), Volume Down (Buttons 6/7), keyboard A (Button 5
-and DPI) and DPI Toggle (Button 5 and DPI). NGENUITY exposes the same assignment
-categories for the middle click, five numbered side controls, DPI control and
-both wheel tilts. The runtime writer therefore treats those six records as
-portable across these nine general controls while keeping the primary left and
-right clicks unavailable. Forward, Copy and macro references remain
-Button-5-specific until their portability is independently established.
+Together with earlier captures, six ordinary record families now repeat on at
+least two physical controls: Disabled (Buttons 4/5), Mouse Back (Buttons 4/5),
+Volume Up (Buttons 5/7), Volume Down (Buttons 6/7), keyboard usage (Button 5
+and DPI, with A/B isolated on DPI) and DPI Toggle (Button 5 and DPI). NGENUITY
+exposes the same assignment categories for the middle click, five numbered
+side controls, DPI control and both wheel tilts. The runtime writer therefore
+treats those six records as portable across these nine general controls while
+keeping the primary left and right clicks unavailable. Forward, Copy and macro
+references remain Button-5-specific until their portability is independently
+established.
 
 With NGENUITY stopped, OpenHyperX then applied the portable Mouse Back record
 to Button 6, whose initial mapping was Volume Down. An independent runtime read
@@ -780,7 +805,7 @@ continued to operate normally. No onboard-save transaction was sent.
 | persistent RGB/effects | OpenHyperX effects are foreground-rendered; a standalone firmware rainbow was observed after NGENUITY stopped, but NGENUITY Solid/Cycle and red/green save captures did not select or persist it | identify a confirmed hardware-mode selector and its save semantics before exposing hardware rainbow or other persistent effects |
 | DPI and stages | runtime read/set, per-stage value/color edits, active-stage selection and final-stage add/remove are implemented and hardware-validated; five big-endian X/Y slots, 200-16000 range and 50-DPI units are confirmed | determine whether independent X/Y values are supported; onboard persistence remains part of the separate save blocker |
 | polling | all four interval codes captured; runtime 1000→500→1000 set/readback validated; 1000 Hz persisted through a separate NGENUITY save and power-cycle | verify effective USB report rate with an external rate tester |
-| button bindings | all 11 mappings are readable; six records repeated across physical slots are writable on the nine general controls, while Forward, Copy and macros remain Button-5-specific; the portable path is hardware-tested on Button 6, and target-specific Button 4, Button 5, Button 7 and DPI writes are also hardware-tested; bounded Button 5 Play Once macros support keyboard chords, nonuniform timing and left/right/middle clicks | capture primary-click swaps and the remaining ordinary records; isolate macro portability, repeat modes, longer timelines, remaining mouse events and timing boundaries |
+| button bindings | all 11 mappings are readable; five fixed records plus named one-byte keyboard usages are writable on the nine general controls, while Forward, Copy and macros remain Button-5-specific; the portable path is hardware-tested on Button 6, direct Keyboard A/B is hardware-tested on DPI, and target-specific Button 4, Button 5, Button 7 and DPI writes are also hardware-tested; bounded Button 5 Play Once macros support keyboard chords, nonuniform timing and left/right/middle clicks | capture primary-click swaps and the remaining ordinary records; isolate macro portability, repeat modes, longer timelines, remaining mouse events and timing boundaries |
 | onboard save | repeated transaction, timing and read-modify-write captured; performance persistence confirmed; `0x18[0]` carries two correlated RGB triplets while `0x18[1..2]` were zero for Solid/All Lights | capture isolated wheel/logo and non-Solid saves, then save a profile containing a macro; determine acknowledgements and failure behavior before replay |
 | NGENUITY locking | unknown | run `devices`, then future read-only `info`, with NGENUITY open and closed; record open errors |
 | admin requirement | configuration collection opens without elevation | retest on a second Windows machine/account |

@@ -26,13 +26,14 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
   200–16000 range, 50-DPI step and up to five contiguous stages
 - capture-backed runtime polling get/set for 125, 250, 500 and 1000 Hz
 - runtime listing of all 11 button mappings
-- capture-backed Button 5 runtime assignments for Disabled, Forward, Back,
-  Volume Up, Copy, keyboard A and DPI Toggle, plus TOML Play Once macros with
-  keyboard chords, per-event timings and left/right/middle mouse clicks
-- capture-backed DPI-button runtime assignments for keyboard A and DPI Toggle
+- capture-backed runtime assignments on all nine non-primary controls for
+  Disabled, Back, Volume Up/Down, DPI Toggle and named keyboard keys
+- additional capture-backed Button 5 assignments for Forward, Copy and TOML
+  Play Once macros with keyboard chords, per-event timings and
+  left/right/middle mouse clicks
 - raw hex capture parser/diff for protocol research
 - offline DPI-stage, polling and button-profile parser/patcher with golden tests
-- no general button-remapping or onboard hardware writes yet
+- no primary-click remapping or onboard hardware writes yet
 
 The implementation stops wherever protocol evidence stops. Known facts and
 their confidence level are recorded in [docs/research.md](docs/research.md).
@@ -150,16 +151,23 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
   run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
+  buttons set dpi keyboard b
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
+  run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
   buttons set button5 macro examples/macros/ab-20ms.toml
 ```
 
 The writable list is deliberately narrower than the mappings the decoder can
-recognize. The nine non-primary controls accept only binding records confirmed
-on multiple physical slots: Disabled, Mouse Back, DPI Toggle, Volume Up,
-Volume Down and keyboard A. Button 5 additionally accepts its target-specific
-Forward, Copy and macro captures. Left/right primary clicks remain read-only,
-and inferred HID values are never sent. Macro files model playback plus an
-ordered timeline of individual key/button down/up events and per-event delays,
+recognize. The nine non-primary controls accept Disabled, Mouse Back, DPI
+Toggle, Volume Up/Down and named USB HID keyboard keys (`a-z`, digits,
+navigation, F1-F24, keypad and modifiers). An isolated DPI-button A-to-B
+capture proved that the key is the standard one-byte Keyboard/Keypad usage.
+Button 5 additionally accepts its target-specific Forward, Copy and macro
+captures. Left/right primary clicks remain read-only, and raw numeric usage
+values are not accepted by the CLI. Macro files model playback plus an ordered
+timeline of individual key/button down/up events and per-event delays,
 including chords.
 The current Raid encoder accepts Play Once macros of up to 14 balanced
 transitions, common keyboard usages and the three captured primary mouse

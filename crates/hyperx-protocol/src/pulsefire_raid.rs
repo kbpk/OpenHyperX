@@ -1419,6 +1419,26 @@ mod tests {
     }
 
     #[test]
+    fn golden_dpi_keyboard_a_to_b_changes_only_captured_usage_byte() {
+        let original = captured_button_profile();
+        let mut profile = PerformanceProfile::parse(&original).unwrap();
+
+        profile
+            .set_button_binding(
+                PulsefireRaidControl::Dpi,
+                &ButtonBinding::Keyboard(KeyboardUsage(0x05)),
+            )
+            .unwrap();
+
+        assert_eq!(changed_offsets(&original, profile.as_bytes()), vec![0x9D]);
+        assert_eq!(&profile.as_bytes()[0x9C..0xA0], &[0x00, 0x05, 0x00, 0x00]);
+        assert_eq!(
+            profile.button_binding(PulsefireRaidControl::Dpi).unwrap(),
+            ButtonBinding::Keyboard(KeyboardUsage(0x05))
+        );
+    }
+
+    #[test]
     fn standard_hid_binding_families_round_trip_offline() {
         let mut profile = PerformanceProfile::parse(&captured_button_profile()).unwrap();
         let bindings = [

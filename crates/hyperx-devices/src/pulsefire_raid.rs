@@ -117,15 +117,15 @@ impl PulsefireRaidRuntimeAssignment {
                 | PulsefireRaidControl::WheelTiltLeft
                 | PulsefireRaidControl::WheelTiltRight
         );
-        let portable_binding = matches!(
-            &binding,
+        let portable_binding = match &binding {
             ButtonBinding::Disabled
-                | ButtonBinding::Mouse(MouseFunction::Back | MouseFunction::DpiToggle)
-                | ButtonBinding::Multimedia(
-                    MultimediaFunction::VolumeUp | MultimediaFunction::VolumeDown
-                )
-                | ButtonBinding::Keyboard(KeyboardUsage(0x04))
-        );
+            | ButtonBinding::Mouse(MouseFunction::Back | MouseFunction::DpiToggle)
+            | ButtonBinding::Multimedia(
+                MultimediaFunction::VolumeUp | MultimediaFunction::VolumeDown,
+            ) => true,
+            ButtonBinding::Keyboard(usage) => is_supported_runtime_keyboard_usage(*usage),
+            _ => false,
+        };
         let button5_only = control == PulsefireRaidControl::Button5
             && matches!(
                 &binding,
@@ -195,6 +195,13 @@ impl PulsefireRaidRuntimeAssignment {
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Some(PulsefireRaidMacro::button5_play_once(&events)?))
     }
+}
+
+const fn is_supported_runtime_keyboard_usage(usage: KeyboardUsage) -> bool {
+    // This is exactly the named key set accepted by KeyboardUsage::from_str.
+    // The isolated A -> B capture confirms that ordinary bindings carry the
+    // standard one-byte Keyboard/Keypad usage in record byte 1.
+    matches!(usage.0, 0x04..=0x73 | 0xE0..=0xE7)
 }
 
 fn encode_macro_event(event: &MacroEvent) -> Result<PulsefireRaidMacroEvent, PulsefireRaidError> {
@@ -1123,6 +1130,9 @@ mod tests {
             ButtonBinding::Multimedia(MultimediaFunction::VolumeUp),
             ButtonBinding::Multimedia(MultimediaFunction::VolumeDown),
             ButtonBinding::Keyboard(KeyboardUsage(0x04)),
+            ButtonBinding::Keyboard(KeyboardUsage(0x05)),
+            ButtonBinding::Keyboard(KeyboardUsage(0x2C)),
+            ButtonBinding::Keyboard(KeyboardUsage(0xE1)),
             ButtonBinding::Mouse(MouseFunction::DpiToggle),
         ];
         for control in general_controls {
@@ -1149,6 +1159,10 @@ mod tests {
             (
                 PulsefireRaidControl::Button7,
                 ButtonBinding::WindowsShortcut(WindowsShortcut::Copy),
+            ),
+            (
+                PulsefireRaidControl::Dpi,
+                ButtonBinding::Keyboard(KeyboardUsage(0x74)),
             ),
         ] {
             assert!(matches!(

@@ -9,9 +9,9 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use hyperx_core::{
-    ButtonBinding, DeviceDescriptor, DpiProfile, HidInterfaceInfo, MacroDefinition, MouseFunction,
-    MultimediaFunction, PollingRate, RgbColor, SoftwareLightingEffect, SoftwareLightingProgram,
-    UsbId, WindowsShortcut,
+    ButtonBinding, DeviceDescriptor, DpiProfile, HidInterfaceInfo, KeyboardUsage, MacroDefinition,
+    MouseFunction, MultimediaFunction, PollingRate, RgbColor, SoftwareLightingEffect,
+    SoftwareLightingProgram, UsbId, WindowsShortcut,
 };
 use hyperx_devices::{
     find_supported_device, PulsefireRaid, PulsefireRaidRuntimeAssignment, PULSEFIRE_RAID,
@@ -347,8 +347,8 @@ enum ButtonAssignmentCommand {
         shortcut: ButtonWindowsShortcutArg,
     },
     Keyboard {
-        #[arg(value_enum)]
-        key: ButtonKeyboardKeyArg,
+        /// Named USB HID key, for example: a, space, f12, left-shift.
+        key: KeyboardUsage,
     },
     /// Assign a macro timeline from a TOML file.
     Macro {
@@ -373,11 +373,6 @@ enum ButtonMultimediaFunctionArg {
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum ButtonWindowsShortcutArg {
     Copy,
-}
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
-enum ButtonKeyboardKeyArg {
-    A,
 }
 
 impl ButtonAssignmentCommand {
@@ -416,12 +411,13 @@ impl ButtonAssignmentCommand {
                 ButtonBinding::WindowsShortcut(WindowsShortcut::Copy),
                 "Windows shortcut copy",
             ),
-            Self::Keyboard {
-                key: ButtonKeyboardKeyArg::A,
-            } => (
-                ButtonBinding::Keyboard(hyperx_core::KeyboardUsage(0x04)),
-                "keyboard A",
-            ),
+            Self::Keyboard { key } => {
+                let assignment = PulsefireRaidRuntimeAssignment::ordinary(
+                    control,
+                    ButtonBinding::Keyboard(key),
+                )?;
+                return Ok((assignment, format!("keyboard HID usage 0x{:02X}", key.0)));
+            }
             Self::Macro { file } => return load_button_macro(control, &file),
         };
         let assignment = PulsefireRaidRuntimeAssignment::ordinary(control, binding)?;
@@ -1480,6 +1476,24 @@ mod tests {
             "hyperx-cli",
             "buttons",
             "set",
+            "dpi",
+            "keyboard",
+            "left-shift",
+        ])
+        .is_ok());
+        assert!(Cli::try_parse_from([
+            "hyperx-cli",
+            "buttons",
+            "set",
+            "dpi",
+            "keyboard",
+            "definitely-not-a-key",
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "hyperx-cli",
+            "buttons",
+            "set",
             "button5",
             "windows-shortcut",
             "copy",
@@ -1526,7 +1540,7 @@ mod tests {
         .into_assignment(PulsefireRaidControl::Dpi)
         .is_ok());
         assert!(ButtonAssignmentCommand::Keyboard {
-            key: ButtonKeyboardKeyArg::A,
+            key: KeyboardUsage(0x05),
         }
         .into_assignment(PulsefireRaidControl::Dpi)
         .is_ok());
