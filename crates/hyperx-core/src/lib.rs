@@ -4,6 +4,7 @@ mod button;
 mod capability;
 mod color;
 mod device;
+mod lighting;
 mod performance;
 
 pub use button::{
@@ -17,4 +18,5 @@ pub use capability::{
 };
 pub use color::{ColorParseError, RgbColor};
 pub use device::{DeviceDescriptor, HidInterfaceInfo, InterfaceSelector, UsbId};
+pub use lighting::{spectrum_color, SPECTRUM_STEPS};
 pub use performance::{DpiProfile, DpiStage};

@@ -9,8 +9,9 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use hyperx_core::{
-    ButtonBinding, DeviceDescriptor, DpiProfile, HidInterfaceInfo, MacroDefinition, MouseFunction,
-    MultimediaFunction, PollingRate, RgbColor, UsbId, WindowsShortcut,
+    spectrum_color, ButtonBinding, DeviceDescriptor, DpiProfile, HidInterfaceInfo, MacroDefinition,
+    MouseFunction, MultimediaFunction, PollingRate, RgbColor, UsbId, WindowsShortcut,
+    SPECTRUM_STEPS,
 };
 use hyperx_devices::{
     find_supported_device, PulsefireRaid, PulsefireRaidButton5Assignment, PULSEFIRE_RAID,
@@ -110,6 +111,43 @@ enum RgbCommand {
         #[arg(long, default_value_t = 0)]
         duration: u64,
     },
+    /// Render a software RGB spectrum in the foreground; never saves onboard.
+    Cycle {
+        /// Physical LEDs receiving the effect.
+        #[arg(long, value_enum, default_value_t = RgbTargetArg::All)]
+        target: RgbTargetArg,
+        /// Foreground runtime in seconds, from 1 through 3600.
+        #[arg(long, default_value_t = 30, value_parser = parse_effect_duration)]
+        duration: u64,
+        /// Seconds per complete color cycle, from 1 through 60.
+        #[arg(long, default_value_t = 5, value_parser = parse_cycle_period)]
+        period: u64,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum RgbTargetArg {
+    All,
+    Wheel,
+    Logo,
+}
+
+impl RgbTargetArg {
+    const fn colors(self, color: RgbColor) -> (RgbColor, RgbColor) {
+        match self {
+            Self::All => (color, color),
+            Self::Wheel => (color, RgbColor::BLACK),
+            Self::Logo => (RgbColor::BLACK, color),
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::All => "all LEDs",
+            Self::Wheel => "wheel",
+            Self::Logo => "logo",
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -316,6 +354,11 @@ fn main() -> Result<()> {
                 rgb(wheel, logo, duration)
             }
             RgbCommand::Off { duration } => rgb(RgbColor::BLACK, RgbColor::BLACK, duration),
+            RgbCommand::Cycle {
+                target,
+                duration,
+                period,
+            } => rgb_cycle(target, duration, period),
         },
         Command::Dpi { command } => dpi(command),
         Command::Polling { command } => polling(command),
@@ -338,6 +381,32 @@ fn parse_rgb_or_off(input: &str) -> Result<RgbColor, String> {
         Ok(RgbColor::BLACK)
     } else {
         input.parse::<RgbColor>().map_err(|error| error.to_string())
+    }
+}
+
+fn parse_effect_duration(input: &str) -> Result<u64, String> {
+    let seconds = input
+        .parse::<u64>()
+        .map_err(|_| format!("effect duration must be an integer; got {input}"))?;
+    if (1..=3600).contains(&seconds) {
+        Ok(seconds)
+    } else {
+        Err(format!(
+            "effect duration must be between 1 and 3600 seconds; got {seconds}"
+        ))
+    }
+}
+
+fn parse_cycle_period(input: &str) -> Result<u64, String> {
+    let seconds = input
+        .parse::<u64>()
+        .map_err(|_| format!("cycle period must be an integer; got {input}"))?;
+    if (1..=60).contains(&seconds) {
+        Ok(seconds)
+    } else {
+        Err(format!(
+            "cycle period must be between 1 and 60 seconds; got {seconds}"
+        ))
     }
 }
 
@@ -767,6 +836,30 @@ fn rgb(wheel: RgbColor, logo: RgbColor, duration_seconds: u64) -> Result<()> {
     Ok(())
 }
 
+fn rgb_cycle(target: RgbTargetArg, duration_seconds: u64, period_seconds: u64) -> Result<()> {
+    let mut device = open_pulsefire_raid()?;
+    let started = Instant::now();
+    let duration = Duration::from_secs(duration_seconds);
+    let period_millis = u128::from(period_seconds) * 1000;
+
+    while started.elapsed() < duration {
+        let elapsed_millis = started.elapsed().as_millis();
+        let phase =
+            ((elapsed_millis % period_millis) * u128::from(SPECTRUM_STEPS) / period_millis) as u16;
+        let (wheel, logo) = target.colors(spectrum_color(phase));
+        device.set_volatile_direct_rgb(wheel, logo)?;
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    println!(
+        "Rendered volatile RGB cycle on {} for {duration_seconds} seconds with a {period_seconds}-second period.",
+        target.name()
+    );
+    println!("The previous lighting state may now return.");
+    println!("No onboard profile or firmware data was written.");
+    Ok(())
+}
+
 fn decode_capture(before_path: &Path, after_path: &Path) -> Result<()> {
     let before_text = fs::read_to_string(before_path)
         .with_context(|| format!("failed to read {}", before_path.display()))?;
@@ -966,6 +1059,41 @@ mod tests {
         assert!(
             Cli::try_parse_from(["hyperx-cli", "rgb", "static", "--logo", "not-a-color",]).is_err()
         );
+    }
+
+    #[test]
+    fn cli_validates_foreground_rgb_cycle() {
+        let red = RgbColor::new(255, 0, 0);
+        assert_eq!(RgbTargetArg::All.colors(red), (red, red));
+        assert_eq!(RgbTargetArg::Wheel.colors(red), (red, RgbColor::BLACK));
+        assert_eq!(RgbTargetArg::Logo.colors(red), (RgbColor::BLACK, red));
+
+        assert!(Cli::try_parse_from(["hyperx-cli", "rgb", "cycle"]).is_ok());
+        assert!(Cli::try_parse_from([
+            "hyperx-cli",
+            "rgb",
+            "cycle",
+            "--target",
+            "wheel",
+            "--duration",
+            "5",
+            "--period",
+            "2",
+        ])
+        .is_ok());
+
+        for invalid in [
+            ["--duration", "0"],
+            ["--duration", "3601"],
+            ["--period", "0"],
+            ["--period", "61"],
+            ["--target", "not-a-zone"],
+        ] {
+            assert!(
+                Cli::try_parse_from(["hyperx-cli", "rgb", "cycle", invalid[0], invalid[1],])
+                    .is_err()
+            );
+        }
     }
 
     #[test]

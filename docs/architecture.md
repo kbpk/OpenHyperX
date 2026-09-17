@@ -29,10 +29,10 @@ hidapi / Windows HID
 
 The current implementation includes discovery, standard report-descriptor
 reads, a capture-backed runtime-profile read, the capture-backed volatile RGB
-operation with separate wheel/logo colors, runtime setters for active DPI and
-polling, and an offline Pulsefire Raid profile patcher. Runtime DPI setters can
-edit values and colors, select a stage, append up to five contiguous stages,
-and remove only the final stage.
+operation with separate wheel/logo colors, an explicit foreground spectrum
+renderer, runtime setters for active DPI and polling, and an offline Pulsefire
+Raid profile patcher. Runtime DPI setters can edit values and colors, select a
+stage, append up to five contiguous stages, and remove only the final stage.
 It also recognizes confirmed button records and exposes a deliberately narrow
 runtime Button 5 setter for seven captured ordinary records. The
 platform-independent macro model stores an ordered key/button down/up timeline
@@ -117,8 +117,8 @@ parent device information to derive a stable physical-device key.
 
 ## Background work
 
-No permanent service is planned. Operations that need short-lived activity can
-run in the foreground. OpenRGB indicates Pulsefire Raid direct RGB needs a
-roughly one-second keepalive; an RGB CLI command must therefore either expose
-an explicit duration/foreground mode or use a separately confirmed persistent
-profile command. It must not silently install a service.
+No permanent service is planned. Operations that need short-lived activity run
+in the foreground. OpenRGB indicates Pulsefire Raid direct RGB needs a roughly
+one-second keepalive. Static direct lighting therefore exposes an explicit
+duration, while the software spectrum cycle runs only for its requested
+foreground duration. Neither silently installs a service or writes a profile.

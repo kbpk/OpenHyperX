@@ -423,10 +423,28 @@ On 2026-09-17, with NGENUITY, OpenRGB and other device writers stopped,
 OpenHyperX exercised the two direct fields independently on the physical
 release-`1124` unit. For five seconds, `wheel=#FF0000, logo=#000000` lit only
 the scroll wheel red. The reversed test, `wheel=#000000, logo=#0000FF`, lit
-only the HyperX logo blue. After each foreground keepalive ended, both LEDs
-returned to their pre-test red state. This confirms field-to-LED ordering,
-independent colors, per-LED black/off behavior and volatile reversion. Neither
-test sent an onboard-profile write.
+only the HyperX logo blue. A third test used `wheel=#FF0000, logo=#0000FF`;
+both LEDs simultaneously displayed their distinct requested colors even though
+the tested NGENUITY Solid UI did not expose separate per-LED colors. After each
+foreground keepalive ended, both LEDs returned to their pre-test red state.
+This confirms field-to-LED ordering, simultaneous independent colors,
+per-LED black/off behavior and volatile reversion. None of these tests sent an
+onboard-profile write.
+
+OpenHyperX's `rgb cycle` is deliberately described as a software spectrum,
+not as a decoded firmware effect or a byte-for-byte clone of NGENUITY's
+animation. It computes portable RGB frames in `hyperx-core`, sends them through
+the same confirmed two-LED direct report at roughly 60-ms intervals including
+transport pacing, and stops after an explicit foreground duration. The target
+can be both LEDs, the wheel only or the logo only; untargeted LEDs receive
+black. It never writes the runtime or onboard profile.
+
+The first physical test ran `rgb cycle --target all --duration 5 --period 2`
+on the release-`1124` unit with other writers stopped. Both the wheel and logo
+visibly moved through the spectrum in sync for the requested five seconds.
+This validates the foreground renderer and sustained direct-report pacing on
+Windows hardware; it does not imply persistence or reproduce NGENUITY's exact
+animation curve.
 
 ### Button-remapping UI observations
 
@@ -671,7 +689,7 @@ continued to operate normally. No onboard-save transaction was sent.
 | report descriptor for configuration collection | confirmed | optionally dump the two other vendor collections for research without sending reports |
 | direct RGB transport | hardware-validated for independent wheel/logo colors and black/off; NGENUITY Solid and Cycle both use it, and the previous lighting state returns without keepalive | optionally measure the exact timeout/revert interval |
 | RGB off semantics | direct black independently extinguishes both physical LEDs | compare NGENUITY's explicit lighting-off UI, if present, only to determine whether it differs from black |
-| persistent RGB/effects | Solid color and Cycle are software-rendered; red/green save captures did not persist lighting | determine whether Raid firmware exposes any hardware-lighting mode before claiming support; otherwise provide an explicit foreground engine |
+| persistent RGB/effects | Solid color and Cycle are software-rendered; OpenHyperX provides an explicit foreground spectrum cycle, while red/green save captures did not persist lighting | determine whether Raid firmware exposes any hardware-lighting mode before claiming persistent support |
 | DPI and stages | runtime read/set, per-stage value/color edits, active-stage selection and final-stage add/remove are implemented and hardware-validated; five big-endian X/Y slots, 200-16000 range and 50-DPI units are confirmed | determine whether independent X/Y values are supported; onboard persistence remains part of the separate save blocker |
 | polling | all four interval codes captured; runtime 1000→500→1000 set/readback validated; 1000 Hz persisted through a separate NGENUITY save and power-cycle | verify effective USB report rate with an external rate tester |
 | button bindings | all 11 mappings are readable; seven exact Button 5 ordinary assignments are writable; bounded Play Once macros support keyboard chords, nonuniform timing and left/right/middle clicks; Forward and AB were hardware-tested before the general encoder | capture target-control changes and repeat inferred multimedia/shortcut values; isolate repeat modes, longer timelines, remaining mouse events and timing boundaries |
