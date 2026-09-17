@@ -225,8 +225,10 @@ publishing them.
 
 See [docs/reverse-engineering.md](docs/reverse-engineering.md) for the capture
 workflow and [docs/adding-device.md](docs/adding-device.md) for registry rules.
-The repository-local `$add-hyperx-device` skill in
-`.agents/skills/add-hyperx-device` enforces this workflow for future devices.
+Repository-local skills split read-only `$discover-hyperx-device` discovery
+from capture-backed `$add-hyperx-device` protocol and driver development. They
+live in `.agents/skills/` and deliberately avoid repeating discovery during an
+ongoing development session.
 
 ## License and prior art
 

@@ -1,4 +1,4 @@
 interface:
-  display_name: "Add HyperX Device"
-  short_description: "Add capture-backed HyperX HID device support"
-  default_prompt: "Use $add-hyperx-device to add safe, tested support for this HyperX device."
+  display_name: "Develop HyperX Device"
+  short_description: "Develop capture-backed HyperX protocol support"
+  default_prompt: "Use $add-hyperx-device to implement and verify this already-discovered HyperX capability."

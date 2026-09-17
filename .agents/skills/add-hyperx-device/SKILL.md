@@ -1,55 +1,57 @@
 ---
 name: add-hyperx-device
-description: Add or extend support for a HyperX USB/HID device in this Rust workspace, from safe discovery through capture-backed protocol commands and tests. Use for new device models, capabilities, packet codecs, HID transport work, or device-specific CLI commands; do not use for firmware, bootloader, or DFU work.
+description: Implement or extend capture-backed HyperX protocol, driver, and CLI support after device identity and HID topology are known. Use for codecs, mutable commands, captures, and hardware verification; use discover-hyperx-device instead for read-only discovery. Never use for firmware, bootloader, or DFU work.
 ---
 
-# Add a HyperX Device
+# Develop a HyperX Device
 
-Work in small evidence-backed increments. Preserve the separation between
-`hyperx-core`, `hyperx-hid`, `hyperx-protocol`, `hyperx-devices`, and clients.
+Assume discovery is already complete. Reuse the exact identity, collection
+selector, and current-session capture routing recorded in `docs/research.md` or
+handed off by `$discover-hyperx-device`. Do not repeat VID/PID research, HID
+enumeration, process checks, or USBPcap probing unless the relevant state could
+actually have changed. If identity or topology is missing, stop this workflow
+and perform discovery once.
 
-Before changing a driver, read the relevant sections of:
+Preserve the separation between `hyperx-core`, `hyperx-hid`,
+`hyperx-protocol`, `hyperx-devices`, and clients. Read only the task-relevant
+sections of:
 
 - `docs/architecture.md` for crate and safety boundaries;
 - `docs/research.md` for confirmed facts and current unknowns;
 - `docs/adding-device.md` for repository conventions.
 
-When implementing any vendor report or persistent operation, also read
-[references/protocol-safety.md](references/protocol-safety.md) and follow its
-evidence gate.
+For any capture, vendor report, mutable operation, or hardware test, read
+[references/protocol-safety.md](references/protocol-safety.md). For a capture,
+also read the relevant experiment section of `docs/reverse-engineering.md`.
 
-## Required approach
+## Workflow
 
-1. Inspect the current worktree and preserve unrelated changes.
-2. Identify the exact VID/PID and HID collection tuple from hardware output or
-   an attributable primary/public implementation. Never infer IDs or interfaces
-   from a sibling HyperX model.
-3. Add the model descriptor and hardware capabilities in `hyperx-devices`.
-   Keep “hardware supports it” distinct from “the driver implements it.”
-4. Enumerate first. Open only the verified vendor collection; leave standard
-   mouse and keyboard collections alone.
-5. Implement typed encoders/decoders and driver operations only when every
-   meaningful byte is supported by evidence. Unknown data requires a targeted
-   capture experiment and a precise TODO, not a guessed packet.
-6. Add golden packet tests, invalid-input tests, capability tests, and an exact
-   TX/RX test using `MockHidTransport` before testing on hardware.
-7. Update `docs/research.md` with sources, local observations, confidence, and
-   remaining unknowns. Attribute GPL or other prior art and independently write
-   this project's implementation.
-8. Run the Windows checks from WSL with
-   `scripts/check-windows.ps1`. The Windows binary, not a Linux build, is the
-   acceptance target.
+1. Inspect the worktree and the narrow existing API involved in the request.
+2. Separate confirmed bytes from hypotheses. An unknown requires one targeted
+   capture experiment and a precise TODO, never an inferred send path.
+3. Implement typed codecs and validate all input before discovery or HID I/O.
+4. Add golden packet, invalid-input, capability, and exact `MockHidTransport`
+   TX/RX tests before a hardware test.
+5. Test the narrowest confirmed operation, then record the result and remaining
+   unknowns in `docs/research.md`.
+6. Run format and Clippy on Linux. Once code is stable, run one aggregated
+   native Windows test/build/smoke invocation with `scripts/check-windows.ps1`.
+
+Do offline codec and fixture work without touching Windows hardware. When a
+Windows call is necessary, combine related read-only checks and the one planned
+operation instead of issuing a sequence of exploratory commands. A capture
+session should resolve routing once and reuse it until reboot, reconnect, or an
+observed address change. Never probe guessed USB addresses one by one.
 
 Mutable hardware testing must state what will change and whether it is volatile
-or persistent. Exercise the narrowest confirmed operation and verify normal
-cursor/buttons still work afterward. Do not run NGENUITY and this project as
-simultaneous writers.
+or persistent. Check competing writers in the same aggregated invocation as
+the test when practical. Do not run NGENUITY and this project as simultaneous
+writers.
 
 Never implement or transmit firmware flashing, firmware update, bootloader, or
 DFU commands. Do not replay an unknown report. A future raw-send facility must
 be isolated, require explicit `--unsafe`, warn immediately, and block known
 firmware paths; its existence is not required for adding a device.
 
-Finish with a concise report of implemented capabilities, commands actually
-tested on Windows hardware, checks run, and protocol areas still blocked on
-captures.
+Finish with the implemented capability, commands actually tested on hardware,
+checks run, and protocol areas still blocked on captures.

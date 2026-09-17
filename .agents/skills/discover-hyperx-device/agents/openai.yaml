@@ -1,0 +1,4 @@
+interface:
+  display_name: "Discover HyperX Device"
+  short_description: "Read-only HyperX HID and USBPcap discovery"
+  default_prompt: "Use $discover-hyperx-device to identify this HyperX device and return a concise discovery handoff."
