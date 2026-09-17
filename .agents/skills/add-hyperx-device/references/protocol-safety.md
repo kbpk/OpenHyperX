@@ -55,3 +55,6 @@ Capture one UI change at a time and repeat it. Include a no-op capture to remove
 keepalive/background traffic. Export complete ordered reports as hex; retain
 direction, interface, transfer/report type, and timing. Follow
 `docs/reverse-engineering.md` for the experiment matrix and fixture format.
+After every capture, verify both a non-header file size and relevant target
+traffic before declaring it successful. A wrapper process exiting successfully
+is not evidence that USBPcap recorded the intended transaction.

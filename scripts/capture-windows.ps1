@@ -3,9 +3,17 @@ param(
     [ValidatePattern('^\\\\\.\\USBPcap\d+$')]
     [string]$Interface,
 
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $true, ParameterSetName = "Address")]
     [ValidateRange(1, 127)]
     [int]$DeviceAddress,
+
+    [Parameter(Mandatory = $true, ParameterSetName = "Identity")]
+    [ValidateRange(0, 65535)]
+    [int]$VendorId,
+
+    [Parameter(Mandatory = $true, ParameterSetName = "Identity")]
+    [ValidateRange(0, 65535)]
+    [int]$ProductId,
 
     [ValidateRange(1, 300)]
     [int]$DurationSeconds = 15,
@@ -28,10 +36,18 @@ if (-not $isAdministrator) {
         "-ExecutionPolicy", "Bypass",
         "-File", "`"$PSCommandPath`"",
         "-Interface", "`"$Interface`"",
-        "-DeviceAddress", $DeviceAddress,
         "-DurationSeconds", $DurationSeconds,
         "-OutputPath", "`"$OutputPath`""
     )
+    if ($PSCmdlet.ParameterSetName -eq "Identity") {
+        $arguments += @(
+            "-VendorId", $VendorId,
+            "-ProductId", $ProductId
+        )
+    }
+    else {
+        $arguments += @("-DeviceAddress", $DeviceAddress)
+    }
 
     $elevationOptions = @{
         FilePath     = "powershell.exe"
@@ -47,6 +63,26 @@ if (-not $isAdministrator) {
 $usbPcap = Join-Path $env:ProgramFiles "USBPcap\USBPcapCMD.exe"
 if (-not (Test-Path -LiteralPath $usbPcap)) {
     throw "USBPcapCMD.exe was not found at $usbPcap."
+}
+
+if ($PSCmdlet.ParameterSetName -eq "Identity") {
+    $locator = Join-Path $PSScriptRoot "locate-usbpcap-device.ps1"
+    if (-not (Test-Path -LiteralPath $locator)) {
+        throw "USBPcap device locator was not found at $locator."
+    }
+    $location = @(
+        & $locator -Interface $Interface -VendorId $VendorId `
+            -ProductId $ProductId -DurationSeconds 2
+    )
+    $locationMatch = if ($location.Count -eq 1) {
+        [regex]::Match($location[0], '^.+\|(\d+)$')
+    }
+    if ($location.Count -ne 1 -or -not $locationMatch.Success) {
+        throw "USBPcap device locator returned an invalid result: $($location -join ', ')"
+    }
+    $DeviceAddress = [int]$locationMatch.Groups[1].Value
+    Write-Output ("Resolved {0:X4}:{1:X4} to {2}, address {3}." -f `
+        $VendorId, $ProductId, $Interface, $DeviceAddress)
 }
 
 $expandedOutputPath = [Environment]::ExpandEnvironmentVariables($OutputPath)

@@ -22,19 +22,21 @@ bounded device-only capture from WSL:
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -File "$(wslpath -w "$PWD/scripts/capture-windows.ps1")" \
   -Interface '\\.\USBPcap1' \
-  -DeviceAddress 7 \
+  -VendorId 2385 \
+  -ProductId 5860 \
   -DurationSeconds 5 \
   -OutputPath '%TEMP%\openhyperx-dpi-800-900.pcapng'
 ```
 
-The interface and address are examples and can change after reconnect or
-reboot. Re-enumerate them before every capture session. The script refuses to
-capture every device, refuses to overwrite an existing file, stops after at
-most 300 seconds, expands Windows `%NAME%` environment variables in the output
-path, and requests elevation only for the bounded capture process. Using
-`%TEMP%` avoids hard-coding a Windows account name when invoking PowerShell
-from Bash. A header-only pcapng is treated as a failed capture and tells the
-operator to re-enumerate the transient interface and device address.
+The controller is an example and can change after moving the device to another
+port. Identity mode takes a temporary descriptor snapshot on that controller,
+resolves `0951:16E4` to its current ephemeral address, deletes the snapshot,
+then records only that address. This avoids reusing a stale address or probing
+guesses. The script refuses to overwrite an existing file, stops after at most
+300 seconds, expands Windows `%NAME%` environment variables in the output path,
+and requests elevation only for the bounded capture process. Using `%TEMP%`
+avoids hard-coding a Windows account name when invoking PowerShell from Bash. A
+header-only pcapng is treated as a failed capture.
 
 USBPcap may contain traffic from other devices on the same host controller.
 Treat raw captures as potentially sensitive. The repository ignores `*.pcap`,

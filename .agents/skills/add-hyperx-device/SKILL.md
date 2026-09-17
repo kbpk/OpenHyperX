@@ -6,11 +6,12 @@ description: Implement or extend capture-backed HyperX protocol, driver, and CLI
 # Develop a HyperX Device
 
 Assume discovery is already complete. Reuse the exact identity, collection
-selector, and current-session capture routing recorded in `docs/research.md` or
-handed off by `$discover-hyperx-device`. Do not repeat VID/PID research, HID
-enumeration, process checks, or USBPcap probing unless the relevant state could
-actually have changed. If identity or topology is missing, stop this workflow
-and perform discovery once.
+selector, and USBPcap controller recorded in `docs/research.md` or handed off
+by `$discover-hyperx-device`. Never trust a cached numeric USBPcap device
+address: it can change without an obvious reboot or reconnect. Do not repeat
+VID/PID research, HID enumeration, process checks, or controller discovery
+unless the relevant state could actually have changed. If identity or topology
+is missing, stop this workflow and perform discovery once.
 
 Preserve the separation between `hyperx-core`, `hyperx-hid`,
 `hyperx-protocol`, `hyperx-devices`, and clients. Read only the task-relevant
@@ -40,8 +41,23 @@ also read the relevant experiment section of `docs/reverse-engineering.md`.
 Do offline codec and fixture work without touching Windows hardware. When a
 Windows call is necessary, combine related read-only checks and the one planned
 operation instead of issuing a sequence of exploratory commands. A capture
-session should resolve routing once and reuse it until reboot, reconnect, or an
-observed address change. Never probe guessed USB addresses one by one.
+must use the identity mode of `scripts/capture-windows.ps1`; it resolves VID/PID
+to the current address immediately before recording, under the same elevation.
+Never probe guessed USB addresses one by one or ask the operator to repeat an
+experiment before fully analyzing the capture already obtained.
+
+For a manual capture:
+
+1. State the single UI transition and have the operator ready before starting.
+2. Run one bounded identity-resolving capture, for example with
+   `-VendorId 2385 -ProductId 5860`; do not run the locator separately first.
+3. After it returns, explicitly verify the file is larger than a pcapng header
+   and contains traffic for the resolved device. Do not infer success from the
+   parent PowerShell exit code.
+4. Before requesting another operator action, extract and inspect all candidate
+   feature reports and prove whether the expected transition is present.
+
+Keep raw captures outside Git and treat them as potentially sensitive.
 
 Mutable hardware testing must state what will change and whether it is volatile
 or persistent. Check competing writers in the same aggregated invocation as
