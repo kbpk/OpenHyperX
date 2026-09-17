@@ -1,6 +1,6 @@
 # Pulsefire Raid research
 
-Last updated: 2026-09-16.
+Last updated: 2026-09-17.
 
 This document separates manufacturer facts, public implementation evidence,
 local observations and hypotheses. Do not promote a hypothesis into a device
@@ -576,7 +576,23 @@ The protocol crate contains an offline evidence-gated codec for the confirmed
 Button 5 macro reference and three exact event lists: A at 20 ms, A at 300 ms,
 and A then B at 20 ms. It rejects every other event list, nonuniform timing,
 playback-like byte, nonzero padding or onboard profile. Generic macros and all
-device I/O remain unavailable until the fields above are isolated.
+other macro variants remain unavailable until the fields above are isolated.
+
+On 2026-09-17, OpenHyperX's runtime setter was tested on the physical
+release-`1124` unit with NGENUITY and other writers stopped. The initial read
+showed the existing Button 5 macro reference. OpenHyperX changed only Button 5
+to the captured Mouse Forward record, and an independent read decoded it as
+Forward while the other ten mappings were unchanged. It then sent the exact
+captured A-then-B/20-ms/Play-Once macro definition followed by the profile
+reference; an independent read again found the macro reference and all other
+mappings unchanged. Pressing Button 5 then emitted lowercase `ab`, functionally
+confirming the OpenHyperX-generated macro definition and ordering. No
+onboard-save transaction was sent.
+
+The driver exposes only the seven ordinary Button 5 assignments seen in local
+captures (Disabled, Forward, Back, Volume Up, Copy, keyboard A and DPI Toggle)
+plus the three exact macro fixtures. Other decoded bindings remain read-only
+inferences even when their usage IDs come from the USB HID standard.
 
 ## Unknowns and required evidence
 
@@ -589,7 +605,7 @@ device I/O remain unavailable until the fields above are isolated.
 | persistent RGB/effects | Solid color and Cycle are software-rendered; red/green save captures did not persist lighting | determine whether Raid firmware exposes any hardware-lighting mode before claiming support; otherwise provide an explicit foreground engine |
 | DPI and stages | runtime read/set, per-stage value/color edits, active-stage selection and final-stage add/remove are implemented and hardware-validated; five big-endian X/Y slots, 200-16000 range and 50-DPI units are confirmed | determine whether independent X/Y values are supported; onboard persistence remains part of the separate save blocker |
 | polling | all four interval codes captured; runtime 1000→500→1000 set/readback validated; 1000 Hz persisted through a separate NGENUITY save and power-cycle | verify effective USB report rate with an external rate tester |
-| button bindings | 11 record offsets correlated; Button 5 isolated across Disabled, Forward, Back, Volume Up, Copy, A, DPI Toggle and working A/A→B macros; keyboard event append format and 20/300 ms timing encoding confirmed offline | capture one nonuniform-timing A→B macro, isolate playback and target-control bytes, then boundary-test the UI timing range; repeat one inferred multimedia/shortcut value; do not expose hardware writes yet |
+| button bindings | all 11 mappings are readable; seven exact Button 5 ordinary assignments and three exact Play Once macro presets are writable at runtime; Forward was read back and the restored AB macro emitted `ab` on hardware | capture target-control changes and repeat inferred multimedia/shortcut values before expanding writable controls; isolate nonuniform timing and playback modes |
 | onboard save | repeated transaction, timing and read-modify-write captured; performance persistence confirmed; `0x18[0]` carries two correlated RGB triplets while `0x18[1..2]` were zero for Solid/All Lights | capture isolated wheel/logo and non-Solid saves, then save a profile containing a macro; determine acknowledgements and failure behavior before replay |
 | NGENUITY locking | unknown | run `devices`, then future read-only `info`, with NGENUITY open and closed; record open errors |
 | admin requirement | configuration collection opens without elevation | retest on a second Windows machine/account |

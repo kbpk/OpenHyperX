@@ -7,12 +7,15 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
-use clap::{ArgAction, Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use hyperx_core::{
     ButtonBinding, DeviceDescriptor, DpiProfile, HidInterfaceInfo, MouseFunction,
     MultimediaFunction, PollingRate, RgbColor, UsbId, WindowsShortcut,
 };
-use hyperx_devices::{find_supported_device, PulsefireRaid, PULSEFIRE_RAID, PULSEFIRE_RAID_DPI};
+use hyperx_devices::{
+    find_supported_device, PulsefireRaid, PulsefireRaidButton5Assignment, PULSEFIRE_RAID,
+    PULSEFIRE_RAID_DPI,
+};
 use hyperx_hid::{HidApiDiscovery, HidApiTransport, HidDiscovery, HidTransport};
 use hyperx_protocol::{
     capture::{diff_captures, parse_hex_capture},
@@ -69,6 +72,11 @@ enum Command {
     Polling {
         #[command(subcommand)]
         command: PollingCommand,
+    },
+    /// Read button mappings or apply an exact capture-backed runtime mapping.
+    Buttons {
+        #[command(subcommand)]
+        command: ButtonsCommand,
     },
     /// Compare two text files containing one raw hexadecimal report per line.
     DecodeCapture {
@@ -169,6 +177,75 @@ enum PollingCommand {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum ButtonsCommand {
+    /// Show all 11 runtime button mappings.
+    List,
+    /// Change one runtime mapping; currently limited to captured Button 5 cases.
+    Set {
+        /// Physical control to update.
+        control: ButtonControlArg,
+        /// Exact capture-backed assignment.
+        assignment: Button5AssignmentArg,
+    },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ButtonControlArg {
+    Button5,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum Button5AssignmentArg {
+    Disabled,
+    Forward,
+    Back,
+    VolumeUp,
+    Copy,
+    KeyA,
+    DpiToggle,
+    #[value(name = "macro-a-20ms")]
+    MacroA20ms,
+    #[value(name = "macro-a-300ms")]
+    MacroA300ms,
+    #[value(name = "macro-ab-20ms")]
+    MacroAb20ms,
+}
+
+impl Button5AssignmentArg {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::Forward => "forward",
+            Self::Back => "back",
+            Self::VolumeUp => "volume-up",
+            Self::Copy => "copy",
+            Self::KeyA => "key-a",
+            Self::DpiToggle => "dpi-toggle",
+            Self::MacroA20ms => "macro-a-20ms",
+            Self::MacroA300ms => "macro-a-300ms",
+            Self::MacroAb20ms => "macro-ab-20ms",
+        }
+    }
+}
+
+impl From<Button5AssignmentArg> for PulsefireRaidButton5Assignment {
+    fn from(assignment: Button5AssignmentArg) -> Self {
+        match assignment {
+            Button5AssignmentArg::Disabled => Self::Disabled,
+            Button5AssignmentArg::Forward => Self::Forward,
+            Button5AssignmentArg::Back => Self::Back,
+            Button5AssignmentArg::VolumeUp => Self::VolumeUp,
+            Button5AssignmentArg::Copy => Self::Copy,
+            Button5AssignmentArg::KeyA => Self::KeyboardA,
+            Button5AssignmentArg::DpiToggle => Self::DpiToggle,
+            Button5AssignmentArg::MacroA20ms => Self::MacroA20Ms,
+            Button5AssignmentArg::MacroA300ms => Self::MacroA300Ms,
+            Button5AssignmentArg::MacroAb20ms => Self::MacroAb20Ms,
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     init_logging(cli.verbose, cli.trace)?;
@@ -182,6 +259,7 @@ fn main() -> Result<()> {
         },
         Command::Dpi { command } => dpi(command),
         Command::Polling { command } => polling(command),
+        Command::Buttons { command } => buttons(command),
         Command::DecodeCapture { before, after } => decode_capture(&before, &after),
     }
 }
@@ -338,22 +416,26 @@ fn print_runtime_profile(profile: &PerformanceProfile) {
     }
 
     println!("  Buttons:");
+    print_button_profile(profile, "    ");
+}
+
+fn print_button_profile(profile: &PerformanceProfile, indent: &str) {
     for control in PulsefireRaidControl::ALL {
         if profile.has_confirmed_macro_reference(control) {
             println!(
-                "    {:<17} Macro reference (definition is not present in the runtime profile)",
+                "{indent}{:<17} Macro reference (definition is not present in the runtime profile)",
                 format!("{}:", control.name())
             );
             continue;
         }
         match profile.button_binding(control) {
             Ok(binding) => println!(
-                "    {:<17} {}",
+                "{indent}{:<17} {}",
                 format!("{}:", control.name()),
                 format_button_binding(&binding)
             ),
             Err(error) => println!(
-                "    {:<17} <decode error: {error}>",
+                "{indent}{:<17} <decode error: {error}>",
                 format!("{}:", control.name())
             ),
         }
@@ -527,6 +609,32 @@ fn polling(command: PollingCommand) -> Result<()> {
                 "failed to update the runtime polling rate; the setting may be unchanged",
             )?;
             println!("Updated runtime polling rate to {} Hz.", rate.hz());
+            println!("The onboard profile was not written.");
+        }
+    }
+    Ok(())
+}
+
+fn buttons(command: ButtonsCommand) -> Result<()> {
+    let mut device = open_pulsefire_raid()?;
+    match command {
+        ButtonsCommand::List => {
+            let profile = device.runtime_profile().context(
+                "failed to read the Pulsefire Raid runtime profile; close NGENUITY and retry",
+            )?;
+            println!("Button mappings:");
+            print_button_profile(&profile, "  ");
+        }
+        ButtonsCommand::Set {
+            control: ButtonControlArg::Button5,
+            assignment,
+        } => {
+            device
+                .set_runtime_button5_assignment(assignment.into())
+                .context(
+                    "failed to update Button 5's runtime mapping; the setting may be unchanged",
+                )?;
+            println!("Updated Button 5 runtime mapping to {}.", assignment.name());
             println!("The onboard profile was not written.");
         }
     }
@@ -786,6 +894,35 @@ mod tests {
             assert!(Cli::try_parse_from(["hyperx-cli", "polling", "set", valid]).is_ok());
         }
         assert!(Cli::try_parse_from(["hyperx-cli", "polling", "set", "2000"]).is_err());
+    }
+
+    #[test]
+    fn cli_exposes_only_capture_backed_button5_assignments() {
+        assert!(Cli::try_parse_from(["hyperx-cli", "buttons", "list"]).is_ok());
+        for assignment in [
+            "disabled",
+            "forward",
+            "back",
+            "volume-up",
+            "copy",
+            "key-a",
+            "dpi-toggle",
+            "macro-a-20ms",
+            "macro-a-300ms",
+            "macro-ab-20ms",
+        ] {
+            assert!(
+                Cli::try_parse_from(["hyperx-cli", "buttons", "set", "button5", assignment])
+                    .is_ok(),
+                "assignment {assignment} should parse"
+            );
+        }
+
+        assert!(Cli::try_parse_from(["hyperx-cli", "buttons", "set", "button4", "back",]).is_err());
+        assert!(
+            Cli::try_parse_from(["hyperx-cli", "buttons", "set", "button5", "volume-down",])
+                .is_err()
+        );
     }
 
     fn fixture() -> HidInterfaceInfo {

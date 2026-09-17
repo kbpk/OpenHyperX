@@ -387,9 +387,9 @@ impl PerformanceProfile {
 
     /// Patch one confirmed four-byte button record in an existing profile.
     ///
-    /// This is an offline operation. Inferred members use standard USB HID
-    /// usage IDs, but no profile produced here is sent by the device driver
-    /// while the surrounding save transaction remains unresolved.
+    /// This operation itself performs no I/O. Inferred members use standard
+    /// USB HID usage IDs; the device driver exposes a separate evidence gate
+    /// and transmits only the exact Button 5 records captured locally.
     pub fn set_button_binding(
         &mut self,
         control: PulsefireRaidControl,
@@ -508,8 +508,9 @@ impl ConfirmedMacro {
 
     /// Patch the exact captured macro reference into a runtime profile image.
     ///
-    /// This remains offline. A complete profile transaction is not exposed by
-    /// the device driver, and onboard use is deliberately rejected.
+    /// This operation itself performs no I/O. The device driver exposes only
+    /// the exact locally captured runtime macro presets, and onboard use is
+    /// deliberately rejected.
     pub fn apply_to_profile(
         &self,
         profile: &mut PerformanceProfile,

@@ -1,14 +1,15 @@
 use std::time::Duration;
 
 use hyperx_core::{
-    Capability, CapabilitySet, DeviceDescriptor, DpiCapabilities, DpiProfile, DpiValidationError,
-    InterfaceSelector, LightingZone, PollingRate, RgbColor, UsbId,
+    ButtonBinding, Capability, CapabilitySet, DeviceDescriptor, DpiCapabilities, DpiProfile,
+    DpiValidationError, InterfaceSelector, KeyboardMacroEvent, KeyboardUsage, LightingZone,
+    MouseFunction, MultimediaFunction, PollingRate, RgbColor, UsbId, WindowsShortcut,
 };
 use hyperx_hid::{HidError, HidTransport};
 use hyperx_protocol::pulsefire_raid::{
     encode_direct_rgb, encode_profile_read_request, encode_runtime_profile_read_prelude,
-    PerformanceProfile, PerformanceProfileError, ProfileImageKind, ProfileSection,
-    DIRECT_REPORT_ID, DIRECT_REPORT_LENGTH,
+    ConfirmedMacro, ConfirmedMacroError, PerformanceProfile, PerformanceProfileError,
+    ProfileImageKind, ProfileSection, PulsefireRaidControl, DIRECT_REPORT_ID, DIRECT_REPORT_LENGTH,
 };
 use thiserror::Error;
 
@@ -75,6 +76,62 @@ pub const PULSEFIRE_RAID: DeviceDescriptor = DeviceDescriptor {
     },
 };
 
+/// Button 5 assignments backed by exact local Pulsefire Raid captures.
+///
+/// This intentionally excludes inferred members of otherwise recognized HID
+/// binding families. Expand it only after an isolated capture confirms the
+/// exact record or macro report on the target device.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PulsefireRaidButton5Assignment {
+    Disabled,
+    Forward,
+    Back,
+    VolumeUp,
+    Copy,
+    KeyboardA,
+    DpiToggle,
+    MacroA20Ms,
+    MacroA300Ms,
+    MacroAb20Ms,
+}
+
+impl PulsefireRaidButton5Assignment {
+    fn ordinary_binding(self) -> Option<ButtonBinding> {
+        match self {
+            Self::Disabled => Some(ButtonBinding::Disabled),
+            Self::Forward => Some(ButtonBinding::Mouse(MouseFunction::Forward)),
+            Self::Back => Some(ButtonBinding::Mouse(MouseFunction::Back)),
+            Self::VolumeUp => Some(ButtonBinding::Multimedia(MultimediaFunction::VolumeUp)),
+            Self::Copy => Some(ButtonBinding::WindowsShortcut(WindowsShortcut::Copy)),
+            Self::KeyboardA => Some(ButtonBinding::Keyboard(KeyboardUsage(0x04))),
+            Self::DpiToggle => Some(ButtonBinding::Mouse(MouseFunction::DpiToggle)),
+            Self::MacroA20Ms | Self::MacroA300Ms | Self::MacroAb20Ms => None,
+        }
+    }
+
+    fn macro_definition(self) -> Result<Option<ConfirmedMacro>, ConfirmedMacroError> {
+        let events = match self {
+            Self::MacroA20Ms => keyboard_events(&[(0x04, 20)]),
+            Self::MacroA300Ms => keyboard_events(&[(0x04, 300)]),
+            Self::MacroAb20Ms => keyboard_events(&[(0x04, 20), (0x05, 20)]),
+            _ => return Ok(None),
+        };
+        ConfirmedMacro::button5_keyboard_once(&events).map(Some)
+    }
+}
+
+fn keyboard_events(keys: &[(u16, u16)]) -> Vec<KeyboardMacroEvent> {
+    keys.iter()
+        .flat_map(|&(usage, timing_ms)| {
+            let usage = KeyboardUsage(usage);
+            [
+                KeyboardMacroEvent::pressed(usage, timing_ms),
+                KeyboardMacroEvent::released(usage, timing_ms),
+            ]
+        })
+        .collect()
+}
+
 #[derive(Debug, Error)]
 pub enum PulsefireRaidError {
     #[error("Pulsefire Raid configuration requires HID interface 1, got {0}")]
@@ -96,6 +153,8 @@ pub enum PulsefireRaidError {
     TooManyDpiStages(u8),
     #[error("the only remaining DPI stage cannot be removed")]
     CannotRemoveOnlyDpiStage,
+    #[error(transparent)]
+    InvalidMacro(#[from] ConfirmedMacroError),
     #[error(transparent)]
     InvalidDpi(#[from] DpiValidationError),
     #[error(transparent)]
@@ -320,6 +379,43 @@ impl<T: HidTransport> PulsefireRaid<T> {
         stage_index: usize,
     ) -> Result<DpiProfile, PulsefireRaidError> {
         self.set_runtime_dpi_stage(stage_index, None, None, true)
+    }
+
+    /// Assign one exact capture-backed action to Button 5 in runtime memory.
+    ///
+    /// Macro presets transmit their confirmed definition immediately before
+    /// the profile reference, matching the captured NGENUITY transaction. No
+    /// variant writes the onboard profile.
+    pub fn set_runtime_button5_assignment(
+        &mut self,
+        assignment: PulsefireRaidButton5Assignment,
+    ) -> Result<PulsefireRaidButton5Assignment, PulsefireRaidError> {
+        self.set_runtime_button5_assignment_with_wait(assignment, std::thread::sleep)
+    }
+
+    fn set_runtime_button5_assignment_with_wait(
+        &mut self,
+        assignment: PulsefireRaidButton5Assignment,
+        wait: impl FnMut(Duration),
+    ) -> Result<PulsefireRaidButton5Assignment, PulsefireRaidError> {
+        let macro_definition = assignment.macro_definition()?;
+        let ordinary_binding = assignment.ordinary_binding();
+        let mut profile = self.runtime_profile_with_wait(wait)?;
+
+        if let Some(macro_definition) = macro_definition {
+            macro_definition.apply_to_profile(&mut profile)?;
+            self.send_feature_report(macro_definition.as_bytes())?;
+        } else {
+            profile.set_button_binding(
+                PulsefireRaidControl::Button5,
+                ordinary_binding
+                    .as_ref()
+                    .expect("every non-macro assignment has an ordinary binding"),
+            )?;
+        }
+
+        self.write_runtime_profile(&profile)?;
+        Ok(assignment)
     }
 
     /// Change the polling rate in the runtime profile only.
@@ -629,6 +725,93 @@ mod tests {
             Err(PulsefireRaidError::CannotRemoveOnlyDpiStage)
         ));
         device.into_transport().assert_drained();
+    }
+
+    #[test]
+    fn driver_writes_only_the_captured_button5_record_for_an_ordinary_assignment() {
+        let mut response = performance_profile_response();
+        response[0x8C..0x90].copy_from_slice(&[0x53, 0x00, 0x00, 0x04]);
+        let mut expected_write = response;
+        expected_write[1] = 0x01;
+        expected_write[0x8C..0x90].copy_from_slice(&[0x02, 0xF9, 0x00, 0x04]);
+
+        let mut transport = MockHidTransport::new(1);
+        transport.expect_feature_report(encode_runtime_profile_read_prelude());
+        transport.expect_feature_report(encode_profile_read_request());
+        transport.queue_feature_response(response);
+        transport.expect_feature_report(expected_write);
+
+        let mut device = PulsefireRaid::new(transport).unwrap();
+        assert_eq!(
+            device
+                .set_runtime_button5_assignment_with_wait(
+                    PulsefireRaidButton5Assignment::Forward,
+                    |_| {},
+                )
+                .unwrap(),
+            PulsefireRaidButton5Assignment::Forward
+        );
+        device.into_transport().assert_drained();
+    }
+
+    #[test]
+    fn driver_sends_confirmed_macro_before_its_button5_profile_reference() {
+        let mut response = performance_profile_response();
+        response[0x8C..0x90].copy_from_slice(&[0x02, 0xF9, 0x00, 0x04]);
+
+        let mut expected_macro = [0_u8; DIRECT_REPORT_LENGTH];
+        expected_macro[..22].copy_from_slice(&[
+            0x07, 0x05, 0x04, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x80, 0x14, 0x04, 0x00,
+            0x14, 0x04, 0x80, 0x14, 0x05, 0x00, 0x14, 0x05,
+        ]);
+        let mut expected_write = response;
+        expected_write[1] = 0x01;
+        expected_write[0x8C..0x90].copy_from_slice(&[0x53, 0x00, 0x00, 0x04]);
+
+        let mut transport = MockHidTransport::new(1);
+        transport.expect_feature_report(encode_runtime_profile_read_prelude());
+        transport.expect_feature_report(encode_profile_read_request());
+        transport.queue_feature_response(response);
+        transport.expect_feature_report(expected_macro);
+        transport.expect_feature_report(expected_write);
+
+        let mut device = PulsefireRaid::new(transport).unwrap();
+        assert_eq!(
+            device
+                .set_runtime_button5_assignment_with_wait(
+                    PulsefireRaidButton5Assignment::MacroAb20Ms,
+                    |_| {},
+                )
+                .unwrap(),
+            PulsefireRaidButton5Assignment::MacroAb20Ms
+        );
+        device.into_transport().assert_drained();
+    }
+
+    #[test]
+    fn button5_assignment_enum_contains_only_locally_confirmed_variants() {
+        let ordinary = [
+            PulsefireRaidButton5Assignment::Disabled,
+            PulsefireRaidButton5Assignment::Forward,
+            PulsefireRaidButton5Assignment::Back,
+            PulsefireRaidButton5Assignment::VolumeUp,
+            PulsefireRaidButton5Assignment::Copy,
+            PulsefireRaidButton5Assignment::KeyboardA,
+            PulsefireRaidButton5Assignment::DpiToggle,
+        ];
+        assert!(ordinary
+            .into_iter()
+            .all(|assignment| assignment.ordinary_binding().is_some()));
+
+        let macros = [
+            PulsefireRaidButton5Assignment::MacroA20Ms,
+            PulsefireRaidButton5Assignment::MacroA300Ms,
+            PulsefireRaidButton5Assignment::MacroAb20Ms,
+        ];
+        assert!(macros.into_iter().all(|assignment| {
+            assignment.ordinary_binding().is_none()
+                && assignment.macro_definition().unwrap().is_some()
+        }));
     }
 
     #[test]

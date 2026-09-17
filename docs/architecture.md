@@ -32,10 +32,11 @@ reads, a capture-backed runtime-profile read, the capture-backed volatile RGB
 operation, runtime setters for active DPI and polling, and an offline Pulsefire
 Raid profile patcher. Runtime DPI setters can edit values and colors, select a
 stage, append up to five contiguous stages, and remove only the final stage.
-It also recognizes and reproduces confirmed button records and the keyboard-A
-and keyboard-A-then-B macro fixtures. Macro timing is represented per
-press/release event even though only uniform Standard Timing captures are
-currently accepted. Unconfirmed setters remain absent.
+It also recognizes confirmed button records and exposes a deliberately narrow
+runtime Button 5 setter for seven captured ordinary records and three exact
+keyboard macro fixtures. Macro timing is represented per press/release event
+even though only uniform Standard Timing captures are currently accepted.
+Unconfirmed setters remain absent.
 
 ## Crate responsibilities
 
@@ -77,7 +78,9 @@ Owns model identities, capability declarations and per-model protocol drivers.
 read, DPI-stage/polling runtime setters and volatile direct RGB. A model driver
 may depend on the core, protocol and transport traits, but never on CLI/Tauri
 types. Its stage API uses zero-based indexes internally; user-facing clients
-translate those to one-based numbers.
+translate those to one-based numbers. Device-specific evidence gates, such as
+the current Button 5 assignment enum, live in the driver so a future GUI cannot
+bypass the CLI's restricted writable set.
 
 ### `hyperx-cli`
 

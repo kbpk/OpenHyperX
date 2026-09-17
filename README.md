@@ -24,9 +24,12 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
 - capture-backed runtime DPI and stage management with per-stage colors, a
   200–16000 range, 50-DPI step and up to five contiguous stages
 - capture-backed runtime polling get/set for 125, 250, 500 and 1000 Hz
+- runtime listing of all 11 button mappings
+- capture-backed Button 5 runtime presets for Disabled, Forward, Back,
+  Volume Up, Copy, keyboard A, DPI Toggle and three exact Play Once macros
 - raw hex capture parser/diff for protocol research
 - offline DPI-stage, polling and button-profile parser/patcher with golden tests
-- no button-remapping or onboard hardware writes yet
+- no general button-remapping or onboard hardware writes yet
 
 The implementation stops wherever protocol evidence stops. Known facts and
 their confidence level are recorded in [docs/research.md](docs/research.md).
@@ -114,6 +117,29 @@ These setters read the current runtime image, patch only confirmed fields and
 write it back without invoking `Save to mouse`. All unrelated and unknown
 profile bytes are preserved. Use a separate `get` to verify a changed value.
 
+List all runtime button mappings or apply one of the exact Button 5 presets:
+
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
+  run --target x86_64-pc-windows-msvc --bin hyperx-cli -- buttons list
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
+  run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
+  buttons set button5 forward
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
+  run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
+  buttons set button5 macro-ab-20ms
+```
+
+The writable list is deliberately narrower than the mappings the decoder can
+recognize. Each exposed preset has an exact local capture; inferred HID values
+remain read-only. Macro presets are also exact: keyboard A at 20 or 300 ms, or
+A then B at 20 ms, all using Play Once. These commands do not save onboard.
+
 Apply volatile RGB once, or keep it active in the foreground for 30 seconds:
 
 ```bash
@@ -159,7 +185,8 @@ publishing them.
 3. **RGB proof of concept (implemented):** typed static/off direct reports and
    explicit foreground keepalive.
 4. **Protocol exploration:** DPI stages/colors and polling runtime control are
-   implemented; bindings, macros and onboard profiles remain capture-gated.
+   implemented; exact Button 5 binding/macro presets are implemented, while
+   general bindings, general macros and onboard profiles remain capture-gated.
 5. **GUI:** Tauri client using only the public core API.
 
 See [docs/reverse-engineering.md](docs/reverse-engineering.md) for the capture
