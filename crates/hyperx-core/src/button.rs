@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 /// A semantic action assigned to a programmable device button.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ButtonBinding {
@@ -98,11 +100,37 @@ pub struct MacroBinding {
 }
 
 /// Macro playback policies observed in NGENUITY.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum MacroPlayback {
     Once,
     ToggleRepeat,
     RepeatWhileHeld,
+}
+
+/// Platform-independent software macro definition.
+///
+/// Device drivers validate which event shapes, keys, timings and playback
+/// modes they can encode. A definition being parseable does not imply that a
+/// particular device can execute it.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct MacroDefinition {
+    pub playback: MacroPlayback,
+    pub events: Vec<MacroEvent>,
+}
+
+/// One input transition followed by an exact delay before the next event.
+///
+/// Separate down/up events allow chords: press a modifier, use a zero delay,
+/// press another key, then release both explicitly. Mouse-button variants are
+/// modeled for future capture-backed device encoders.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum MacroEvent {
+    KeyDown { key: String, delay_ms: u16 },
+    KeyUp { key: String, delay_ms: u16 },
+    MouseButtonDown { button: String, delay_ms: u16 },
+    MouseButtonUp { button: String, delay_ms: u16 },
 }
 
 #[cfg(test)]

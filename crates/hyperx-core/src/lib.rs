@@ -7,8 +7,8 @@ mod device;
 mod performance;
 
 pub use button::{
-    ButtonBinding, KeyState, KeyboardMacroEvent, KeyboardUsage, MacroBinding, MacroPlayback,
-    MouseFunction, MultimediaFunction, WindowsShortcut,
+    ButtonBinding, KeyState, KeyboardMacroEvent, KeyboardUsage, MacroBinding, MacroDefinition,
+    MacroEvent, MacroPlayback, MouseFunction, MultimediaFunction, WindowsShortcut,
 };
 pub use capability::{
     Capability, CapabilitySet, DpiCapabilities, DpiValidationError, LightingZone, PollingRate,

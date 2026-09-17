@@ -1,0 +1,21 @@
+playback = "once"
+
+[[events]]
+type = "key-down"
+key = "a"
+delay_ms = 20
+
+[[events]]
+type = "key-up"
+key = "a"
+delay_ms = 20
+
+[[events]]
+type = "key-down"
+key = "b"
+delay_ms = 20
+
+[[events]]
+type = "key-up"
+key = "b"
+delay_ms = 20

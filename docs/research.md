@@ -594,6 +594,16 @@ captures (Disabled, Forward, Back, Volume Up, Copy, keyboard A and DPI Toggle)
 plus the three exact macro fixtures. Other decoded bindings remain read-only
 inferences even when their usage IDs come from the USB HID standard.
 
+The public macro model is no longer shaped like those temporary fixtures. A
+TOML macro contains a playback policy and an ordered timeline of keyboard or
+mouse-button down/up events, each with its own delay. This can represent held
+modifiers, chords such as `LeftShift+A`, mouse events and nonuniform timing.
+The Pulsefire Raid evidence gate currently recognizes only the three captured
+event timelines and rejects every other valid definition before device
+discovery. The checked-in AB/20-ms example was applied through this TOML path
+on the Windows host; the device accepted the same confirmed macro transaction
+and an independent profile read returned the Button 5 macro reference.
+
 ## Unknowns and required evidence
 
 | Area | Current state | Required next experiment |
@@ -605,7 +615,7 @@ inferences even when their usage IDs come from the USB HID standard.
 | persistent RGB/effects | Solid color and Cycle are software-rendered; red/green save captures did not persist lighting | determine whether Raid firmware exposes any hardware-lighting mode before claiming support; otherwise provide an explicit foreground engine |
 | DPI and stages | runtime read/set, per-stage value/color edits, active-stage selection and final-stage add/remove are implemented and hardware-validated; five big-endian X/Y slots, 200-16000 range and 50-DPI units are confirmed | determine whether independent X/Y values are supported; onboard persistence remains part of the separate save blocker |
 | polling | all four interval codes captured; runtime 1000→500→1000 set/readback validated; 1000 Hz persisted through a separate NGENUITY save and power-cycle | verify effective USB report rate with an external rate tester |
-| button bindings | all 11 mappings are readable; seven exact Button 5 ordinary assignments and three exact Play Once macro presets are writable at runtime; Forward was read back and the restored AB macro emitted `ab` on hardware | capture target-control changes and repeat inferred multimedia/shortcut values before expanding writable controls; isolate nonuniform timing and playback modes |
+| button bindings | all 11 mappings are readable; seven exact Button 5 ordinary assignments and three exact Play Once macro timelines are writable at runtime; generic TOML models chords/mouse events/nonuniform timing but the driver gates them; Forward was read back and the restored AB macro emitted `ab` on hardware | capture target-control changes and repeat inferred multimedia/shortcut values before expanding writable controls; isolate nonuniform timing, chords, mouse events and playback modes |
 | onboard save | repeated transaction, timing and read-modify-write captured; performance persistence confirmed; `0x18[0]` carries two correlated RGB triplets while `0x18[1..2]` were zero for Solid/All Lights | capture isolated wheel/logo and non-Solid saves, then save a profile containing a macro; determine acknowledgements and failure behavior before replay |
 | NGENUITY locking | unknown | run `devices`, then future read-only `info`, with NGENUITY open and closed; record open errors |
 | admin requirement | configuration collection opens without elevation | retest on a second Windows machine/account |

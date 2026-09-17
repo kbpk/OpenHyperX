@@ -9,8 +9,9 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use hyperx_core::{
-    ButtonBinding, DeviceDescriptor, DpiProfile, HidInterfaceInfo, MouseFunction,
-    MultimediaFunction, PollingRate, RgbColor, UsbId, WindowsShortcut,
+    ButtonBinding, DeviceDescriptor, DpiProfile, HidInterfaceInfo, MacroDefinition, MacroEvent,
+    MacroPlayback, MouseFunction, MultimediaFunction, PollingRate, RgbColor, UsbId,
+    WindowsShortcut,
 };
 use hyperx_devices::{
     find_supported_device, PulsefireRaid, PulsefireRaidButton5Assignment, PULSEFIRE_RAID,
@@ -185,8 +186,9 @@ enum ButtonsCommand {
     Set {
         /// Physical control to update.
         control: ButtonControlArg,
-        /// Exact capture-backed assignment.
-        assignment: Button5AssignmentArg,
+        /// Assignment category and its parameters.
+        #[command(subcommand)]
+        assignment: ButtonAssignmentCommand,
     },
 }
 
@@ -195,55 +197,150 @@ enum ButtonControlArg {
     Button5,
 }
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
-enum Button5AssignmentArg {
+#[derive(Debug, Subcommand)]
+enum ButtonAssignmentCommand {
     Disabled,
+    Mouse {
+        #[arg(value_enum)]
+        function: ButtonMouseFunctionArg,
+    },
+    Multimedia {
+        #[arg(value_enum)]
+        function: ButtonMultimediaFunctionArg,
+    },
+    WindowsShortcut {
+        #[arg(value_enum)]
+        shortcut: ButtonWindowsShortcutArg,
+    },
+    Keyboard {
+        #[arg(value_enum)]
+        key: ButtonKeyboardKeyArg,
+    },
+    /// Assign a macro timeline from a TOML file.
+    Macro {
+        /// TOML file containing playback and an ordered event timeline.
+        file: PathBuf,
+    },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ButtonMouseFunctionArg {
     Forward,
     Back,
-    VolumeUp,
-    Copy,
-    KeyA,
     DpiToggle,
-    #[value(name = "macro-a-20ms")]
-    MacroA20ms,
-    #[value(name = "macro-a-300ms")]
-    MacroA300ms,
-    #[value(name = "macro-ab-20ms")]
-    MacroAb20ms,
 }
 
-impl Button5AssignmentArg {
-    const fn name(self) -> &'static str {
-        match self {
-            Self::Disabled => "disabled",
-            Self::Forward => "forward",
-            Self::Back => "back",
-            Self::VolumeUp => "volume-up",
-            Self::Copy => "copy",
-            Self::KeyA => "key-a",
-            Self::DpiToggle => "dpi-toggle",
-            Self::MacroA20ms => "macro-a-20ms",
-            Self::MacroA300ms => "macro-a-300ms",
-            Self::MacroAb20ms => "macro-ab-20ms",
-        }
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ButtonMultimediaFunctionArg {
+    VolumeUp,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ButtonWindowsShortcutArg {
+    Copy,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ButtonKeyboardKeyArg {
+    A,
+}
+
+impl ButtonAssignmentCommand {
+    fn into_assignment(self) -> Result<(PulsefireRaidButton5Assignment, String)> {
+        let (assignment, description) = match self {
+            Self::Disabled => (PulsefireRaidButton5Assignment::Disabled, "disabled"),
+            Self::Mouse { function } => match function {
+                ButtonMouseFunctionArg::Forward => {
+                    (PulsefireRaidButton5Assignment::Forward, "mouse forward")
+                }
+                ButtonMouseFunctionArg::Back => {
+                    (PulsefireRaidButton5Assignment::Back, "mouse back")
+                }
+                ButtonMouseFunctionArg::DpiToggle => (
+                    PulsefireRaidButton5Assignment::DpiToggle,
+                    "mouse DPI toggle",
+                ),
+            },
+            Self::Multimedia {
+                function: ButtonMultimediaFunctionArg::VolumeUp,
+            } => (
+                PulsefireRaidButton5Assignment::VolumeUp,
+                "multimedia volume-up",
+            ),
+            Self::WindowsShortcut {
+                shortcut: ButtonWindowsShortcutArg::Copy,
+            } => (
+                PulsefireRaidButton5Assignment::Copy,
+                "Windows shortcut copy",
+            ),
+            Self::Keyboard {
+                key: ButtonKeyboardKeyArg::A,
+            } => (PulsefireRaidButton5Assignment::KeyboardA, "keyboard A"),
+            Self::Macro { file } => return load_button5_macro(&file),
+        };
+        Ok((assignment, description.to_owned()))
     }
 }
 
-impl From<Button5AssignmentArg> for PulsefireRaidButton5Assignment {
-    fn from(assignment: Button5AssignmentArg) -> Self {
-        match assignment {
-            Button5AssignmentArg::Disabled => Self::Disabled,
-            Button5AssignmentArg::Forward => Self::Forward,
-            Button5AssignmentArg::Back => Self::Back,
-            Button5AssignmentArg::VolumeUp => Self::VolumeUp,
-            Button5AssignmentArg::Copy => Self::Copy,
-            Button5AssignmentArg::KeyA => Self::KeyboardA,
-            Button5AssignmentArg::DpiToggle => Self::DpiToggle,
-            Button5AssignmentArg::MacroA20ms => Self::MacroA20Ms,
-            Button5AssignmentArg::MacroA300ms => Self::MacroA300Ms,
-            Button5AssignmentArg::MacroAb20ms => Self::MacroAb20Ms,
-        }
+fn load_button5_macro(path: &Path) -> Result<(PulsefireRaidButton5Assignment, String)> {
+    let source = fs::read_to_string(path)
+        .with_context(|| format!("failed to read macro file {}", path.display()))?;
+    let definition: MacroDefinition = toml::from_str(&source)
+        .with_context(|| format!("failed to parse macro file {}", path.display()))?;
+    let assignment = confirmed_button5_macro_assignment(&definition)?;
+    Ok((assignment, format!("macro from {}", path.display())))
+}
+
+fn confirmed_button5_macro_assignment(
+    definition: &MacroDefinition,
+) -> Result<PulsefireRaidButton5Assignment> {
+    if definition.playback != MacroPlayback::Once {
+        return Err(anyhow!(
+            "macro playback {:?} is not capture-backed; only once is currently supported",
+            definition.playback
+        ));
     }
+
+    let events = definition.events.as_slice();
+    if matches_key_sequence(events, &[(true, "a", 20), (false, "a", 20)]) {
+        return Ok(PulsefireRaidButton5Assignment::MacroA20Ms);
+    }
+    if matches_key_sequence(events, &[(true, "a", 300), (false, "a", 300)]) {
+        return Ok(PulsefireRaidButton5Assignment::MacroA300Ms);
+    }
+    if matches_key_sequence(
+        events,
+        &[
+            (true, "a", 20),
+            (false, "a", 20),
+            (true, "b", 20),
+            (false, "b", 20),
+        ],
+    ) {
+        return Ok(PulsefireRaidButton5Assignment::MacroAb20Ms);
+    }
+
+    Err(anyhow!(
+        "macro event timeline is valid but not capture-backed for Pulsefire Raid; currently supported timelines are A/20 ms, A/300 ms and A then B/20 ms"
+    ))
+}
+
+fn matches_key_sequence(events: &[MacroEvent], expected: &[(bool, &str, u16)]) -> bool {
+    events.len() == expected.len()
+        && events
+            .iter()
+            .zip(expected)
+            .all(
+                |(event, &(pressed, expected_key, expected_delay))| match event {
+                    MacroEvent::KeyDown { key, delay_ms } if pressed => {
+                        key.eq_ignore_ascii_case(expected_key) && *delay_ms == expected_delay
+                    }
+                    MacroEvent::KeyUp { key, delay_ms } if !pressed => {
+                        key.eq_ignore_ascii_case(expected_key) && *delay_ms == expected_delay
+                    }
+                    _ => false,
+                },
+            )
 }
 
 fn main() -> Result<()> {
@@ -616,9 +713,9 @@ fn polling(command: PollingCommand) -> Result<()> {
 }
 
 fn buttons(command: ButtonsCommand) -> Result<()> {
-    let mut device = open_pulsefire_raid()?;
     match command {
         ButtonsCommand::List => {
+            let mut device = open_pulsefire_raid()?;
             let profile = device.runtime_profile().context(
                 "failed to read the Pulsefire Raid runtime profile; close NGENUITY and retry",
             )?;
@@ -629,12 +726,12 @@ fn buttons(command: ButtonsCommand) -> Result<()> {
             control: ButtonControlArg::Button5,
             assignment,
         } => {
-            device
-                .set_runtime_button5_assignment(assignment.into())
-                .context(
-                    "failed to update Button 5's runtime mapping; the setting may be unchanged",
-                )?;
-            println!("Updated Button 5 runtime mapping to {}.", assignment.name());
+            let (assignment, description) = assignment.into_assignment()?;
+            let mut device = open_pulsefire_raid()?;
+            device.set_runtime_button5_assignment(assignment).context(
+                "failed to update Button 5's runtime mapping; the setting may be unchanged",
+            )?;
+            println!("Updated Button 5 runtime mapping to {description}.");
             println!("The onboard profile was not written.");
         }
     }
@@ -899,30 +996,146 @@ mod tests {
     #[test]
     fn cli_exposes_only_capture_backed_button5_assignments() {
         assert!(Cli::try_parse_from(["hyperx-cli", "buttons", "list"]).is_ok());
-        for assignment in [
-            "disabled",
-            "forward",
-            "back",
-            "volume-up",
-            "copy",
-            "key-a",
-            "dpi-toggle",
-            "macro-a-20ms",
-            "macro-a-300ms",
-            "macro-ab-20ms",
-        ] {
-            assert!(
-                Cli::try_parse_from(["hyperx-cli", "buttons", "set", "button5", assignment])
-                    .is_ok(),
-                "assignment {assignment} should parse"
-            );
-        }
-
-        assert!(Cli::try_parse_from(["hyperx-cli", "buttons", "set", "button4", "back",]).is_err());
         assert!(
-            Cli::try_parse_from(["hyperx-cli", "buttons", "set", "button5", "volume-down",])
+            Cli::try_parse_from(["hyperx-cli", "buttons", "set", "button5", "disabled",]).is_ok()
+        );
+        for function in ["forward", "back", "dpi-toggle"] {
+            assert!(Cli::try_parse_from([
+                "hyperx-cli",
+                "buttons",
+                "set",
+                "button5",
+                "mouse",
+                function,
+            ])
+            .is_ok());
+        }
+        assert!(Cli::try_parse_from([
+            "hyperx-cli",
+            "buttons",
+            "set",
+            "button5",
+            "multimedia",
+            "volume-up",
+        ])
+        .is_ok());
+        assert!(Cli::try_parse_from([
+            "hyperx-cli",
+            "buttons",
+            "set",
+            "button5",
+            "windows-shortcut",
+            "copy",
+        ])
+        .is_ok());
+        assert!(
+            Cli::try_parse_from(["hyperx-cli", "buttons", "set", "button5", "keyboard", "a",])
+                .is_ok()
+        );
+        assert!(Cli::try_parse_from([
+            "hyperx-cli",
+            "buttons",
+            "set",
+            "button5",
+            "macro",
+            "macro.toml",
+        ])
+        .is_ok());
+
+        assert!(
+            Cli::try_parse_from(["hyperx-cli", "buttons", "set", "button5", "macro-ab-20ms",])
                 .is_err()
         );
+        assert!(
+            Cli::try_parse_from(["hyperx-cli", "buttons", "set", "button4", "mouse", "back",])
+                .is_err()
+        );
+        assert!(Cli::try_parse_from([
+            "hyperx-cli",
+            "buttons",
+            "set",
+            "button5",
+            "multimedia",
+            "volume-down",
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn macro_toml_models_event_timelines_but_gates_device_encoding() {
+        let example =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/macros/ab-20ms.toml");
+        assert_eq!(
+            load_button5_macro(&example).unwrap().0,
+            PulsefireRaidButton5Assignment::MacroAb20Ms
+        );
+
+        let macro_ab: MacroDefinition = toml::from_str(
+            r#"
+                playback = "once"
+                [[events]]
+                type = "key-down"
+                key = "a"
+                delay_ms = 20
+                [[events]]
+                type = "key-up"
+                key = "a"
+                delay_ms = 20
+                [[events]]
+                type = "key-down"
+                key = "b"
+                delay_ms = 20
+                [[events]]
+                type = "key-up"
+                key = "b"
+                delay_ms = 20
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            confirmed_button5_macro_assignment(&macro_ab).unwrap(),
+            PulsefireRaidButton5Assignment::MacroAb20Ms
+        );
+
+        let shift_a: MacroDefinition = toml::from_str(
+            r#"
+                playback = "once"
+                [[events]]
+                type = "key-down"
+                key = "left-shift"
+                delay_ms = 0
+                [[events]]
+                type = "key-down"
+                key = "a"
+                delay_ms = 20
+                [[events]]
+                type = "key-up"
+                key = "a"
+                delay_ms = 0
+                [[events]]
+                type = "key-up"
+                key = "left-shift"
+                delay_ms = 20
+            "#,
+        )
+        .unwrap();
+        assert_eq!(shift_a.events.len(), 4);
+        assert!(confirmed_button5_macro_assignment(&shift_a).is_err());
+
+        let nonuniform = MacroDefinition {
+            playback: MacroPlayback::Once,
+            events: vec![
+                MacroEvent::KeyDown {
+                    key: "a".to_owned(),
+                    delay_ms: 20,
+                },
+                MacroEvent::KeyUp {
+                    key: "a".to_owned(),
+                    delay_ms: 40,
+                },
+            ],
+        };
+        assert!(confirmed_button5_macro_assignment(&nonuniform).is_err());
     }
 
     fn fixture() -> HidInterfaceInfo {

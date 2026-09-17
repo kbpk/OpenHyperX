@@ -12,5 +12,6 @@ hyperx-core = { path = "../hyperx-core" }
 hyperx-devices = { path = "../hyperx-devices" }
 hyperx-hid = { path = "../hyperx-hid" }
 hyperx-protocol = { path = "../hyperx-protocol" }
+toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

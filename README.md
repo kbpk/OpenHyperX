@@ -25,8 +25,8 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
   200–16000 range, 50-DPI step and up to five contiguous stages
 - capture-backed runtime polling get/set for 125, 250, 500 and 1000 Hz
 - runtime listing of all 11 button mappings
-- capture-backed Button 5 runtime presets for Disabled, Forward, Back,
-  Volume Up, Copy, keyboard A, DPI Toggle and three exact Play Once macros
+- capture-backed Button 5 runtime assignments for Disabled, Forward, Back,
+  Volume Up, Copy, keyboard A, DPI Toggle and three exact Play Once timelines
 - raw hex capture parser/diff for protocol research
 - offline DPI-stage, polling and button-profile parser/patcher with golden tests
 - no general button-remapping or onboard hardware writes yet
@@ -117,7 +117,7 @@ These setters read the current runtime image, patch only confirmed fields and
 write it back without invoking `Save to mouse`. All unrelated and unknown
 profile bytes are preserved. Use a separate `get` to verify a changed value.
 
-List all runtime button mappings or apply one of the exact Button 5 presets:
+List all runtime button mappings or apply a typed Button 5 assignment:
 
 ```bash
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
@@ -127,18 +127,23 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
   run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
-  buttons set button5 forward
+  buttons set button5 mouse forward
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
   run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
-  buttons set button5 macro-ab-20ms
+  buttons set button5 macro examples/macros/ab-20ms.toml
 ```
 
 The writable list is deliberately narrower than the mappings the decoder can
-recognize. Each exposed preset has an exact local capture; inferred HID values
-remain read-only. Macro presets are also exact: keyboard A at 20 or 300 ms, or
-A then B at 20 ms, all using Play Once. These commands do not save onboard.
+recognize. Each exposed assignment has an exact local capture; inferred HID
+values remain read-only. Macro files model playback plus an ordered timeline of
+individual key/button down/up events and per-event delays, including chords.
+The current Raid encoder accepts only three exact captured timelines: keyboard
+A at 20 or 300 ms, or A then B at 20 ms, all using Play Once. Other valid
+timelines are rejected before the mouse is opened. See
+[docs/macro-format.md](docs/macro-format.md). These commands do not save
+onboard.
 
 Apply volatile RGB once, or keep it active in the foreground for 30 seconds:
 
@@ -185,8 +190,9 @@ publishing them.
 3. **RGB proof of concept (implemented):** typed static/off direct reports and
    explicit foreground keepalive.
 4. **Protocol exploration:** DPI stages/colors and polling runtime control are
-   implemented; exact Button 5 binding/macro presets are implemented, while
-   general bindings, general macros and onboard profiles remain capture-gated.
+   implemented; exact Button 5 bindings and macro timelines are implemented,
+   while general bindings, general macros and onboard profiles remain
+   capture-gated.
 5. **GUI:** Tauri client using only the public core API.
 
 See [docs/reverse-engineering.md](docs/reverse-engineering.md) for the capture

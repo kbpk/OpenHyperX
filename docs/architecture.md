@@ -34,8 +34,10 @@ Raid profile patcher. Runtime DPI setters can edit values and colors, select a
 stage, append up to five contiguous stages, and remove only the final stage.
 It also recognizes confirmed button records and exposes a deliberately narrow
 runtime Button 5 setter for seven captured ordinary records and three exact
-keyboard macro fixtures. Macro timing is represented per press/release event
-even though only uniform Standard Timing captures are currently accepted.
+keyboard macro fixtures. The platform-independent macro model stores an
+ordered key/button down/up timeline and a delay on every event, so chords and
+nonuniform recording are representable without changing the public model.
+The Raid encoder still accepts only uniform Standard Timing captures.
 Unconfirmed setters remain absent.
 
 ## Crate responsibilities
