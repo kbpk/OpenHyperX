@@ -14,7 +14,7 @@ use hyperx_core::{
     UsbId, WindowsShortcut,
 };
 use hyperx_devices::{
-    find_supported_device, PulsefireRaid, PulsefireRaidButton5Assignment, PULSEFIRE_RAID,
+    find_supported_device, PulsefireRaid, PulsefireRaidRuntimeAssignment, PULSEFIRE_RAID,
     PULSEFIRE_RAID_DPI,
 };
 use hyperx_hid::{HidApiDiscovery, HidApiTransport, HidDiscovery, HidTransport};
@@ -292,7 +292,7 @@ enum PollingCommand {
 enum ButtonsCommand {
     /// Show all 11 runtime button mappings.
     List,
-    /// Change one runtime mapping; currently limited to captured Button 5 cases.
+    /// Change one target-specific, capture-backed runtime mapping.
     Set {
         /// Physical control to update.
         control: ButtonControlArg,
@@ -305,6 +305,16 @@ enum ButtonsCommand {
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum ButtonControlArg {
     Button5,
+    Dpi,
+}
+
+impl ButtonControlArg {
+    const fn protocol_control(self) -> PulsefireRaidControl {
+        match self {
+            Self::Button5 => PulsefireRaidControl::Button5,
+            Self::Dpi => PulsefireRaidControl::Dpi,
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -356,48 +366,59 @@ enum ButtonKeyboardKeyArg {
 }
 
 impl ButtonAssignmentCommand {
-    fn into_assignment(self) -> Result<(PulsefireRaidButton5Assignment, String)> {
-        let (assignment, description) = match self {
-            Self::Disabled => (PulsefireRaidButton5Assignment::Disabled, "disabled"),
+    fn into_assignment(
+        self,
+        control: PulsefireRaidControl,
+    ) -> Result<(PulsefireRaidRuntimeAssignment, String)> {
+        let (binding, description) = match self {
+            Self::Disabled => (ButtonBinding::Disabled, "disabled"),
             Self::Mouse { function } => match function {
-                ButtonMouseFunctionArg::Forward => {
-                    (PulsefireRaidButton5Assignment::Forward, "mouse forward")
-                }
+                ButtonMouseFunctionArg::Forward => (
+                    ButtonBinding::Mouse(MouseFunction::Forward),
+                    "mouse forward",
+                ),
                 ButtonMouseFunctionArg::Back => {
-                    (PulsefireRaidButton5Assignment::Back, "mouse back")
+                    (ButtonBinding::Mouse(MouseFunction::Back), "mouse back")
                 }
                 ButtonMouseFunctionArg::DpiToggle => (
-                    PulsefireRaidButton5Assignment::DpiToggle,
+                    ButtonBinding::Mouse(MouseFunction::DpiToggle),
                     "mouse DPI toggle",
                 ),
             },
             Self::Multimedia {
                 function: ButtonMultimediaFunctionArg::VolumeUp,
             } => (
-                PulsefireRaidButton5Assignment::VolumeUp,
+                ButtonBinding::Multimedia(MultimediaFunction::VolumeUp),
                 "multimedia volume-up",
             ),
             Self::WindowsShortcut {
                 shortcut: ButtonWindowsShortcutArg::Copy,
             } => (
-                PulsefireRaidButton5Assignment::Copy,
+                ButtonBinding::WindowsShortcut(WindowsShortcut::Copy),
                 "Windows shortcut copy",
             ),
             Self::Keyboard {
                 key: ButtonKeyboardKeyArg::A,
-            } => (PulsefireRaidButton5Assignment::KeyboardA, "keyboard A"),
-            Self::Macro { file } => return load_button5_macro(&file),
+            } => (
+                ButtonBinding::Keyboard(hyperx_core::KeyboardUsage(0x04)),
+                "keyboard A",
+            ),
+            Self::Macro { file } => return load_button_macro(control, &file),
         };
+        let assignment = PulsefireRaidRuntimeAssignment::ordinary(control, binding)?;
         Ok((assignment, description.to_owned()))
     }
 }
 
-fn load_button5_macro(path: &Path) -> Result<(PulsefireRaidButton5Assignment, String)> {
+fn load_button_macro(
+    control: PulsefireRaidControl,
+    path: &Path,
+) -> Result<(PulsefireRaidRuntimeAssignment, String)> {
     let source = fs::read_to_string(path)
         .with_context(|| format!("failed to read macro file {}", path.display()))?;
     let definition: MacroDefinition = toml::from_str(&source)
         .with_context(|| format!("failed to parse macro file {}", path.display()))?;
-    let assignment = PulsefireRaidButton5Assignment::macro_timeline(definition)
+    let assignment = PulsefireRaidRuntimeAssignment::macro_timeline(control, definition)
         .with_context(|| format!("unsupported Pulsefire Raid macro in {}", path.display()))?;
     Ok((assignment, format!("macro from {}", path.display())))
 }
@@ -888,15 +909,24 @@ fn buttons(command: ButtonsCommand) -> Result<()> {
             print_button_profile(&profile, "  ");
         }
         ButtonsCommand::Set {
-            control: ButtonControlArg::Button5,
+            control,
             assignment,
         } => {
-            let (assignment, description) = assignment.into_assignment()?;
+            let control = control.protocol_control();
+            let (assignment, description) = assignment.into_assignment(control)?;
             let mut device = open_pulsefire_raid()?;
-            device.set_runtime_button5_assignment(assignment).context(
-                "failed to update Button 5's runtime mapping; the setting may be unchanged",
-            )?;
-            println!("Updated Button 5 runtime mapping to {description}.");
+            device
+                .set_runtime_button_assignment(assignment)
+                .with_context(|| {
+                    format!(
+                        "failed to update {}'s runtime mapping; the setting may be unchanged",
+                        control.name()
+                    )
+                })?;
+            println!(
+                "Updated {} runtime mapping to {description}.",
+                control.name()
+            );
             println!("The onboard profile was not written.");
         }
     }
@@ -1371,7 +1401,7 @@ mod tests {
     }
 
     #[test]
-    fn cli_exposes_only_capture_backed_button5_assignments() {
+    fn cli_exposes_only_capture_backed_button_targets_and_assignments() {
         assert!(Cli::try_parse_from(["hyperx-cli", "buttons", "list"]).is_ok());
         assert!(
             Cli::try_parse_from(["hyperx-cli", "buttons", "set", "button5", "disabled",]).is_ok()
@@ -1396,6 +1426,18 @@ mod tests {
             "volume-up",
         ])
         .is_ok());
+        assert!(Cli::try_parse_from([
+            "hyperx-cli",
+            "buttons",
+            "set",
+            "dpi",
+            "mouse",
+            "dpi-toggle",
+        ])
+        .is_ok());
+        assert!(
+            Cli::try_parse_from(["hyperx-cli", "buttons", "set", "dpi", "keyboard", "a",]).is_ok()
+        );
         assert!(Cli::try_parse_from([
             "hyperx-cli",
             "buttons",
@@ -1436,17 +1478,37 @@ mod tests {
             "volume-down",
         ])
         .is_err());
+
+        assert!(ButtonAssignmentCommand::Mouse {
+            function: ButtonMouseFunctionArg::DpiToggle,
+        }
+        .into_assignment(PulsefireRaidControl::Dpi)
+        .is_ok());
+        assert!(ButtonAssignmentCommand::Keyboard {
+            key: ButtonKeyboardKeyArg::A,
+        }
+        .into_assignment(PulsefireRaidControl::Dpi)
+        .is_ok());
+        assert!(ButtonAssignmentCommand::Disabled
+            .into_assignment(PulsefireRaidControl::Dpi)
+            .is_err());
+        assert!(ButtonAssignmentCommand::Mouse {
+            function: ButtonMouseFunctionArg::Forward,
+        }
+        .into_assignment(PulsefireRaidControl::Dpi)
+        .is_err());
     }
 
     #[test]
     fn macro_toml_supports_chords_nonuniform_timings_and_mouse_clicks() {
         let example =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/macros/ab-20ms.toml");
-        let PulsefireRaidButton5Assignment::Macro(example_definition) =
-            load_button5_macro(&example).unwrap().0
-        else {
-            panic!("the TOML example must produce a macro assignment");
-        };
+        let example_assignment = load_button_macro(PulsefireRaidControl::Button5, &example)
+            .unwrap()
+            .0;
+        let example_definition = example_assignment
+            .macro_definition()
+            .expect("the TOML example must produce a macro assignment");
         assert_eq!(example_definition.events.len(), 4);
 
         let macro_ab: MacroDefinition = toml::from_str(
@@ -1471,7 +1533,11 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert!(PulsefireRaidButton5Assignment::macro_timeline(macro_ab).is_ok());
+        assert!(PulsefireRaidRuntimeAssignment::macro_timeline(
+            PulsefireRaidControl::Button5,
+            macro_ab
+        )
+        .is_ok());
 
         let shift_a: MacroDefinition = toml::from_str(
             r#"
@@ -1496,7 +1562,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(shift_a.events.len(), 4);
-        assert!(PulsefireRaidButton5Assignment::macro_timeline(shift_a).is_ok());
+        assert!(PulsefireRaidRuntimeAssignment::macro_timeline(
+            PulsefireRaidControl::Button5,
+            shift_a
+        )
+        .is_ok());
 
         let nonuniform = MacroDefinition {
             playback: MacroPlayback::Once,
@@ -1511,7 +1581,11 @@ mod tests {
                 },
             ],
         };
-        assert!(PulsefireRaidButton5Assignment::macro_timeline(nonuniform).is_ok());
+        assert!(PulsefireRaidRuntimeAssignment::macro_timeline(
+            PulsefireRaidControl::Button5,
+            nonuniform
+        )
+        .is_ok());
 
         let mouse_clicks: MacroDefinition = toml::from_str(
             r#"
@@ -1527,7 +1601,11 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert!(PulsefireRaidButton5Assignment::macro_timeline(mouse_clicks).is_ok());
+        assert!(PulsefireRaidRuntimeAssignment::macro_timeline(
+            PulsefireRaidControl::Button5,
+            mouse_clicks
+        )
+        .is_ok());
 
         let invalid = MacroDefinition {
             playback: MacroPlayback::Once,
@@ -1536,7 +1614,11 @@ mod tests {
                 delay_ms: 20,
             }],
         };
-        assert!(PulsefireRaidButton5Assignment::macro_timeline(invalid).is_err());
+        assert!(PulsefireRaidRuntimeAssignment::macro_timeline(
+            PulsefireRaidControl::Button5,
+            invalid
+        )
+        .is_err());
     }
 
     fn fixture() -> HidInterfaceInfo {

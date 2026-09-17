@@ -34,13 +34,15 @@ effect renderer, runtime setters for active DPI and polling, and an offline
 Pulsefire Raid profile patcher. Runtime DPI setters can edit values and colors,
 select a stage, append up to five contiguous stages, and remove only the final
 stage.
-It also recognizes confirmed button records and exposes a deliberately narrow
-runtime Button 5 setter for seven captured ordinary records. The
+It also recognizes confirmed button records and exposes a target-aware runtime
+assignment API. Its private evidence gate permits seven captured Button 5
+records and the captured keyboard-A/DPI-Toggle pair for the DPI control. The
 platform-independent macro model stores an ordered key/button down/up timeline
 and a delay on every event. A capture-backed Raid encoder now supports Play
-Once keyboard chords, nonuniform timings and left/right/middle mouse clicks,
-with a conservative 14-transition limit matching the largest local capture.
-Other playback modes, longer macros and unconfirmed mouse events remain absent.
+Once Button 5 keyboard chords, nonuniform timings and left/right/middle mouse
+clicks, with a conservative 14-transition limit matching the largest local
+capture. Other targets, playback modes, longer macros and unconfirmed mouse
+events remain absent.
 
 ## Crate responsibilities
 
@@ -82,9 +84,9 @@ Owns model identities, capability declarations and per-model protocol drivers.
 read, DPI-stage/polling runtime setters and volatile direct RGB. A model driver
 may depend on the core, protocol and transport traits, but never on CLI/Tauri
 types. Its stage API uses zero-based indexes internally; user-facing clients
-translate those to one-based numbers. Device-specific evidence gates, such as
-the current Button 5 assignment enum, live in the driver so a future GUI cannot
-bypass the CLI's restricted writable set.
+translate those to one-based numbers. Device-specific, target-aware assignment
+evidence gates live in the driver so a future GUI cannot bypass the CLI's
+restricted writable set.
 
 ### `hyperx-cli`
 

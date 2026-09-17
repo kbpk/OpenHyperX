@@ -29,6 +29,7 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
 - capture-backed Button 5 runtime assignments for Disabled, Forward, Back,
   Volume Up, Copy, keyboard A and DPI Toggle, plus TOML Play Once macros with
   keyboard chords, per-event timings and left/right/middle mouse clicks
+- capture-backed DPI-button runtime assignments for keyboard A and DPI Toggle
 - raw hex capture parser/diff for protocol research
 - offline DPI-stage, polling and button-profile parser/patcher with golden tests
 - no general button-remapping or onboard hardware writes yet
@@ -119,7 +120,7 @@ These setters read the current runtime image, patch only confirmed fields and
 write it back without invoking `Save to mouse`. All unrelated and unknown
 profile bytes are preserved. Use a separate `get` to verify a changed value.
 
-List all runtime button mappings or apply a typed Button 5 assignment:
+List all runtime button mappings or apply a typed, target-validated assignment:
 
 ```bash
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
@@ -130,6 +131,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
   run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
   buttons set button5 mouse forward
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
+  run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
+  buttons set dpi mouse dpi-toggle
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
@@ -218,9 +224,9 @@ publishing them.
 3. **RGB proof of concept (implemented):** typed static/off direct reports and
    explicit foreground keepalive.
 4. **Protocol exploration:** DPI stages/colors, polling runtime control,
-   capture-backed Button 5 bindings and bounded Play Once macros are
-   implemented; other controls, repeat modes, longer macros and onboard
-   profiles remain capture-gated.
+   capture-backed Button 5 and DPI-button bindings plus bounded Play Once
+   Button 5 macros are implemented; other controls, repeat modes, longer macros
+   and onboard profiles remain capture-gated.
 5. **GUI:** Tauri client using only the public core API.
 
 See [docs/reverse-engineering.md](docs/reverse-engineering.md) for the capture

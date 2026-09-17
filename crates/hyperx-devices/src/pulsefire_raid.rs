@@ -79,49 +79,98 @@ pub const PULSEFIRE_RAID: DeviceDescriptor = DeviceDescriptor {
     },
 };
 
-/// Button 5 assignments backed by exact local Pulsefire Raid captures.
+/// One validated, capture-backed runtime button assignment.
 ///
-/// This intentionally excludes inferred members of otherwise recognized HID
-/// binding families. Expand it only after an isolated capture confirms the
-/// exact record or macro report on the target device.
+/// The fields are private so every client, including a future GUI, must pass
+/// the target-specific evidence gate before opening the device.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum PulsefireRaidButton5Assignment {
-    Disabled,
-    Forward,
-    Back,
-    VolumeUp,
-    Copy,
-    KeyboardA,
-    DpiToggle,
+pub struct PulsefireRaidRuntimeAssignment {
+    control: PulsefireRaidControl,
+    action: PulsefireRaidRuntimeAction,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum PulsefireRaidRuntimeAction {
+    Ordinary(ButtonBinding),
     Macro(MacroDefinition),
 }
 
-impl PulsefireRaidButton5Assignment {
-    /// Validate a software macro for the capture-backed Button 5 runtime path.
+impl PulsefireRaidRuntimeAssignment {
+    /// Validate an ordinary binding against captures for this exact control.
+    ///
+    /// This performs no discovery or I/O. Recognized but inferred binding
+    /// records remain rejected here until a target-specific capture confirms
+    /// them.
+    pub fn ordinary(
+        control: PulsefireRaidControl,
+        binding: ButtonBinding,
+    ) -> Result<Self, PulsefireRaidError> {
+        let confirmed = match control {
+            PulsefireRaidControl::Button5 => matches!(
+                &binding,
+                ButtonBinding::Disabled
+                    | ButtonBinding::Mouse(
+                        MouseFunction::Forward | MouseFunction::Back | MouseFunction::DpiToggle
+                    )
+                    | ButtonBinding::Multimedia(MultimediaFunction::VolumeUp)
+                    | ButtonBinding::WindowsShortcut(WindowsShortcut::Copy)
+                    | ButtonBinding::Keyboard(KeyboardUsage(0x04))
+            ),
+            PulsefireRaidControl::Dpi => matches!(
+                &binding,
+                ButtonBinding::Mouse(MouseFunction::DpiToggle)
+                    | ButtonBinding::Keyboard(KeyboardUsage(0x04))
+            ),
+            _ => false,
+        };
+        if !confirmed {
+            return Err(PulsefireRaidError::UnconfirmedRuntimeButtonBinding { control, binding });
+        }
+        Ok(Self {
+            control,
+            action: PulsefireRaidRuntimeAction::Ordinary(binding),
+        })
+    }
+
+    /// Validate a software macro for the capture-backed runtime path.
     ///
     /// This performs no discovery or I/O, allowing clients to reject invalid
     /// files before opening the device.
-    pub fn macro_timeline(definition: MacroDefinition) -> Result<Self, PulsefireRaidError> {
-        let assignment = Self::Macro(definition);
+    pub fn macro_timeline(
+        control: PulsefireRaidControl,
+        definition: MacroDefinition,
+    ) -> Result<Self, PulsefireRaidError> {
+        if control != PulsefireRaidControl::Button5 {
+            return Err(PulsefireRaidError::UnconfirmedMacroControl(control));
+        }
+        let assignment = Self {
+            control,
+            action: PulsefireRaidRuntimeAction::Macro(definition),
+        };
         assignment.encoded_macro()?;
         Ok(assignment)
     }
 
-    fn ordinary_binding(&self) -> Option<ButtonBinding> {
-        match self {
-            Self::Disabled => Some(ButtonBinding::Disabled),
-            Self::Forward => Some(ButtonBinding::Mouse(MouseFunction::Forward)),
-            Self::Back => Some(ButtonBinding::Mouse(MouseFunction::Back)),
-            Self::VolumeUp => Some(ButtonBinding::Multimedia(MultimediaFunction::VolumeUp)),
-            Self::Copy => Some(ButtonBinding::WindowsShortcut(WindowsShortcut::Copy)),
-            Self::KeyboardA => Some(ButtonBinding::Keyboard(KeyboardUsage(0x04))),
-            Self::DpiToggle => Some(ButtonBinding::Mouse(MouseFunction::DpiToggle)),
-            Self::Macro(_) => None,
+    pub const fn control(&self) -> PulsefireRaidControl {
+        self.control
+    }
+
+    pub fn ordinary_binding(&self) -> Option<&ButtonBinding> {
+        match &self.action {
+            PulsefireRaidRuntimeAction::Ordinary(binding) => Some(binding),
+            PulsefireRaidRuntimeAction::Macro(_) => None,
+        }
+    }
+
+    pub fn macro_definition(&self) -> Option<&MacroDefinition> {
+        match &self.action {
+            PulsefireRaidRuntimeAction::Ordinary(_) => None,
+            PulsefireRaidRuntimeAction::Macro(definition) => Some(definition),
         }
     }
 
     fn encoded_macro(&self) -> Result<Option<PulsefireRaidMacro>, PulsefireRaidError> {
-        let Self::Macro(definition) = self else {
+        let PulsefireRaidRuntimeAction::Macro(definition) = &self.action else {
             return Ok(None);
         };
         if definition.playback != MacroPlayback::Once {
@@ -208,6 +257,13 @@ pub enum PulsefireRaidError {
     TooManyDpiStages(u8),
     #[error("the only remaining DPI stage cannot be removed")]
     CannotRemoveOnlyDpiStage,
+    #[error("runtime binding {binding:?} is not capture-backed for {control:?}")]
+    UnconfirmedRuntimeButtonBinding {
+        control: PulsefireRaidControl,
+        binding: ButtonBinding,
+    },
+    #[error("runtime macros are not capture-backed for {0:?}; only Button 5 is supported")]
+    UnconfirmedMacroControl(PulsefireRaidControl),
     #[error("Pulsefire Raid macro playback {0:?} is not capture-backed; only once is supported")]
     UnsupportedMacroPlayback(MacroPlayback),
     #[error("unknown macro keyboard key {0:?}")]
@@ -442,23 +498,24 @@ impl<T: HidTransport> PulsefireRaid<T> {
         self.set_runtime_dpi_stage(stage_index, None, None, true)
     }
 
-    /// Assign one capture-backed action to Button 5 in runtime memory.
+    /// Assign one target-specific, capture-backed action in runtime memory.
     ///
-    /// Macros transmit their validated definition immediately before
-    /// the profile reference, matching the captured NGENUITY transaction. No
-    /// variant writes the onboard profile.
-    pub fn set_runtime_button5_assignment(
+    /// Button 5 macros transmit their validated definition immediately before
+    /// the profile reference, matching the captured NGENUITY transaction.
+    /// No variant writes the onboard profile.
+    pub fn set_runtime_button_assignment(
         &mut self,
-        assignment: PulsefireRaidButton5Assignment,
-    ) -> Result<PulsefireRaidButton5Assignment, PulsefireRaidError> {
-        self.set_runtime_button5_assignment_with_wait(assignment, std::thread::sleep)
+        assignment: PulsefireRaidRuntimeAssignment,
+    ) -> Result<PulsefireRaidRuntimeAssignment, PulsefireRaidError> {
+        self.set_runtime_button_assignment_with_wait(assignment, std::thread::sleep)
     }
 
-    fn set_runtime_button5_assignment_with_wait(
+    fn set_runtime_button_assignment_with_wait(
         &mut self,
-        assignment: PulsefireRaidButton5Assignment,
+        assignment: PulsefireRaidRuntimeAssignment,
         wait: impl FnMut(Duration),
-    ) -> Result<PulsefireRaidButton5Assignment, PulsefireRaidError> {
+    ) -> Result<PulsefireRaidRuntimeAssignment, PulsefireRaidError> {
+        let control = assignment.control();
         let macro_definition = assignment.encoded_macro()?;
         let ordinary_binding = assignment.ordinary_binding();
         let mut profile = self.runtime_profile_with_wait(wait)?;
@@ -468,10 +525,8 @@ impl<T: HidTransport> PulsefireRaid<T> {
             self.send_feature_report(macro_definition.as_bytes())?;
         } else {
             profile.set_button_binding(
-                PulsefireRaidControl::Button5,
-                ordinary_binding
-                    .as_ref()
-                    .expect("every non-macro assignment has an ordinary binding"),
+                control,
+                ordinary_binding.expect("every non-macro assignment has an ordinary binding"),
             )?;
         }
 
@@ -869,15 +924,46 @@ mod tests {
         transport.queue_feature_response(response);
         transport.expect_feature_report(expected_write);
 
+        let assignment = PulsefireRaidRuntimeAssignment::ordinary(
+            PulsefireRaidControl::Button5,
+            ButtonBinding::Mouse(MouseFunction::Forward),
+        )
+        .unwrap();
         let mut device = PulsefireRaid::new(transport).unwrap();
         assert_eq!(
             device
-                .set_runtime_button5_assignment_with_wait(
-                    PulsefireRaidButton5Assignment::Forward,
-                    |_| {},
-                )
+                .set_runtime_button_assignment_with_wait(assignment.clone(), |_| {})
                 .unwrap(),
-            PulsefireRaidButton5Assignment::Forward
+            assignment
+        );
+        device.into_transport().assert_drained();
+    }
+
+    #[test]
+    fn driver_writes_only_the_captured_dpi_control_record() {
+        let mut response = performance_profile_response();
+        response[0x9C..0xA0].copy_from_slice(&[0x00, 0x04, 0x00, 0x00]);
+        let mut expected_write = response;
+        expected_write[1] = 0x01;
+        expected_write[0x9C..0xA0].copy_from_slice(&[0x71, 0xF0, 0x00, 0x00]);
+
+        let mut transport = MockHidTransport::new(1);
+        transport.expect_feature_report(encode_runtime_profile_read_prelude());
+        transport.expect_feature_report(encode_profile_read_request());
+        transport.queue_feature_response(response);
+        transport.expect_feature_report(expected_write);
+
+        let assignment = PulsefireRaidRuntimeAssignment::ordinary(
+            PulsefireRaidControl::Dpi,
+            ButtonBinding::Mouse(MouseFunction::DpiToggle),
+        )
+        .unwrap();
+        let mut device = PulsefireRaid::new(transport).unwrap();
+        assert_eq!(
+            device
+                .set_runtime_button_assignment_with_wait(assignment.clone(), |_| {})
+                .unwrap(),
+            assignment
         );
         device.into_transport().assert_drained();
     }
@@ -905,12 +991,15 @@ mod tests {
         transport.expect_feature_report(expected_macro);
         transport.expect_feature_report(expected_write);
 
-        let assignment =
-            PulsefireRaidButton5Assignment::macro_timeline(captured_coverage_macro()).unwrap();
+        let assignment = PulsefireRaidRuntimeAssignment::macro_timeline(
+            PulsefireRaidControl::Button5,
+            captured_coverage_macro(),
+        )
+        .unwrap();
         let mut device = PulsefireRaid::new(transport).unwrap();
         assert_eq!(
             device
-                .set_runtime_button5_assignment_with_wait(assignment.clone(), |_| {})
+                .set_runtime_button_assignment_with_wait(assignment.clone(), |_| {})
                 .unwrap(),
             assignment
         );
@@ -918,29 +1007,66 @@ mod tests {
     }
 
     #[test]
-    fn button5_assignment_enum_contains_only_locally_confirmed_variants() {
-        let ordinary = [
-            PulsefireRaidButton5Assignment::Disabled,
-            PulsefireRaidButton5Assignment::Forward,
-            PulsefireRaidButton5Assignment::Back,
-            PulsefireRaidButton5Assignment::VolumeUp,
-            PulsefireRaidButton5Assignment::Copy,
-            PulsefireRaidButton5Assignment::KeyboardA,
-            PulsefireRaidButton5Assignment::DpiToggle,
+    fn runtime_assignment_gate_contains_only_locally_confirmed_pairs() {
+        let button5_bindings = [
+            ButtonBinding::Disabled,
+            ButtonBinding::Mouse(MouseFunction::Forward),
+            ButtonBinding::Mouse(MouseFunction::Back),
+            ButtonBinding::Multimedia(MultimediaFunction::VolumeUp),
+            ButtonBinding::WindowsShortcut(WindowsShortcut::Copy),
+            ButtonBinding::Keyboard(KeyboardUsage(0x04)),
+            ButtonBinding::Mouse(MouseFunction::DpiToggle),
         ];
-        assert!(ordinary
-            .into_iter()
-            .all(|assignment| assignment.ordinary_binding().is_some()));
+        assert!(button5_bindings.into_iter().all(|binding| {
+            PulsefireRaidRuntimeAssignment::ordinary(PulsefireRaidControl::Button5, binding).is_ok()
+        }));
+        for binding in [
+            ButtonBinding::Keyboard(KeyboardUsage(0x04)),
+            ButtonBinding::Mouse(MouseFunction::DpiToggle),
+        ] {
+            assert!(
+                PulsefireRaidRuntimeAssignment::ordinary(PulsefireRaidControl::Dpi, binding)
+                    .is_ok()
+            );
+        }
+        for (control, binding) in [
+            (PulsefireRaidControl::Button4, ButtonBinding::Disabled),
+            (PulsefireRaidControl::Dpi, ButtonBinding::Disabled),
+            (
+                PulsefireRaidControl::Button5,
+                ButtonBinding::Multimedia(MultimediaFunction::VolumeDown),
+            ),
+        ] {
+            assert!(matches!(
+                PulsefireRaidRuntimeAssignment::ordinary(control, binding),
+                Err(PulsefireRaidError::UnconfirmedRuntimeButtonBinding { .. })
+            ));
+        }
 
-        let macro_assignment =
-            PulsefireRaidButton5Assignment::macro_timeline(captured_coverage_macro()).unwrap();
+        let macro_assignment = PulsefireRaidRuntimeAssignment::macro_timeline(
+            PulsefireRaidControl::Button5,
+            captured_coverage_macro(),
+        )
+        .unwrap();
         assert!(macro_assignment.ordinary_binding().is_none());
         assert!(macro_assignment.encoded_macro().unwrap().is_some());
+        assert!(matches!(
+            PulsefireRaidRuntimeAssignment::macro_timeline(
+                PulsefireRaidControl::Dpi,
+                captured_coverage_macro(),
+            ),
+            Err(PulsefireRaidError::UnconfirmedMacroControl(
+                PulsefireRaidControl::Dpi
+            ))
+        ));
 
         let mut unsupported_playback = captured_coverage_macro();
         unsupported_playback.playback = MacroPlayback::ToggleRepeat;
         assert!(matches!(
-            PulsefireRaidButton5Assignment::macro_timeline(unsupported_playback),
+            PulsefireRaidRuntimeAssignment::macro_timeline(
+                PulsefireRaidControl::Button5,
+                unsupported_playback,
+            ),
             Err(PulsefireRaidError::UnsupportedMacroPlayback(
                 MacroPlayback::ToggleRepeat
             ))
