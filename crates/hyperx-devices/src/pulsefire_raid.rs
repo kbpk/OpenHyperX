@@ -88,6 +88,14 @@ pub enum PulsefireRaidError {
         kind: ProfileImageKind,
         section: ProfileSection,
     },
+    #[error("DPI stage {stage} does not exist; the runtime profile has {stage_count} stage(s)")]
+    DpiStageNotFound { stage: usize, stage_count: usize },
+    #[error("DPI stage update must change its DPI, color, or active state")]
+    EmptyDpiStageUpdate,
+    #[error("Pulsefire Raid supports at most {0} DPI stages")]
+    TooManyDpiStages(u8),
+    #[error("the only remaining DPI stage cannot be removed")]
+    CannotRemoveOnlyDpiStage,
     #[error(transparent)]
     InvalidDpi(#[from] DpiValidationError),
     #[error(transparent)]
@@ -189,6 +197,129 @@ impl<T: HidTransport> PulsefireRaid<T> {
         profile.set_dpi_profile(&dpi_profile)?;
         self.write_runtime_profile(&profile)?;
         Ok(dpi_profile)
+    }
+
+    /// Change one existing runtime DPI stage and optionally make it active.
+    ///
+    /// Stage indexes are zero-based. Omitted DPI or color values are preserved,
+    /// as are every field unrelated to the DPI profile. This does not write the
+    /// onboard profile.
+    pub fn set_runtime_dpi_stage(
+        &mut self,
+        stage_index: usize,
+        dpi: Option<u32>,
+        color: Option<RgbColor>,
+        activate: bool,
+    ) -> Result<DpiProfile, PulsefireRaidError> {
+        self.set_runtime_dpi_stage_with_wait(stage_index, dpi, color, activate, std::thread::sleep)
+    }
+
+    fn set_runtime_dpi_stage_with_wait(
+        &mut self,
+        stage_index: usize,
+        dpi: Option<u32>,
+        color: Option<RgbColor>,
+        activate: bool,
+        wait: impl FnMut(Duration),
+    ) -> Result<DpiProfile, PulsefireRaidError> {
+        if dpi.is_none() && color.is_none() && !activate {
+            return Err(PulsefireRaidError::EmptyDpiStageUpdate);
+        }
+        let dpi = dpi
+            .map(|value| PULSEFIRE_RAID_DPI.validate(value))
+            .transpose()?;
+        let mut profile = self.runtime_profile_with_wait(wait)?;
+        let mut dpi_profile = profile.dpi_profile()?;
+        let stage_count = dpi_profile.stages.len();
+        let stage = dpi_profile.stages.get_mut(stage_index).ok_or(
+            PulsefireRaidError::DpiStageNotFound {
+                stage: stage_index + 1,
+                stage_count,
+            },
+        )?;
+        if let Some(dpi) = dpi {
+            stage.x = dpi;
+            stage.y = dpi;
+        }
+        if let Some(color) = color {
+            stage.color = color;
+        }
+        if activate {
+            dpi_profile.active_stage = stage_index;
+        }
+        profile.set_dpi_profile(&dpi_profile)?;
+        self.write_runtime_profile(&profile)?;
+        Ok(dpi_profile)
+    }
+
+    /// Append one runtime DPI stage. This does not write the onboard profile.
+    pub fn add_runtime_dpi_stage(
+        &mut self,
+        dpi: u32,
+        color: RgbColor,
+        activate: bool,
+    ) -> Result<DpiProfile, PulsefireRaidError> {
+        self.add_runtime_dpi_stage_with_wait(dpi, color, activate, std::thread::sleep)
+    }
+
+    fn add_runtime_dpi_stage_with_wait(
+        &mut self,
+        dpi: u32,
+        color: RgbColor,
+        activate: bool,
+        wait: impl FnMut(Duration),
+    ) -> Result<DpiProfile, PulsefireRaidError> {
+        let dpi = PULSEFIRE_RAID_DPI.validate(dpi)?;
+        let mut profile = self.runtime_profile_with_wait(wait)?;
+        let mut dpi_profile = profile.dpi_profile()?;
+        if dpi_profile.stages.len() >= usize::from(PULSEFIRE_RAID_DPI.max_stages) {
+            return Err(PulsefireRaidError::TooManyDpiStages(
+                PULSEFIRE_RAID_DPI.max_stages,
+            ));
+        }
+        dpi_profile
+            .stages
+            .push(hyperx_core::DpiStage::new(dpi, dpi, color));
+        if activate {
+            dpi_profile.active_stage = dpi_profile.stages.len() - 1;
+        }
+        profile.set_dpi_profile(&dpi_profile)?;
+        self.write_runtime_profile(&profile)?;
+        Ok(dpi_profile)
+    }
+
+    /// Remove the final runtime DPI stage, preserving at least one stage.
+    ///
+    /// Removing only the final stage matches the device's contiguous stage
+    /// layout and the captured NGENUITY add/remove behavior.
+    pub fn remove_runtime_last_dpi_stage(&mut self) -> Result<DpiProfile, PulsefireRaidError> {
+        self.remove_runtime_last_dpi_stage_with_wait(std::thread::sleep)
+    }
+
+    fn remove_runtime_last_dpi_stage_with_wait(
+        &mut self,
+        wait: impl FnMut(Duration),
+    ) -> Result<DpiProfile, PulsefireRaidError> {
+        let mut profile = self.runtime_profile_with_wait(wait)?;
+        let mut dpi_profile = profile.dpi_profile()?;
+        if dpi_profile.stages.len() == 1 {
+            return Err(PulsefireRaidError::CannotRemoveOnlyDpiStage);
+        }
+        dpi_profile.stages.pop();
+        if dpi_profile.active_stage >= dpi_profile.stages.len() {
+            dpi_profile.active_stage = dpi_profile.stages.len() - 1;
+        }
+        profile.set_dpi_profile(&dpi_profile)?;
+        self.write_runtime_profile(&profile)?;
+        Ok(dpi_profile)
+    }
+
+    /// Select an existing runtime DPI stage without changing its values.
+    pub fn set_runtime_active_dpi_stage(
+        &mut self,
+        stage_index: usize,
+    ) -> Result<DpiProfile, PulsefireRaidError> {
+        self.set_runtime_dpi_stage(stage_index, None, None, true)
     }
 
     /// Change the polling rate in the runtime profile only.
@@ -303,6 +434,23 @@ mod tests {
         response
     }
 
+    fn two_stage_profile_response() -> [u8; DIRECT_REPORT_LENGTH] {
+        let mut response = performance_profile_response();
+        response[0x1B..0x1D].copy_from_slice(&[0x00, 0x20]);
+        response[0x27..0x29].copy_from_slice(&[0x00, 0x20]);
+        response[0x33] = 0x01;
+        response[0x6C..0x6F].copy_from_slice(&[0xCD, 0x00, 0xFF]);
+        response
+    }
+
+    fn five_stage_profile_response() -> [u8; DIRECT_REPORT_LENGTH] {
+        let mut response = performance_profile_response();
+        response[0x1B..0x23].copy_from_slice(&[0x00, 0x20, 0x00, 0x40, 0x00, 0x80, 0x01, 0x40]);
+        response[0x27..0x2F].copy_from_slice(&[0x00, 0x20, 0x00, 0x40, 0x00, 0x80, 0x01, 0x40]);
+        response[0x32..0x37].fill(0x01);
+        response
+    }
+
     #[test]
     fn driver_changes_only_active_dpi_fields_and_write_opcode() {
         let response = performance_profile_response();
@@ -337,6 +485,148 @@ mod tests {
             Err(PulsefireRaidError::InvalidDpi(
                 DpiValidationError::NotStepAligned { dpi: 225, .. }
             ))
+        ));
+        device.into_transport().assert_drained();
+    }
+
+    #[test]
+    fn driver_updates_one_dpi_stage_and_preserves_other_fields() {
+        let response = two_stage_profile_response();
+        let mut expected_write = response;
+        expected_write[1] = 0x01;
+        expected_write[0x1B..0x1D].copy_from_slice(&[0x00, 0x22]);
+        expected_write[0x27..0x29].copy_from_slice(&[0x00, 0x22]);
+        expected_write[0x31] = 0x01;
+        expected_write[0x6C..0x6F].copy_from_slice(&[0x01, 0x02, 0x03]);
+
+        let mut transport = MockHidTransport::new(1);
+        transport.expect_feature_report(encode_runtime_profile_read_prelude());
+        transport.expect_feature_report(encode_profile_read_request());
+        transport.queue_feature_response(response);
+        transport.expect_feature_report(expected_write);
+
+        let mut device = PulsefireRaid::new(transport).unwrap();
+        let dpi_profile = device
+            .set_runtime_dpi_stage_with_wait(
+                1,
+                Some(1700),
+                Some(RgbColor::new(1, 2, 3)),
+                true,
+                |_| {},
+            )
+            .unwrap();
+
+        assert_eq!(dpi_profile.active_stage, 1);
+        assert_eq!(dpi_profile.stages[1].x, 1700);
+        assert_eq!(dpi_profile.stages[1].y, 1700);
+        assert_eq!(dpi_profile.stages[1].color, RgbColor::new(1, 2, 3));
+        device.into_transport().assert_drained();
+    }
+
+    #[test]
+    fn driver_adds_a_contiguous_dpi_stage() {
+        let response = performance_profile_response();
+        let mut expected_write = response;
+        expected_write[1] = 0x01;
+        expected_write[0x1B..0x1D].copy_from_slice(&[0x00, 0x20]);
+        expected_write[0x27..0x29].copy_from_slice(&[0x00, 0x20]);
+        expected_write[0x31] = 0x01;
+        expected_write[0x33] = 0x01;
+        expected_write[0x6C..0x6F].copy_from_slice(&[0xFF, 0x00, 0x00]);
+
+        let mut transport = MockHidTransport::new(1);
+        transport.expect_feature_report(encode_runtime_profile_read_prelude());
+        transport.expect_feature_report(encode_profile_read_request());
+        transport.queue_feature_response(response);
+        transport.expect_feature_report(expected_write);
+
+        let mut device = PulsefireRaid::new(transport).unwrap();
+        let dpi_profile = device
+            .add_runtime_dpi_stage_with_wait(1600, RgbColor::new(0xFF, 0, 0), true, |_| {})
+            .unwrap();
+
+        assert_eq!(dpi_profile.stages.len(), 2);
+        assert_eq!(dpi_profile.active_stage, 1);
+        device.into_transport().assert_drained();
+    }
+
+    #[test]
+    fn driver_removes_and_clears_only_the_final_dpi_stage() {
+        let mut response = two_stage_profile_response();
+        response[0x31] = 0x01;
+        let mut expected_write = response;
+        expected_write[1] = 0x01;
+        expected_write[0x1B..0x1D].fill(0);
+        expected_write[0x27..0x29].fill(0);
+        expected_write[0x31] = 0x00;
+        expected_write[0x33] = 0x00;
+        expected_write[0x6C..0x6F].fill(0);
+
+        let mut transport = MockHidTransport::new(1);
+        transport.expect_feature_report(encode_runtime_profile_read_prelude());
+        transport.expect_feature_report(encode_profile_read_request());
+        transport.queue_feature_response(response);
+        transport.expect_feature_report(expected_write);
+
+        let mut device = PulsefireRaid::new(transport).unwrap();
+        let dpi_profile = device
+            .remove_runtime_last_dpi_stage_with_wait(|_| {})
+            .unwrap();
+
+        assert_eq!(dpi_profile.stages.len(), 1);
+        assert_eq!(dpi_profile.active_stage, 0);
+        device.into_transport().assert_drained();
+    }
+
+    #[test]
+    fn driver_rejects_missing_or_empty_dpi_stage_updates() {
+        let transport = MockHidTransport::new(1);
+        let mut device = PulsefireRaid::new(transport).unwrap();
+        assert!(matches!(
+            device.set_runtime_dpi_stage_with_wait(0, None, None, false, |_| {}),
+            Err(PulsefireRaidError::EmptyDpiStageUpdate)
+        ));
+        device.into_transport().assert_drained();
+
+        let response = performance_profile_response();
+        let mut transport = MockHidTransport::new(1);
+        transport.expect_feature_report(encode_runtime_profile_read_prelude());
+        transport.expect_feature_report(encode_profile_read_request());
+        transport.queue_feature_response(response);
+        let mut device = PulsefireRaid::new(transport).unwrap();
+        assert!(matches!(
+            device.set_runtime_dpi_stage_with_wait(1, Some(1600), None, false, |_| {}),
+            Err(PulsefireRaidError::DpiStageNotFound {
+                stage: 2,
+                stage_count: 1
+            })
+        ));
+        device.into_transport().assert_drained();
+    }
+
+    #[test]
+    fn driver_rejects_stage_count_overflow_and_removing_the_only_stage() {
+        let response = five_stage_profile_response();
+        let mut transport = MockHidTransport::new(1);
+        transport.expect_feature_report(encode_runtime_profile_read_prelude());
+        transport.expect_feature_report(encode_profile_read_request());
+        transport.queue_feature_response(response);
+        let mut device = PulsefireRaid::new(transport).unwrap();
+        assert!(matches!(
+            device.add_runtime_dpi_stage_with_wait(16000, RgbColor::BLACK, false, |_| {}),
+            Err(PulsefireRaidError::TooManyDpiStages(5))
+        ));
+        device.into_transport().assert_drained();
+
+        let response = performance_profile_response();
+        let mut transport = MockHidTransport::new(1);
+        transport.expect_feature_report(encode_runtime_profile_read_prelude());
+        transport.expect_feature_report(encode_profile_read_request());
+        transport.queue_feature_response(response);
+        let mut device = PulsefireRaid::new(transport).unwrap();
+        assert!(matches!(
+            device.remove_runtime_last_dpi_stage_with_wait(|_| {}),
+            Err(PulsefireRaidError::CannotRemoveOnlyDpiStage)
         ));
         device.into_transport().assert_drained();
     }

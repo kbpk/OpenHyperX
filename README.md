@@ -21,7 +21,8 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
   and button bindings
 - protocol-independent `HidTransport` plus `MockHidTransport` for packet tests
 - volatile static/off RGB for wheel and logo with optional foreground keepalive
-- capture-backed runtime DPI get/set with a 200–16000 range and 50-DPI step
+- capture-backed runtime DPI and stage management with per-stage colors, a
+  200–16000 range, 50-DPI step and up to five contiguous stages
 - capture-backed runtime polling get/set for 125, 250, 500 and 1000 Hz
 - raw hex capture parser/diff for protocol research
 - offline DPI-stage, polling and button-profile parser/patcher with golden tests
@@ -78,7 +79,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
 it does not send the profile-write packet. Close NGENUITY first so two programs
 do not access the configuration collection concurrently.
 
-Read or change the active runtime DPI stage and polling rate:
+Read or change runtime DPI stages and polling rate:
 
 ```bash
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
@@ -88,6 +89,21 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
   run --target x86_64-pc-windows-msvc --bin hyperx-cli -- dpi set 800
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
+  run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
+  dpi stage set 2 --dpi 1600 --color CD00FF --active
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
+  run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
+  dpi stage add 16000 FFFFFF
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
+  run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
+  dpi stage remove-last
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
@@ -142,9 +158,8 @@ publishing them.
    button bindings.
 3. **RGB proof of concept (implemented):** typed static/off direct reports and
    explicit foreground keepalive.
-4. **Protocol exploration:** DPI and polling runtime control are implemented;
-   DPI-stage management, bindings, macros and onboard profiles remain
-   capture-gated.
+4. **Protocol exploration:** DPI stages/colors and polling runtime control are
+   implemented; bindings, macros and onboard profiles remain capture-gated.
 5. **GUI:** Tauri client using only the public core API.
 
 See [docs/reverse-engineering.md](docs/reverse-engineering.md) for the capture

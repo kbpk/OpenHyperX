@@ -1,6 +1,6 @@
 # Pulsefire Raid research
 
-Last updated: 2026-09-14.
+Last updated: 2026-09-16.
 
 This document separates manufacturer facts, public implementation evidence,
 local observations and hypotheses. Do not promote a hypothesis into a device
@@ -234,10 +234,18 @@ OpenHyperX has a profile patcher for DPI values, active stage, stage count and
 colors. NGENUITY locally exposed a minimum of 200 DPI; the manufacturer
 documents a maximum of 16000 DPI, and captures confirm a 50-DPI step. The
 patcher therefore accepts multiples of 50 in the inclusive `200..=16000` range
-and preserves unrelated profile bytes. The device driver exposes only changing
-both axes of the already-active runtime stage; stage count, active-index and
-color writes remain offline until they receive their own CLI design and
-hardware validation.
+and preserves unrelated profile bytes.
+
+On 2026-09-16, the resulting runtime API and CLI were validated against the
+physical release-`1124` unit with NGENUITY and other writers stopped. Starting
+from four stages with stage 1 active, OpenHyperX appended stage 5 at 16000 DPI
+and `#FFFFFF`, independently read all five stages back, removed and cleared
+stage 5, and independently read the original four-stage profile back. It then
+changed stage 2 to 1700 DPI and `#010203`, made it active, and read those values
+back. Finally it restored stage 2 to 1600 DPI and `#CD00FF`, selected stage 1,
+and read the original four stages and active 800-DPI value back. No onboard
+save transaction was sent. The CLI deliberately removes only the final stage,
+matching the contiguous layout and captured add/remove operation.
 
 Observed configuration sequence:
 
@@ -349,10 +357,29 @@ the mouse returning to a different stored lighting effect. It confirms
 performance-field persistence only; persistent lighting storage is not yet
 understood and must be tested separately.
 
-The semantics and legal contents of the three `0x18` packets remain unknown.
-They are part of the captured save transaction and block a safe replay until
-isolated captures establish their variable fields. Raw `.pcapng` files remain
-outside Git.
+The two no-op saves reproduced the same timing as well as the same payloads.
+The first indexed `0x18` packet was sent about 64 ms after `07 03 01 64`; the
+second followed about 35 ms later, while the third and `07 81` request followed
+at roughly 2 ms intervals. NGENUITY waited about 113--115 ms between `07 81`
+and the `GET_REPORT`, wrote the full profile immediately after the response,
+then waited about one second before selecting runtime section `0x04` again.
+
+The indexed packets are not an empty handshake. For the two red saves,
+index `0x00` contained `FF 00 00` at both offsets `0x08..0x0A` and
+`0x0B..0x0D`. In the isolated green save both triplets changed to
+`32 FF 00`; all remaining bytes in that packet and every payload byte after
+the index in packets `0x01` and `0x02` were zero. The complete `07 01 01`
+profile writes from both red saves and the green save were byte-for-byte
+identical, proving that this observed color data lives outside the main
+profile image. The two triplets correlate with the direct-RGB wheel/logo
+colors, but their persistent meaning is not established: the saved green did
+not survive without NGENUITY's volatile lighting stream.
+
+The legal contents and full semantics of the three `0x18` packets therefore
+remain unknown. They are part of the captured save transaction and block a
+general safe replay until captures isolate zones/effects and a save containing
+a macro establishes how auxiliary macro definitions participate. Raw
+`.pcapng` files remain outside Git.
 
 ### Runtime lighting and persistence observations
 
@@ -560,10 +587,10 @@ device I/O remain unavailable until the fields above are isolated.
 | direct RGB transport | accepted locally; NGENUITY Solid and Cycle both use it, and lighting returns to rainbow without keepalive | isolate timeout/revert timing and confirm both physical LED zones |
 | RGB off semantics | unknown | compare NGENUITY static black vs explicit lighting-off capture |
 | persistent RGB/effects | Solid color and Cycle are software-rendered; red/green save captures did not persist lighting | determine whether Raid firmware exposes any hardware-lighting mode before claiming support; otherwise provide an explicit foreground engine |
-| DPI and stages | five big-endian X/Y values, 200-16000 DPI range in 50-DPI units, active index, enable flags and per-stage colors confirmed; active-stage runtime set/readback validated; forward/reverse edits cover stages 1-4 and add/remove covers stage 5 | design explicit stage/index/color commands and determine whether independent X/Y values are supported |
+| DPI and stages | runtime read/set, per-stage value/color edits, active-stage selection and final-stage add/remove are implemented and hardware-validated; five big-endian X/Y slots, 200-16000 range and 50-DPI units are confirmed | determine whether independent X/Y values are supported; onboard persistence remains part of the separate save blocker |
 | polling | all four interval codes captured; runtime 1000→500→1000 set/readback validated; 1000 Hz persisted through a separate NGENUITY save and power-cycle | verify effective USB report rate with an external rate tester |
 | button bindings | 11 record offsets correlated; Button 5 isolated across Disabled, Forward, Back, Volume Up, Copy, A, DPI Toggle and working A/A→B macros; keyboard event append format and 20/300 ms timing encoding confirmed offline | capture one nonuniform-timing A→B macro, isolate playback and target-control bytes, then boundary-test the UI timing range; repeat one inferred multimedia/shortcut value; do not expose hardware writes yet |
-| onboard save | repeated transaction captured; read-modify-write and performance persistence confirmed | identify the three `0x18` packets, acknowledgements, timing and failure behavior before replay |
+| onboard save | repeated transaction, timing and read-modify-write captured; performance persistence confirmed; `0x18[0]` carries two correlated RGB triplets while `0x18[1..2]` were zero for Solid/All Lights | capture isolated wheel/logo and non-Solid saves, then save a profile containing a macro; determine acknowledgements and failure behavior before replay |
 | NGENUITY locking | unknown | run `devices`, then future read-only `info`, with NGENUITY open and closed; record open errors |
 | admin requirement | configuration collection opens without elevation | retest on a second Windows machine/account |
 

@@ -107,6 +107,55 @@ enum DpiCommand {
         #[arg(value_parser = parse_dpi)]
         dpi: u32,
     },
+    /// Change one DPI stage, append/remove the last stage, or select a stage.
+    Stage {
+        #[command(subcommand)]
+        command: DpiStageCommand,
+    },
+    /// Select an existing DPI stage without changing its value or color.
+    Active {
+        /// One-based stage number from 1 through 5.
+        #[arg(value_parser = parse_dpi_stage)]
+        stage: usize,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum DpiStageCommand {
+    /// Change an existing runtime stage; omitted fields are preserved.
+    #[command(group(
+        clap::ArgGroup::new("change")
+            .required(true)
+            .multiple(true)
+            .args(["dpi", "color", "active"])
+    ))]
+    Set {
+        /// One-based stage number from 1 through 5.
+        #[arg(value_parser = parse_dpi_stage)]
+        stage: usize,
+        /// DPI from 200 through 16000 in steps of 50.
+        #[arg(long, value_parser = parse_dpi)]
+        dpi: Option<u32>,
+        /// Six hexadecimal RGB digits, with optional leading '#'.
+        #[arg(long)]
+        color: Option<RgbColor>,
+        /// Also make this the active stage.
+        #[arg(long)]
+        active: bool,
+    },
+    /// Append one runtime stage; does not save onboard.
+    Add {
+        /// DPI from 200 through 16000 in steps of 50.
+        #[arg(value_parser = parse_dpi)]
+        dpi: u32,
+        /// Six hexadecimal RGB digits, with optional leading '#'.
+        color: RgbColor,
+        /// Also make the new stage active.
+        #[arg(long)]
+        active: bool,
+    },
+    /// Remove and clear the last runtime stage; at least one is retained.
+    RemoveLast,
 }
 
 #[derive(Debug, Subcommand)]
@@ -144,6 +193,20 @@ fn parse_dpi(input: &str) -> Result<u32, String> {
     PULSEFIRE_RAID_DPI
         .validate(dpi)
         .map_err(|error| error.to_string())
+}
+
+fn parse_dpi_stage(input: &str) -> Result<usize, String> {
+    let stage = input
+        .parse::<usize>()
+        .map_err(|_| format!("DPI stage must be an integer; got {input}"))?;
+    if (1..=usize::from(PULSEFIRE_RAID_DPI.max_stages)).contains(&stage) {
+        Ok(stage)
+    } else {
+        Err(format!(
+            "DPI stage must be between 1 and {}; got {stage}",
+            PULSEFIRE_RAID_DPI.max_stages
+        ))
+    }
 }
 
 fn init_logging(verbosity: u8, trace: bool) -> Result<()> {
@@ -397,6 +460,55 @@ fn dpi(command: DpiCommand) -> Result<()> {
             print_dpi_profile(&dpi_profile);
             println!("The onboard profile was not written.");
         }
+        DpiCommand::Stage { command } => {
+            let (message, dpi_profile) = match command {
+                DpiStageCommand::Set {
+                    stage,
+                    dpi,
+                    color,
+                    active,
+                } => {
+                    let profile = device
+                        .set_runtime_dpi_stage(stage - 1, dpi, color, active)
+                        .with_context(|| {
+                            format!(
+                                "failed to update runtime DPI stage {stage}; the setting may be unchanged"
+                            )
+                        })?;
+                    (format!("Updated runtime DPI stage {stage}."), profile)
+                }
+                DpiStageCommand::Add { dpi, color, active } => {
+                    let profile = device.add_runtime_dpi_stage(dpi, color, active).context(
+                        "failed to append a runtime DPI stage; the setting may be unchanged",
+                    )?;
+                    let stage = profile.stages.len();
+                    (format!("Added runtime DPI stage {stage}."), profile)
+                }
+                DpiStageCommand::RemoveLast => {
+                    let profile = device.remove_runtime_last_dpi_stage().context(
+                        "failed to remove the last runtime DPI stage; the setting may be unchanged",
+                    )?;
+                    ("Removed the last runtime DPI stage.".to_owned(), profile)
+                }
+            };
+            println!("{message}");
+            println!("DPI stages:");
+            print_dpi_profile(&dpi_profile);
+            println!("The onboard profile was not written.");
+        }
+        DpiCommand::Active { stage } => {
+            let dpi_profile = device
+                .set_runtime_active_dpi_stage(stage - 1)
+                .with_context(|| {
+                    format!(
+                        "failed to select runtime DPI stage {stage}; the setting may be unchanged"
+                    )
+                })?;
+            println!("Selected runtime DPI stage {stage}.");
+            println!("DPI stages:");
+            print_dpi_profile(&dpi_profile);
+            println!("The onboard profile was not written.");
+        }
     }
     Ok(())
 }
@@ -628,6 +740,44 @@ mod tests {
         for invalid in ["199", "225", "16050", "not-a-number"] {
             assert!(Cli::try_parse_from(["hyperx-cli", "dpi", "set", invalid]).is_err());
         }
+    }
+
+    #[test]
+    fn cli_validates_dpi_stage_commands_before_opening_the_device() {
+        assert!(Cli::try_parse_from([
+            "hyperx-cli",
+            "dpi",
+            "stage",
+            "set",
+            "2",
+            "--dpi",
+            "1700",
+            "--color",
+            "CD00FF",
+            "--active",
+        ])
+        .is_ok());
+        assert!(Cli::try_parse_from([
+            "hyperx-cli",
+            "dpi",
+            "stage",
+            "add",
+            "16000",
+            "FFFFFF",
+            "--active",
+        ])
+        .is_ok());
+        assert!(Cli::try_parse_from(["hyperx-cli", "dpi", "stage", "remove-last"]).is_ok());
+        assert!(Cli::try_parse_from(["hyperx-cli", "dpi", "active", "5"]).is_ok());
+
+        assert!(Cli::try_parse_from(["hyperx-cli", "dpi", "stage", "set", "2"]).is_err());
+        assert!(
+            Cli::try_parse_from(["hyperx-cli", "dpi", "stage", "set", "0", "--active",]).is_err()
+        );
+        assert!(
+            Cli::try_parse_from(["hyperx-cli", "dpi", "stage", "add", "225", "FFFFFF",]).is_err()
+        );
+        assert!(Cli::try_parse_from(["hyperx-cli", "dpi", "active", "6"]).is_err());
     }
 
     #[test]
