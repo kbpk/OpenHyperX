@@ -96,43 +96,43 @@ enum PulsefireRaidRuntimeAction {
 }
 
 impl PulsefireRaidRuntimeAssignment {
-    /// Validate an ordinary binding against captures for this exact control.
+    /// Validate an ordinary binding against captured record evidence and the
+    /// target control's observed NGENUITY capabilities.
     ///
-    /// This performs no discovery or I/O. Recognized but inferred binding
-    /// records remain rejected here until a target-specific capture confirms
-    /// them.
+    /// This performs no discovery or I/O. Binding records seen on only one
+    /// physical control remain target-specific.
     pub fn ordinary(
         control: PulsefireRaidControl,
         binding: ButtonBinding,
     ) -> Result<Self, PulsefireRaidError> {
-        let confirmed = match control {
-            PulsefireRaidControl::Button4 => matches!(
-                &binding,
-                ButtonBinding::Disabled | ButtonBinding::Mouse(MouseFunction::Back)
-            ),
-            PulsefireRaidControl::Button5 => matches!(
-                &binding,
-                ButtonBinding::Disabled
-                    | ButtonBinding::Mouse(
-                        MouseFunction::Forward | MouseFunction::Back | MouseFunction::DpiToggle
-                    )
-                    | ButtonBinding::Multimedia(MultimediaFunction::VolumeUp)
-                    | ButtonBinding::WindowsShortcut(WindowsShortcut::Copy)
-                    | ButtonBinding::Keyboard(KeyboardUsage(0x04))
-            ),
-            PulsefireRaidControl::Button7 => matches!(
-                &binding,
-                ButtonBinding::Multimedia(
+        let general_control = matches!(
+            control,
+            PulsefireRaidControl::MiddleClick
+                | PulsefireRaidControl::Button4
+                | PulsefireRaidControl::Button5
+                | PulsefireRaidControl::Button7
+                | PulsefireRaidControl::Button6
+                | PulsefireRaidControl::Button8
+                | PulsefireRaidControl::Dpi
+                | PulsefireRaidControl::WheelTiltLeft
+                | PulsefireRaidControl::WheelTiltRight
+        );
+        let portable_binding = matches!(
+            &binding,
+            ButtonBinding::Disabled
+                | ButtonBinding::Mouse(MouseFunction::Back | MouseFunction::DpiToggle)
+                | ButtonBinding::Multimedia(
                     MultimediaFunction::VolumeUp | MultimediaFunction::VolumeDown
                 )
-            ),
-            PulsefireRaidControl::Dpi => matches!(
+                | ButtonBinding::Keyboard(KeyboardUsage(0x04))
+        );
+        let button5_only = control == PulsefireRaidControl::Button5
+            && matches!(
                 &binding,
-                ButtonBinding::Mouse(MouseFunction::DpiToggle)
-                    | ButtonBinding::Keyboard(KeyboardUsage(0x04))
-            ),
-            _ => false,
-        };
+                ButtonBinding::Mouse(MouseFunction::Forward)
+                    | ButtonBinding::WindowsShortcut(WindowsShortcut::Copy)
+            );
+        let confirmed = (general_control && portable_binding) || button5_only;
         if !confirmed {
             return Err(PulsefireRaidError::UnconfirmedRuntimeButtonBinding { control, binding });
         }
@@ -1038,6 +1038,35 @@ mod tests {
     }
 
     #[test]
+    fn driver_applies_a_portable_record_to_another_general_control() {
+        let mut response = performance_profile_response();
+        response[0x94..0x98].copy_from_slice(&[0x04, 0x00, 0x00, 0xEA]);
+        let mut expected_write = response;
+        expected_write[1] = 0x01;
+        expected_write[0x94..0x98].copy_from_slice(&[0x02, 0xF8, 0x00, 0x03]);
+
+        let mut transport = MockHidTransport::new(1);
+        transport.expect_feature_report(encode_runtime_profile_read_prelude());
+        transport.expect_feature_report(encode_profile_read_request());
+        transport.queue_feature_response(response);
+        transport.expect_feature_report(expected_write);
+
+        let assignment = PulsefireRaidRuntimeAssignment::ordinary(
+            PulsefireRaidControl::Button6,
+            ButtonBinding::Mouse(MouseFunction::Back),
+        )
+        .unwrap();
+        let mut device = PulsefireRaid::new(transport).unwrap();
+        assert_eq!(
+            device
+                .set_runtime_button_assignment_with_wait(assignment.clone(), |_| {})
+                .unwrap(),
+            assignment
+        );
+        device.into_transport().assert_drained();
+    }
+
+    #[test]
     fn driver_sends_captured_chord_mouse_macro_before_its_button5_profile_reference() {
         let mut response = performance_profile_response();
         response[0x8C..0x90].copy_from_slice(&[0x02, 0xF9, 0x00, 0x04]);
@@ -1076,58 +1105,50 @@ mod tests {
     }
 
     #[test]
-    fn runtime_assignment_gate_contains_only_locally_confirmed_pairs() {
-        let button5_bindings = [
+    fn runtime_assignment_gate_separates_portable_and_target_specific_evidence() {
+        let general_controls = [
+            PulsefireRaidControl::MiddleClick,
+            PulsefireRaidControl::Button4,
+            PulsefireRaidControl::Button5,
+            PulsefireRaidControl::Button7,
+            PulsefireRaidControl::Button6,
+            PulsefireRaidControl::Button8,
+            PulsefireRaidControl::Dpi,
+            PulsefireRaidControl::WheelTiltLeft,
+            PulsefireRaidControl::WheelTiltRight,
+        ];
+        let portable_bindings = [
             ButtonBinding::Disabled,
-            ButtonBinding::Mouse(MouseFunction::Forward),
             ButtonBinding::Mouse(MouseFunction::Back),
             ButtonBinding::Multimedia(MultimediaFunction::VolumeUp),
-            ButtonBinding::WindowsShortcut(WindowsShortcut::Copy),
+            ButtonBinding::Multimedia(MultimediaFunction::VolumeDown),
             ButtonBinding::Keyboard(KeyboardUsage(0x04)),
             ButtonBinding::Mouse(MouseFunction::DpiToggle),
         ];
-        assert!(button5_bindings.into_iter().all(|binding| {
-            PulsefireRaidRuntimeAssignment::ordinary(PulsefireRaidControl::Button5, binding).is_ok()
-        }));
-        for binding in [
-            ButtonBinding::Keyboard(KeyboardUsage(0x04)),
-            ButtonBinding::Mouse(MouseFunction::DpiToggle),
-        ] {
-            assert!(
-                PulsefireRaidRuntimeAssignment::ordinary(PulsefireRaidControl::Dpi, binding)
-                    .is_ok()
-            );
+        for control in general_controls {
+            for binding in portable_bindings.iter().cloned() {
+                assert!(PulsefireRaidRuntimeAssignment::ordinary(control, binding).is_ok());
+            }
         }
         for binding in [
-            ButtonBinding::Disabled,
-            ButtonBinding::Mouse(MouseFunction::Back),
+            ButtonBinding::Mouse(MouseFunction::Forward),
+            ButtonBinding::WindowsShortcut(WindowsShortcut::Copy),
         ] {
             assert!(PulsefireRaidRuntimeAssignment::ordinary(
-                PulsefireRaidControl::Button4,
-                binding
-            )
-            .is_ok());
-        }
-        for binding in [
-            ButtonBinding::Multimedia(MultimediaFunction::VolumeUp),
-            ButtonBinding::Multimedia(MultimediaFunction::VolumeDown),
-        ] {
-            assert!(PulsefireRaidRuntimeAssignment::ordinary(
-                PulsefireRaidControl::Button7,
+                PulsefireRaidControl::Button5,
                 binding
             )
             .is_ok());
         }
         for (control, binding) in [
+            (PulsefireRaidControl::LeftClick, ButtonBinding::Disabled),
             (
                 PulsefireRaidControl::Button4,
                 ButtonBinding::Mouse(MouseFunction::Forward),
             ),
-            (PulsefireRaidControl::Dpi, ButtonBinding::Disabled),
-            (PulsefireRaidControl::Button7, ButtonBinding::Disabled),
             (
-                PulsefireRaidControl::Button5,
-                ButtonBinding::Multimedia(MultimediaFunction::VolumeDown),
+                PulsefireRaidControl::Button7,
+                ButtonBinding::WindowsShortcut(WindowsShortcut::Copy),
             ),
         ] {
             assert!(matches!(

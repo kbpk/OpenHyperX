@@ -154,9 +154,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
 ```
 
 The writable list is deliberately narrower than the mappings the decoder can
-recognize. Each exposed assignment has an exact local capture; inferred HID
-values remain read-only. Macro files model playback plus an ordered timeline of
-individual key/button down/up events and per-event delays, including chords.
+recognize. The nine non-primary controls accept only binding records confirmed
+on multiple physical slots: Disabled, Mouse Back, DPI Toggle, Volume Up,
+Volume Down and keyboard A. Button 5 additionally accepts its target-specific
+Forward, Copy and macro captures. Left/right primary clicks remain read-only,
+and inferred HID values are never sent. Macro files model playback plus an
+ordered timeline of individual key/button down/up events and per-event delays,
+including chords.
 The current Raid encoder accepts Play Once macros of up to 14 balanced
 transitions, common keyboard usages and the three captured primary mouse
 buttons. Unsupported keys, playback modes and malformed timelines are rejected

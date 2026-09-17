@@ -304,19 +304,29 @@ enum ButtonsCommand {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum ButtonControlArg {
+    WheelClick,
     Button4,
     Button5,
     Button7,
+    Button6,
+    Button8,
     Dpi,
+    WheelTiltLeft,
+    WheelTiltRight,
 }
 
 impl ButtonControlArg {
     const fn protocol_control(self) -> PulsefireRaidControl {
         match self {
+            Self::WheelClick => PulsefireRaidControl::MiddleClick,
             Self::Button4 => PulsefireRaidControl::Button4,
             Self::Button5 => PulsefireRaidControl::Button5,
             Self::Button7 => PulsefireRaidControl::Button7,
+            Self::Button6 => PulsefireRaidControl::Button6,
+            Self::Button8 => PulsefireRaidControl::Button8,
             Self::Dpi => PulsefireRaidControl::Dpi,
+            Self::WheelTiltLeft => PulsefireRaidControl::WheelTiltLeft,
+            Self::WheelTiltRight => PulsefireRaidControl::WheelTiltRight,
         }
     }
 }
@@ -1412,6 +1422,25 @@ mod tests {
     #[test]
     fn cli_exposes_only_capture_backed_button_targets_and_assignments() {
         assert!(Cli::try_parse_from(["hyperx-cli", "buttons", "list"]).is_ok());
+        for control in [
+            "wheel-click",
+            "button4",
+            "button5",
+            "button7",
+            "button6",
+            "button8",
+            "dpi",
+            "wheel-tilt-left",
+            "wheel-tilt-right",
+        ] {
+            assert!(
+                Cli::try_parse_from(["hyperx-cli", "buttons", "set", control, "disabled",]).is_ok()
+            );
+        }
+        assert!(
+            Cli::try_parse_from(["hyperx-cli", "buttons", "set", "left-click", "disabled"])
+                .is_err()
+        );
         assert!(
             Cli::try_parse_from(["hyperx-cli", "buttons", "set", "button5", "disabled",]).is_ok()
         );
@@ -1503,7 +1532,7 @@ mod tests {
         .is_ok());
         assert!(ButtonAssignmentCommand::Disabled
             .into_assignment(PulsefireRaidControl::Dpi)
-            .is_err());
+            .is_ok());
         assert!(ButtonAssignmentCommand::Mouse {
             function: ButtonMouseFunctionArg::Forward,
         }
@@ -1534,10 +1563,15 @@ mod tests {
             function: ButtonMultimediaFunctionArg::VolumeDown,
         }
         .into_assignment(PulsefireRaidControl::Button5)
-        .is_err());
+        .is_ok());
         assert!(ButtonAssignmentCommand::Disabled
             .into_assignment(PulsefireRaidControl::Button7)
-            .is_err());
+            .is_ok());
+        assert!(ButtonAssignmentCommand::WindowsShortcut {
+            shortcut: ButtonWindowsShortcutArg::Copy,
+        }
+        .into_assignment(PulsefireRaidControl::Button7)
+        .is_err());
     }
 
     #[test]

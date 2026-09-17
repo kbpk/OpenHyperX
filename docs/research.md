@@ -690,6 +690,23 @@ state and exercised Button 7 through `Volume Down -> Volume Up -> Volume Down
 other ten mappings remained unchanged, and the final state was Volume Up. No
 onboard save was sent.
 
+Together with earlier captures, six ordinary records now repeat byte-for-byte
+on at least two physical controls: Disabled (Buttons 4/5), Mouse Back (Buttons
+4/5), Volume Up (Buttons 5/7), Volume Down (Buttons 6/7), keyboard A (Button 5
+and DPI) and DPI Toggle (Button 5 and DPI). NGENUITY exposes the same assignment
+categories for the middle click, five numbered side controls, DPI control and
+both wheel tilts. The runtime writer therefore treats those six records as
+portable across these nine general controls while keeping the primary left and
+right clicks unavailable. Forward, Copy and macro references remain
+Button-5-specific until their portability is independently established.
+
+With NGENUITY stopped, OpenHyperX then applied the portable Mouse Back record
+to Button 6, whose initial mapping was Volume Down. An independent runtime read
+returned Mouse Back while the other ten mappings were unchanged. A guarded
+cleanup restored Volume Down and a final read confirmed it. This validates the
+portable-record path on a third target slot beyond the pairs used to establish
+the record matrix. No onboard save was sent.
+
 The public macro model is no longer shaped like those temporary fixtures. A
 TOML macro contains a playback policy and an ordered timeline of keyboard or
 mouse-button down/up events, each with its own delay. The checked-in AB/20-ms
@@ -763,7 +780,7 @@ continued to operate normally. No onboard-save transaction was sent.
 | persistent RGB/effects | OpenHyperX effects are foreground-rendered; a standalone firmware rainbow was observed after NGENUITY stopped, but NGENUITY Solid/Cycle and red/green save captures did not select or persist it | identify a confirmed hardware-mode selector and its save semantics before exposing hardware rainbow or other persistent effects |
 | DPI and stages | runtime read/set, per-stage value/color edits, active-stage selection and final-stage add/remove are implemented and hardware-validated; five big-endian X/Y slots, 200-16000 range and 50-DPI units are confirmed | determine whether independent X/Y values are supported; onboard persistence remains part of the separate save blocker |
 | polling | all four interval codes captured; runtime 1000→500→1000 set/readback validated; 1000 Hz persisted through a separate NGENUITY save and power-cycle | verify effective USB report rate with an external rate tester |
-| button bindings | all 11 mappings are readable; Button 4 Disabled/Back, seven exact Button 5 assignments, Button 7 Volume Up/Down and the DPI control's keyboard-A/DPI-Toggle pair are capture-backed and hardware-tested; bounded Button 5 Play Once macros support keyboard chords, nonuniform timing and left/right/middle clicks; Button 5 Forward, AB and Shift+A were functionally tested | capture the other target-control changes and repeat inferred multimedia/shortcut values; isolate repeat modes, longer timelines, remaining mouse events and timing boundaries |
+| button bindings | all 11 mappings are readable; six records repeated across physical slots are writable on the nine general controls, while Forward, Copy and macros remain Button-5-specific; the portable path is hardware-tested on Button 6, and target-specific Button 4, Button 5, Button 7 and DPI writes are also hardware-tested; bounded Button 5 Play Once macros support keyboard chords, nonuniform timing and left/right/middle clicks | capture primary-click swaps and the remaining ordinary records; isolate macro portability, repeat modes, longer timelines, remaining mouse events and timing boundaries |
 | onboard save | repeated transaction, timing and read-modify-write captured; performance persistence confirmed; `0x18[0]` carries two correlated RGB triplets while `0x18[1..2]` were zero for Solid/All Lights | capture isolated wheel/logo and non-Solid saves, then save a profile containing a macro; determine acknowledgements and failure behavior before replay |
 | NGENUITY locking | unknown | run `devices`, then future read-only `info`, with NGENUITY open and closed; record open errors |
 | admin requirement | configuration collection opens without elevation | retest on a second Windows machine/account |
