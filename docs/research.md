@@ -835,10 +835,11 @@ creating button bindings.
 
 `hyperx-protocol::ngenuity` now parses both the version-40 export wrapper and
 the internal preset form with bounds checks and synthetic fixtures. The CLI
-can inspect the decoded data or import confirmed DPI/macro fields to a partial
-OpenHyperX TOML profile. Both operations are offline and have no HID or onboard
-write path. Polling, lighting, physical assignment targets and other preset
-versions require isolated export comparisons before being decoded.
+can inspect the decoded data, compare two presets semantically and byte by
+byte, or import confirmed DPI/macro fields to a partial OpenHyperX TOML
+profile. These operations are offline and have no HID or onboard write path.
+Polling, lighting, physical assignment targets and other preset versions
+require isolated export comparisons before being decoded.
 
 ## Unknowns and required evidence
 

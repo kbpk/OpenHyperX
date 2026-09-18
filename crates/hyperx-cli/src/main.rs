@@ -24,8 +24,9 @@ use hyperx_protocol::{
     format_hex,
     hid_descriptor::parse_report_layouts,
     ngenuity::{
-        format_ngenuity_id, keyboard_usage_name, parse_ngenuity_preset, NgenuityContainer,
-        NgenuityInputAction, NgenuityMacro, NgenuityMacroItem, NgenuityMouseButton, NgenuityPreset,
+        format_ngenuity_id, keyboard_usage_name, ngenuity_embedded_payload, parse_ngenuity_preset,
+        NgenuityContainer, NgenuityInputAction, NgenuityMacro, NgenuityMacroItem,
+        NgenuityMouseButton, NgenuityPreset,
     },
     pulsefire_raid::{PerformanceProfile, PulsefireRaidControl},
 };
@@ -101,12 +102,25 @@ enum Command {
 #[derive(Debug, Subcommand)]
 enum ProfileCommand {
     /// Display confirmed fields from an NGENUITY version-40 .hxp preset.
-    InspectNgenuity {
+    #[command(name = "inspect-ngenuity")]
+    Inspect {
         /// Exported .hxp file or NGENUITY's internal Master.hxp/Preset file.
         file: PathBuf,
     },
+    /// Compare decoded fields and embedded bytes of two NGENUITY presets.
+    #[command(name = "diff-ngenuity")]
+    Diff {
+        /// Baseline exported .hxp or internal preset file.
+        before: PathBuf,
+        /// Preset exported after one isolated setting change.
+        after: PathBuf,
+        /// Print every raw byte change instead of the first 256.
+        #[arg(long)]
+        all_raw: bool,
+    },
     /// Convert confirmed .hxp fields to a partial OpenHyperX TOML profile.
-    ImportNgenuity {
+    #[command(name = "import-ngenuity")]
+    Import {
         /// Exported .hxp file or NGENUITY's internal Master.hxp/Preset file.
         source: PathBuf,
         /// New TOML file. Existing files are never overwritten.
@@ -505,12 +519,17 @@ const MAX_NGENUITY_PRESET_BYTES: u64 = 16 * 1024 * 1024;
 
 fn profile(command: ProfileCommand) -> Result<()> {
     match command {
-        ProfileCommand::InspectNgenuity { file } => {
+        ProfileCommand::Inspect { file } => {
             let preset = load_ngenuity_preset(&file)?;
             print_ngenuity_preset(&preset);
             Ok(())
         }
-        ProfileCommand::ImportNgenuity { source, output } => {
+        ProfileCommand::Diff {
+            before,
+            after,
+            all_raw,
+        } => diff_ngenuity_profiles(&before, &after, all_raw),
+        ProfileCommand::Import { source, output } => {
             let preset = load_ngenuity_preset(&source)?;
             let profile = preset
                 .to_software_profile("pulsefire-raid")
@@ -553,6 +572,12 @@ fn profile(command: ProfileCommand) -> Result<()> {
 }
 
 fn load_ngenuity_preset(path: &Path) -> Result<NgenuityPreset> {
+    let bytes = load_ngenuity_bytes(path)?;
+    parse_ngenuity_preset(&bytes)
+        .with_context(|| format!("failed to parse NGENUITY preset {}", path.display()))
+}
+
+fn load_ngenuity_bytes(path: &Path) -> Result<Vec<u8>> {
     let metadata = fs::metadata(path)
         .with_context(|| format!("failed to inspect NGENUITY preset {}", path.display()))?;
     if metadata.len() > MAX_NGENUITY_PRESET_BYTES {
@@ -563,10 +588,308 @@ fn load_ngenuity_preset(path: &Path) -> Result<NgenuityPreset> {
             MAX_NGENUITY_PRESET_BYTES,
         ));
     }
-    let bytes = fs::read(path)
-        .with_context(|| format!("failed to read NGENUITY preset {}", path.display()))?;
-    parse_ngenuity_preset(&bytes)
-        .with_context(|| format!("failed to parse NGENUITY preset {}", path.display()))
+    fs::read(path).with_context(|| format!("failed to read NGENUITY preset {}", path.display()))
+}
+
+const DEFAULT_RAW_NGENUITY_CHANGE_LIMIT: usize = 256;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RawByteChange {
+    offset: usize,
+    before: Option<u8>,
+    after: Option<u8>,
+}
+
+fn diff_ngenuity_profiles(before_path: &Path, after_path: &Path, all_raw: bool) -> Result<()> {
+    let before_bytes = load_ngenuity_bytes(before_path)?;
+    let after_bytes = load_ngenuity_bytes(after_path)?;
+    let before = parse_ngenuity_preset(&before_bytes)
+        .with_context(|| format!("failed to parse {}", before_path.display()))?;
+    let after = parse_ngenuity_preset(&after_bytes)
+        .with_context(|| format!("failed to parse {}", after_path.display()))?;
+    let before_payload = ngenuity_embedded_payload(&before_bytes)?;
+    let after_payload = ngenuity_embedded_payload(&after_bytes)?;
+
+    println!(
+        "Compared NGENUITY presets {:?} and {:?}.",
+        before.name, after.name
+    );
+    println!("Decoded changes:");
+    let semantic = semantic_ngenuity_changes(&before, &after);
+    if semantic.is_empty() {
+        println!("  <none>");
+    } else {
+        for change in semantic {
+            println!("  {change}");
+        }
+    }
+
+    let raw = raw_byte_changes(before_payload, after_payload);
+    println!(
+        "Raw embedded changes: {} byte(s); lengths {} -> {} bytes.",
+        raw.len(),
+        before_payload.len(),
+        after_payload.len(),
+    );
+    if before_payload.len() != after_payload.len() {
+        println!(
+            "  Lengths differ; raw offsets after an insertion or removal may no longer align."
+        );
+    }
+    let limit = if all_raw {
+        raw.len()
+    } else {
+        DEFAULT_RAW_NGENUITY_CHANGE_LIMIT
+    };
+    for change in raw.iter().take(limit) {
+        println!(
+            "  offset 0x{:04X}: {} -> {}",
+            change.offset,
+            format_optional_byte(change.before),
+            format_optional_byte(change.after),
+        );
+    }
+    if raw.len() > limit {
+        println!(
+            "  ... {} more changed byte(s); rerun with --all-raw to print them.",
+            raw.len() - limit
+        );
+    }
+    if !raw.is_empty() {
+        println!(
+            "  Raw differences can include regenerated source identifiers; decoded comparisons ignore identifier values."
+        );
+    }
+    println!("Comparison was offline; no HID device was opened.");
+    Ok(())
+}
+
+fn semantic_ngenuity_changes(before: &NgenuityPreset, after: &NgenuityPreset) -> Vec<String> {
+    let mut changes = Vec::new();
+    if before.name != after.name {
+        changes.push(format!("name: {:?} -> {:?}", before.name, after.name));
+    }
+    if before.dpi_stages.len() != after.dpi_stages.len() {
+        changes.push(format!(
+            "DPI stage count: {} -> {}",
+            before.dpi_stages.len(),
+            after.dpi_stages.len()
+        ));
+    }
+    for index in 0..before.dpi_stages.len().max(after.dpi_stages.len()) {
+        match (before.dpi_stages.get(index), after.dpi_stages.get(index)) {
+            (Some(left), Some(right))
+                if left.dpi != right.dpi
+                    || left.alpha != right.alpha
+                    || left.color != right.color =>
+            {
+                changes.push(format!(
+                    "DPI stage {}: {} DPI {}/alpha {} -> {} DPI {}/alpha {}",
+                    index + 1,
+                    left.dpi,
+                    left.color,
+                    left.alpha,
+                    right.dpi,
+                    right.color,
+                    right.alpha,
+                ));
+            }
+            (None, Some(stage)) => changes.push(format!(
+                "DPI stage {} added: {} DPI {}/alpha {}",
+                index + 1,
+                stage.dpi,
+                stage.color,
+                stage.alpha,
+            )),
+            (Some(stage), None) => changes.push(format!(
+                "DPI stage {} removed: {} DPI {}/alpha {}",
+                index + 1,
+                stage.dpi,
+                stage.color,
+                stage.alpha,
+            )),
+            _ => {}
+        }
+    }
+    if before.active_dpi_stage != after.active_dpi_stage {
+        changes.push(format!(
+            "stored active-stage value: {} -> {}",
+            before.active_dpi_stage, after.active_dpi_stage
+        ));
+    }
+
+    if before.macros.len() != after.macros.len() {
+        changes.push(format!(
+            "macro count: {} -> {}",
+            before.macros.len(),
+            after.macros.len()
+        ));
+    }
+    for index in 0..before.macros.len().max(after.macros.len()) {
+        match (before.macros.get(index), after.macros.get(index)) {
+            (Some(left), Some(right)) => compare_ngenuity_macro(index, left, right, &mut changes),
+            (None, Some(source_macro)) => changes.push(format!(
+                "macro {} added: {:?}",
+                index + 1,
+                source_macro.name
+            )),
+            (Some(source_macro), None) => changes.push(format!(
+                "macro {} removed: {:?}",
+                index + 1,
+                source_macro.name
+            )),
+            _ => {}
+        }
+    }
+
+    if before.key_assignments.len() != after.key_assignments.len() {
+        changes.push(format!(
+            "assignment count: {} -> {}",
+            before.key_assignments.len(),
+            after.key_assignments.len()
+        ));
+    }
+    for index in 0..before
+        .key_assignments
+        .len()
+        .max(after.key_assignments.len())
+    {
+        let left = before
+            .key_assignments
+            .get(index)
+            .and_then(|assignment| macro_reference_index(before, assignment.macro_source_id));
+        let right = after
+            .key_assignments
+            .get(index)
+            .and_then(|assignment| macro_reference_index(after, assignment.macro_source_id));
+        if left != right {
+            changes.push(format!(
+                "assignment {} macro reference: {} -> {}",
+                index + 1,
+                format_macro_reference(left),
+                format_macro_reference(right),
+            ));
+        }
+    }
+    changes
+}
+
+fn compare_ngenuity_macro(
+    index: usize,
+    before: &NgenuityMacro,
+    after: &NgenuityMacro,
+    changes: &mut Vec<String>,
+) {
+    let number = index + 1;
+    if before.name != after.name {
+        changes.push(format!(
+            "macro {number} name: {:?} -> {:?}",
+            before.name, after.name
+        ));
+    }
+    for (field, left, right) in [
+        (
+            "use-standard-timing",
+            u32::from(before.use_standard_timing),
+            u32::from(after.use_standard_timing),
+        ),
+        (
+            "standard timing ms",
+            before.standard_timing_ms,
+            after.standard_timing_ms,
+        ),
+        (
+            "expanded",
+            u32::from(before.expanded),
+            u32::from(after.expanded),
+        ),
+        ("playback mode", before.playback_mode, after.playback_mode),
+        (
+            "play times",
+            u32::from(before.play_times),
+            u32::from(after.play_times),
+        ),
+    ] {
+        if left != right {
+            changes.push(format!("macro {number} {field}: {left} -> {right}"));
+        }
+    }
+    if before.items.len() != after.items.len() {
+        changes.push(format!(
+            "macro {number} event count: {} -> {}",
+            before.items.len(),
+            after.items.len()
+        ));
+    }
+    for event in 0..before.items.len().max(after.items.len()) {
+        match (before.items.get(event), after.items.get(event)) {
+            (Some(left), Some(right)) if !same_ngenuity_macro_item(left, right) => {
+                changes.push(format!(
+                    "macro {number} event {}: {} (stored {} ms) -> {} (stored {} ms)",
+                    event + 1,
+                    describe_ngenuity_macro_item(left),
+                    left.timing_ms,
+                    describe_ngenuity_macro_item(right),
+                    right.timing_ms,
+                ));
+            }
+            (None, Some(item)) => changes.push(format!(
+                "macro {number} event {} added: {} (stored {} ms)",
+                event + 1,
+                describe_ngenuity_macro_item(item),
+                item.timing_ms,
+            )),
+            (Some(item), None) => changes.push(format!(
+                "macro {number} event {} removed: {} (stored {} ms)",
+                event + 1,
+                describe_ngenuity_macro_item(item),
+                item.timing_ms,
+            )),
+            _ => {}
+        }
+    }
+}
+
+fn same_ngenuity_macro_item(before: &NgenuityMacroItem, after: &NgenuityMacroItem) -> bool {
+    before.item_type == after.item_type
+        && before.action == after.action
+        && before.state == after.state
+        && before.data == after.data
+        && before.timing_ms == after.timing_ms
+        && before.key_data == after.key_data
+}
+
+fn macro_reference_index(preset: &NgenuityPreset, id: Option<[u8; 16]>) -> Option<usize> {
+    id.and_then(|id| {
+        preset
+            .macros
+            .iter()
+            .position(|source_macro| source_macro.source_id == id)
+            .map(|index| index + 1)
+    })
+}
+
+fn format_macro_reference(reference: Option<usize>) -> String {
+    reference.map_or_else(
+        || "none/unresolved".to_owned(),
+        |index| format!("macro {index}"),
+    )
+}
+
+fn raw_byte_changes(before: &[u8], after: &[u8]) -> Vec<RawByteChange> {
+    let mut changes = Vec::new();
+    for offset in 0..before.len().max(after.len()) {
+        let left = before.get(offset).copied();
+        let right = after.get(offset).copied();
+        if left != right {
+            changes.push(RawByteChange {
+                offset,
+                before: left,
+                after: right,
+            });
+        }
+    }
+    changes
 }
 
 fn print_ngenuity_preset(preset: &NgenuityPreset) {
@@ -1638,6 +1961,23 @@ mod tests {
         assert!(Cli::try_parse_from([
             "hyperx-cli",
             "profile",
+            "diff-ngenuity",
+            "before.hxp",
+            "after.hxp",
+        ])
+        .is_ok());
+        assert!(Cli::try_parse_from([
+            "hyperx-cli",
+            "profile",
+            "diff-ngenuity",
+            "before.hxp",
+            "after.hxp",
+            "--all-raw",
+        ])
+        .is_ok());
+        assert!(Cli::try_parse_from([
+            "hyperx-cli",
+            "profile",
             "import-ngenuity",
             "Base Settings.hxp",
             "base-settings.toml",
@@ -1650,6 +1990,60 @@ mod tests {
             "Base Settings.hxp",
         ])
         .is_err());
+    }
+
+    #[test]
+    fn ngenuity_diff_reports_semantics_but_ignores_source_ids() {
+        use hyperx_protocol::ngenuity::NgenuityDpiStage;
+
+        let before = NgenuityPreset {
+            container: NgenuityContainer::Export,
+            embedded_length: 100,
+            version: 40,
+            name: "Preset".to_owned(),
+            dpi_stages: vec![NgenuityDpiStage {
+                source_id: [1; 16],
+                dpi: 800,
+                alpha: 255,
+                color: RgbColor::new(1, 2, 3),
+            }],
+            active_dpi_stage: 1,
+            macros: Vec::new(),
+            key_assignments: Vec::new(),
+        };
+        let mut identifiers_only = before.clone();
+        identifiers_only.dpi_stages[0].source_id = [2; 16];
+        assert!(semantic_ngenuity_changes(&before, &identifiers_only).is_empty());
+
+        let mut changed = identifiers_only;
+        changed.dpi_stages[0].dpi = 900;
+        changed.active_dpi_stage = 2;
+        assert_eq!(
+            semantic_ngenuity_changes(&before, &changed),
+            vec![
+                "DPI stage 1: 800 DPI #010203/alpha 255 -> 900 DPI #010203/alpha 255",
+                "stored active-stage value: 1 -> 2",
+            ]
+        );
+    }
+
+    #[test]
+    fn raw_ngenuity_diff_tracks_offsets_and_length_changes() {
+        assert_eq!(
+            raw_byte_changes(&[0x10, 0x20, 0x30], &[0x10, 0x21, 0x30, 0x40]),
+            vec![
+                RawByteChange {
+                    offset: 1,
+                    before: Some(0x20),
+                    after: Some(0x21),
+                },
+                RawByteChange {
+                    offset: 3,
+                    before: None,
+                    after: Some(0x40),
+                },
+            ]
+        );
     }
 
     #[test]

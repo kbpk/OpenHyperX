@@ -215,24 +215,14 @@ pub enum NgenuityImportError {
     },
 }
 
+/// Return the embedded versioned preset bytes without the optional export
+/// wrapper and footer.
+pub fn ngenuity_embedded_payload(bytes: &[u8]) -> Result<&[u8], NgenuityPresetError> {
+    select_payload(bytes).map(|(_, payload)| payload)
+}
+
 pub fn parse_ngenuity_preset(bytes: &[u8]) -> Result<NgenuityPreset, NgenuityPresetError> {
-    let outer_header = read_u32(bytes, 0, "container header")?;
-    let (container, payload) = match outer_header {
-        HEADER_ALL => {
-            let length = usize::try_from(read_u32(bytes, 4, "embedded preset length")?)
-                .expect("u32 always fits usize on supported targets");
-            let available = bytes.len().saturating_sub(8);
-            if length > available {
-                return Err(NgenuityPresetError::InvalidEmbeddedLength {
-                    declared: length,
-                    available,
-                });
-            }
-            (NgenuityContainer::Export, &bytes[8..8 + length])
-        }
-        HEADER_PRESET => (NgenuityContainer::InternalPreset, bytes),
-        other => return Err(NgenuityPresetError::UnknownHeader(other)),
-    };
+    let (container, payload) = select_payload(bytes)?;
 
     expect_header(payload, 0, HEADER_PRESET, "preset")?;
     let version = read_u32(payload, 4, "preset version")?;
@@ -279,6 +269,26 @@ pub fn parse_ngenuity_preset(bytes: &[u8]) -> Result<NgenuityPreset, NgenuityPre
         macros,
         key_assignments,
     })
+}
+
+fn select_payload(bytes: &[u8]) -> Result<(NgenuityContainer, &[u8]), NgenuityPresetError> {
+    let outer_header = read_u32(bytes, 0, "container header")?;
+    match outer_header {
+        HEADER_ALL => {
+            let length = usize::try_from(read_u32(bytes, 4, "embedded preset length")?)
+                .expect("u32 always fits usize on supported targets");
+            let available = bytes.len().saturating_sub(8);
+            if length > available {
+                return Err(NgenuityPresetError::InvalidEmbeddedLength {
+                    declared: length,
+                    available,
+                });
+            }
+            Ok((NgenuityContainer::Export, &bytes[8..8 + length]))
+        }
+        HEADER_PRESET => Ok((NgenuityContainer::InternalPreset, bytes)),
+        other => Err(NgenuityPresetError::UnknownHeader(other)),
+    }
 }
 
 impl NgenuityPreset {
@@ -727,6 +737,14 @@ mod tests {
         let preset = parse_ngenuity_preset(&bytes).unwrap();
         assert_eq!(preset.container, NgenuityContainer::InternalPreset);
         assert_eq!(preset.embedded_length, bytes.len());
+        assert_eq!(ngenuity_embedded_payload(&bytes).unwrap(), bytes);
+    }
+
+    #[test]
+    fn extracts_export_payload_without_footer_or_wrapper() {
+        let wrapped = fixture(true);
+        let internal = fixture(false);
+        assert_eq!(ngenuity_embedded_payload(&wrapped).unwrap(), internal);
     }
 
     #[test]

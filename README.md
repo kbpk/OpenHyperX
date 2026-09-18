@@ -185,6 +185,9 @@ cargo run --locked --bin hyperx-cli -- \
   profile inspect-ngenuity "/mnt/c/Users/you/Desktop/Base Settings.hxp"
 
 cargo run --locked --bin hyperx-cli -- \
+  profile diff-ngenuity before.hxp after.hxp
+
+cargo run --locked --bin hyperx-cli -- \
   profile import-ngenuity "/mnt/c/Users/you/Desktop/Base Settings.hxp" \
   base-settings.toml
 ```
@@ -197,6 +200,11 @@ polling, lighting and the unconfirmed active-stage indexing are retained or
 reported as partial instead of guessed. The resulting profile is not
 automatically applied to the mouse and cannot invoke `Save to mouse`. See
 [docs/profile-format.md](docs/profile-format.md).
+
+`diff-ngenuity` compares decoded settings first and then prints exact offsets
+for changes in the embedded binary preset. Export-wrapper/footer differences
+are excluded. Raw output is limited to 256 changed bytes unless `--all-raw` is
+used, and may include regenerated source identifiers.
 
 Apply one volatile color to both zones, set wheel and logo independently, or
 keep the direct colors active in the foreground for 30 seconds:

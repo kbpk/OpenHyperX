@@ -11,8 +11,17 @@ internal preset representation when their embedded format version is `40`:
 
 ```text
 hyperx-cli profile inspect-ngenuity SOURCE.hxp
+hyperx-cli profile diff-ngenuity BEFORE.hxp AFTER.hxp
 hyperx-cli profile import-ngenuity SOURCE.hxp OUTPUT.toml
 ```
+
+`diff-ngenuity` reports normalized changes to decoded DPI and macro fields,
+then lists exact byte offsets in the embedded presets. It compares source macro
+references by their position rather than their regenerated identifiers. The
+raw section deliberately remains available for finding polling, lighting and
+assignment fields that are not decoded yet. By default it prints at most 256
+changed bytes; `--all-raw` removes that display limit. If file lengths differ,
+offsets after the first insertion/removal may be shifted.
 
 The output path must not already exist. The importer currently normalizes:
 
