@@ -1,7 +1,9 @@
 use crate::RgbColor;
+use serde::{Deserialize, Serialize};
 
 /// One DPI level exposed by a device profile.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct DpiStage {
     pub x: u32,
     pub y: u32,
@@ -15,7 +17,8 @@ impl DpiStage {
 }
 
 /// Enabled DPI levels and the zero-based index of the active level.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct DpiProfile {
     pub stages: Vec<DpiStage>,
     pub active_stage: usize,

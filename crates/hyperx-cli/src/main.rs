@@ -1,6 +1,7 @@
 use std::{
     collections::BTreeMap,
     fs,
+    io::Write,
     path::{Path, PathBuf},
     thread,
     time::{Duration, Instant},
@@ -22,6 +23,10 @@ use hyperx_protocol::{
     capture::{diff_captures, parse_hex_capture},
     format_hex,
     hid_descriptor::parse_report_layouts,
+    ngenuity::{
+        format_ngenuity_id, keyboard_usage_name, parse_ngenuity_preset, NgenuityContainer,
+        NgenuityInputAction, NgenuityMacro, NgenuityMacroItem, NgenuityMouseButton, NgenuityPreset,
+    },
     pulsefire_raid::{PerformanceProfile, PulsefireRaidControl},
 };
 use tracing_subscriber::EnvFilter;
@@ -79,12 +84,33 @@ enum Command {
         #[command(subcommand)]
         command: ButtonsCommand,
     },
+    /// Inspect or import an application profile without accessing hardware.
+    Profile {
+        #[command(subcommand)]
+        command: ProfileCommand,
+    },
     /// Compare two text files containing one raw hexadecimal report per line.
     DecodeCapture {
         /// Baseline capture exported as hex lines.
         before: PathBuf,
         /// Capture after one isolated setting change.
         after: PathBuf,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ProfileCommand {
+    /// Display confirmed fields from an NGENUITY version-40 .hxp preset.
+    InspectNgenuity {
+        /// Exported .hxp file or NGENUITY's internal Master.hxp/Preset file.
+        file: PathBuf,
+    },
+    /// Convert confirmed .hxp fields to a partial OpenHyperX TOML profile.
+    ImportNgenuity {
+        /// Exported .hxp file or NGENUITY's internal Master.hxp/Preset file.
+        source: PathBuf,
+        /// New TOML file. Existing files are never overwritten.
+        output: PathBuf,
     },
 }
 
@@ -470,7 +496,192 @@ fn main() -> Result<()> {
         Command::Dpi { command } => dpi(command),
         Command::Polling { command } => polling(command),
         Command::Buttons { command } => buttons(command),
+        Command::Profile { command } => profile(command),
         Command::DecodeCapture { before, after } => decode_capture(&before, &after),
+    }
+}
+
+const MAX_NGENUITY_PRESET_BYTES: u64 = 16 * 1024 * 1024;
+
+fn profile(command: ProfileCommand) -> Result<()> {
+    match command {
+        ProfileCommand::InspectNgenuity { file } => {
+            let preset = load_ngenuity_preset(&file)?;
+            print_ngenuity_preset(&preset);
+            Ok(())
+        }
+        ProfileCommand::ImportNgenuity { source, output } => {
+            let preset = load_ngenuity_preset(&source)?;
+            let profile = preset
+                .to_software_profile("pulsefire-raid")
+                .with_context(|| format!("failed to import {}", source.display()))?;
+            let encoded = toml::to_string_pretty(&profile)
+                .context("failed to serialize the imported OpenHyperX profile")?;
+
+            let mut destination = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&output)
+                .with_context(|| {
+                    format!(
+                        "failed to create {}; the importer never overwrites an existing file",
+                        output.display()
+                    )
+                })?;
+            destination
+                .write_all(encoded.as_bytes())
+                .with_context(|| format!("failed to write {}", output.display()))?;
+
+            println!(
+                "Imported NGENUITY preset {:?} to {}.",
+                preset.name,
+                output.display()
+            );
+            println!(
+                "Imported {} DPI stage(s), {} macro(s), and retained {} unresolved button assignment(s).",
+                preset.dpi_stages.len(),
+                preset.macros.len(),
+                preset.key_assignments.len(),
+            );
+            println!(
+                "The profile is marked partial: polling, lighting and physical assignment targets are not decoded from .hxp yet."
+            );
+            println!("No HID device was opened and no onboard profile was written.");
+            Ok(())
+        }
+    }
+}
+
+fn load_ngenuity_preset(path: &Path) -> Result<NgenuityPreset> {
+    let metadata = fs::metadata(path)
+        .with_context(|| format!("failed to inspect NGENUITY preset {}", path.display()))?;
+    if metadata.len() > MAX_NGENUITY_PRESET_BYTES {
+        return Err(anyhow!(
+            "NGENUITY preset {} is {} bytes; the offline parser limit is {} bytes",
+            path.display(),
+            metadata.len(),
+            MAX_NGENUITY_PRESET_BYTES,
+        ));
+    }
+    let bytes = fs::read(path)
+        .with_context(|| format!("failed to read NGENUITY preset {}", path.display()))?;
+    parse_ngenuity_preset(&bytes)
+        .with_context(|| format!("failed to parse NGENUITY preset {}", path.display()))
+}
+
+fn print_ngenuity_preset(preset: &NgenuityPreset) {
+    let container = match preset.container {
+        NgenuityContainer::Export => "exported .hxp wrapper",
+        NgenuityContainer::InternalPreset => "internal preset",
+    };
+    println!("NGENUITY preset: {}", preset.name);
+    println!("Container: {container}");
+    println!("Format version: {}", preset.version);
+    println!("Embedded preset: {} bytes", preset.embedded_length);
+    println!("DPI stages:");
+    for (index, stage) in preset.dpi_stages.iter().enumerate() {
+        let active = if u32::try_from(index + 1).ok() == Some(preset.active_dpi_stage) {
+            " [active candidate]"
+        } else {
+            ""
+        };
+        println!(
+            "  {}: {} DPI, {}, alpha={}{}",
+            index + 1,
+            stage.dpi,
+            stage.color,
+            stage.alpha,
+            active,
+        );
+    }
+    println!(
+        "  Stored active-stage value: {} (indexing semantics are not confirmed).",
+        preset.active_dpi_stage
+    );
+
+    println!("Macros:");
+    if preset.macros.is_empty() {
+        println!("  <none>");
+    }
+    for (index, source_macro) in preset.macros.iter().enumerate() {
+        print_ngenuity_macro(index + 1, source_macro);
+    }
+
+    println!("Button assignments: {}", preset.key_assignments.len());
+    for (index, assignment) in preset.key_assignments.iter().enumerate() {
+        let reference = assignment.macro_source_id.as_ref().map_or_else(
+            || "no decoded macro reference".to_owned(),
+            |id| format!("macro {}", format_ngenuity_id(id)),
+        );
+        println!(
+            "  {}: source_id={}, {reference}; physical control unresolved",
+            index + 1,
+            format_ngenuity_id(&assignment.source_id),
+        );
+    }
+    println!(
+        "Not decoded from .hxp yet: polling rate, lighting fields, and physical targets for assignments."
+    );
+    println!("Inspection was offline; no HID device was opened.");
+}
+
+fn print_ngenuity_macro(index: usize, source_macro: &NgenuityMacro) {
+    let timing = if source_macro.use_standard_timing {
+        format!("standard {} ms", source_macro.standard_timing_ms)
+    } else {
+        "recorded per event".to_owned()
+    };
+    let playback = if source_macro.playback_mode == 1 {
+        "play once"
+    } else {
+        "unconfirmed"
+    };
+    println!(
+        "  {index}: {:?} id={} ({timing}, {playback}, raw mode={}, play-times={}, events={})",
+        source_macro.name,
+        format_ngenuity_id(&source_macro.source_id),
+        source_macro.playback_mode,
+        source_macro.play_times,
+        source_macro.items.len(),
+    );
+    for (event, item) in source_macro.items.iter().enumerate() {
+        let effective = source_macro.effective_timing_ms(item);
+        let stored = if effective != item.timing_ms {
+            format!(", stored={} ms", item.timing_ms)
+        } else {
+            String::new()
+        };
+        println!(
+            "    {}: {}, delay={} ms{}",
+            event + 1,
+            describe_ngenuity_macro_item(item),
+            effective,
+            stored,
+        );
+    }
+}
+
+fn describe_ngenuity_macro_item(item: &NgenuityMacroItem) -> String {
+    match item.decoded_action() {
+        Some(NgenuityInputAction::Keyboard { usage, pressed }) => {
+            let key = keyboard_usage_name(usage).unwrap_or_else(|| format!("usage-0x{usage:04X}"));
+            format!(
+                "key-{} {key} (HID 0x{usage:04X})",
+                if pressed { "down" } else { "up" }
+            )
+        }
+        Some(NgenuityInputAction::MouseButton { button, pressed }) => {
+            let button = match button {
+                NgenuityMouseButton::Left => "left",
+                NgenuityMouseButton::Right => "right",
+                NgenuityMouseButton::Middle => "middle",
+            };
+            format!("mouse-{} {button}", if pressed { "down" } else { "up" })
+        }
+        None => format!(
+            "unknown type={} action={} state={} data={} key-data=0x{:04X}",
+            item.item_type, item.action, item.state, item.data, item.key_data
+        ),
     }
 }
 
@@ -1413,6 +1624,32 @@ mod tests {
             assert!(Cli::try_parse_from(["hyperx-cli", "polling", "set", valid]).is_ok());
         }
         assert!(Cli::try_parse_from(["hyperx-cli", "polling", "set", "2000"]).is_err());
+    }
+
+    #[test]
+    fn cli_exposes_offline_ngenuity_inspection_and_import() {
+        assert!(Cli::try_parse_from([
+            "hyperx-cli",
+            "profile",
+            "inspect-ngenuity",
+            "Base Settings.hxp",
+        ])
+        .is_ok());
+        assert!(Cli::try_parse_from([
+            "hyperx-cli",
+            "profile",
+            "import-ngenuity",
+            "Base Settings.hxp",
+            "base-settings.toml",
+        ])
+        .is_ok());
+        assert!(Cli::try_parse_from([
+            "hyperx-cli",
+            "profile",
+            "import-ngenuity",
+            "Base Settings.hxp",
+        ])
+        .is_err());
     }
 
     #[test]

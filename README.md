@@ -32,6 +32,8 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
   Play Once macros with keyboard chords, per-event timings and
   left/right/middle mouse clicks
 - raw hex capture parser/diff for protocol research
+- offline NGENUITY version-40 `.hxp` inspection and partial import to a
+  portable, versioned OpenHyperX TOML profile
 - offline DPI-stage, polling and button-profile parser/patcher with golden tests
 - no primary-click remapping or onboard hardware writes yet
 
@@ -174,6 +176,27 @@ transitions, common keyboard usages and the three captured primary mouse
 buttons. Unsupported keys, playback modes and malformed timelines are rejected
 before the mouse is opened. See [docs/macro-format.md](docs/macro-format.md).
 These commands do not save onboard.
+
+Inspect an exported NGENUITY preset or import every currently understood field
+to a new OpenHyperX TOML profile:
+
+```bash
+cargo run --locked --bin hyperx-cli -- \
+  profile inspect-ngenuity "/mnt/c/Users/you/Desktop/Base Settings.hxp"
+
+cargo run --locked --bin hyperx-cli -- \
+  profile import-ngenuity "/mnt/c/Users/you/Desktop/Base Settings.hxp" \
+  base-settings.toml
+```
+
+These are platform-independent offline operations: they do not enumerate or
+open HID devices. The importer currently supports NGENUITY preset format
+version 40 and creates, rather than overwrites, its output. DPI stages and
+confirmed macro event types are converted. Unknown physical button targets,
+polling, lighting and the unconfirmed active-stage indexing are retained or
+reported as partial instead of guessed. The resulting profile is not
+automatically applied to the mouse and cannot invoke `Save to mouse`. See
+[docs/profile-format.md](docs/profile-format.md).
 
 Apply one volatile color to both zones, set wheel and logo independently, or
 keep the direct colors active in the foreground for 30 seconds:

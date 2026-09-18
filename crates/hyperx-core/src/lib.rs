@@ -6,6 +6,7 @@ mod color;
 mod device;
 mod lighting;
 mod performance;
+mod profile;
 
 pub use button::{
     ButtonBinding, KeyState, KeyboardMacroEvent, KeyboardUsage, KeyboardUsageParseError,
@@ -23,3 +24,7 @@ pub use lighting::{
     SPECTRUM_STEPS,
 };
 pub use performance::{DpiProfile, DpiStage};
+pub use profile::{
+    NamedMacro, SoftwareDpiProfile, SoftwareProfile, SoftwareProfileSource,
+    UnresolvedButtonAssignment, SOFTWARE_PROFILE_FORMAT_VERSION,
+};

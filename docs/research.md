@@ -794,6 +794,52 @@ unchanged. Pressing Button 5 emitted uppercase `A`, functionally confirming
 modifier state, event ordering and the general TOML-to-report path. The mouse
 continued to operate normally. No onboard-save transaction was sent.
 
+## NGENUITY `.hxp` preset format
+
+On 2026-09-18, an exported `Base Settings.hxp` from NGENUITY `5.38.0.0` was
+examined offline. The file was not copied into the repository because it
+contains local identifiers and recorded macro content. It is an uncompressed,
+versioned binary serialization rather than a HID capture.
+
+The 5,972-byte export begins with little-endian `HEADER_ALL = 0x7D6583CA` and
+an embedded length of 5,904 bytes. The embedded preset begins with
+`HEADER = 0x4D2C83CE`, format version `40`, a .NET-style seven-bit-length UTF-8
+name, and serialized model data. The 60-byte export footer uses the observed
+icon/game-link markers `0x12345670`, `0x12345672`, `0x12345673`, `0x12345671`
+and `0x23456780`. The embedded payload differed from NGENUITY's contemporaneous
+local `Master.hxp` only in two 16-byte identifiers.
+
+The mouse object uses header `0x1A4A0099`. Its observed DPI list contains
+64-byte records with a 16-byte source identifier, a direct little-endian DPI
+integer and an ARGB color. The examined file decoded to 800 `#2B00FF`, 1600
+`#CD00FF`, 3200 `#32FF00` and 6400 `#FF0000`. A following value was `1` and is
+probably the selected stage, but its indexing semantics are not confirmed;
+the importer therefore preserves it only as `source_active_stage`.
+
+Macro objects use header `0x2545C654`; their fixed 38-byte event objects use
+header `0x1B35A31E`. The object fields expose the macro name, Standard Timing
+flag/value, raw playback mode, play count and event count. Observed event type
+`1` contains USB HID keyboard usages with separate down/up actions. Type `2`
+contains left actions `1/2`, right `4/5` and middle `7/8`. The 14-event recorded
+macro reproduced every keyboard, modifier, mouse transition and timing from
+the earlier USB capture. When Standard Timing is enabled, the global value is
+the effective wire timing even though the preset retains recorded item times.
+Raw playback mode `1` corresponds to the independently captured Play Once
+configuration; other numeric modes remain unconverted.
+
+Key-assignment objects use header `0x2CD854CB` and were 93 bytes each in this
+preset. One assignment contained the exact 16-byte source identifier of the
+14-event macro. The mapping from assignment identifiers to physical controls
+has not been established, so imports preserve these references without
+creating button bindings.
+
+`hyperx-protocol::ngenuity` now parses both the version-40 export wrapper and
+the internal preset form with bounds checks and synthetic fixtures. The CLI
+can inspect the decoded data or import confirmed DPI/macro fields to a partial
+OpenHyperX TOML profile. Both operations are offline and have no HID or onboard
+write path. Polling, lighting, physical assignment targets and other preset
+versions require isolated export comparisons before being decoded.
+
 ## Unknowns and required evidence
 
 | Area | Current state | Required next experiment |
@@ -805,6 +851,7 @@ continued to operate normally. No onboard-save transaction was sent.
 | persistent RGB/effects | OpenHyperX effects are foreground-rendered; a standalone firmware rainbow was observed after NGENUITY stopped, but NGENUITY Solid/Cycle and red/green save captures did not select or persist it | identify a confirmed hardware-mode selector and its save semantics before exposing hardware rainbow or other persistent effects |
 | DPI and stages | runtime read/set, per-stage value/color edits, active-stage selection and final-stage add/remove are implemented and hardware-validated; five big-endian X/Y slots, 200-16000 range and 50-DPI units are confirmed | determine whether independent X/Y values are supported; onboard persistence remains part of the separate save blocker |
 | polling | all four interval codes captured; runtime 1000→500→1000 set/readback validated; 1000 Hz persisted through a separate NGENUITY save and power-cycle | verify effective USB report rate with an external rate tester |
+| NGENUITY `.hxp` | version-40 container, DPI records, Play Once keyboard/primary-click macros and macro references are parsed offline; imports are explicitly partial | compare exports differing only in active stage, polling, lighting, one physical assignment and each repeat mode |
 | button bindings | all 11 mappings are readable; five fixed records plus named one-byte keyboard usages are writable on the nine general controls, while Forward, Copy and macros remain Button-5-specific; the portable path is hardware-tested on Button 6, direct Keyboard A/B is hardware-tested on DPI, and target-specific Button 4, Button 5, Button 7 and DPI writes are also hardware-tested; bounded Button 5 Play Once macros support keyboard chords, nonuniform timing and left/right/middle clicks | capture primary-click swaps and the remaining ordinary records; isolate macro portability, repeat modes, longer timelines, remaining mouse events and timing boundaries |
 | onboard save | repeated transaction, timing and read-modify-write captured; performance persistence confirmed; `0x18[0]` carries two correlated RGB triplets while `0x18[1..2]` were zero for Solid/All Lights | capture isolated wheel/logo and non-Solid saves, then save a profile containing a macro; determine acknowledgements and failure behavior before replay |
 | NGENUITY locking | unknown | run `devices`, then future read-only `info`, with NGENUITY open and closed; record open errors |

@@ -42,15 +42,19 @@ and a delay on every event. A capture-backed Raid encoder now supports Play
 Once Button 5 keyboard chords, nonuniform timings and left/right/middle mouse
 clicks, with a conservative 14-transition limit matching the largest local
 capture. Other targets, playback modes, longer macros and unconfirmed mouse
-events remain absent.
+events remain absent. A separate offline parser reads confirmed fields from
+NGENUITY version-40 `.hxp` presets and converts them to a partial, versioned
+software profile without opening a HID device.
 
 ## Crate responsibilities
 
 ### `hyperx-core`
 
 Platform-independent value types: USB identity, HID collection metadata,
-capabilities and, in later milestones, DPI, bindings, lighting, profiles and a
-high-level device API. It must not depend on `hidapi` or a GUI toolkit.
+capabilities, DPI, bindings, lighting, portable software profiles and, in later
+milestones, a high-level device API. It must not depend on `hidapi` or a GUI
+toolkit. Imported profiles explicitly distinguish confirmed normalized fields
+from unresolved source values.
 
 Hardware capabilities and implemented protocol operations are separate facts.
 For example, Pulsefire Raid advertises onboard memory, but no onboard write API
@@ -72,8 +76,9 @@ unverified there.
 
 ### `hyperx-protocol`
 
-Owns protocol-neutral wire logging, HID descriptor/capture parsers, and typed
-report encoders/decoders.
+Owns protocol-neutral wire logging, HID descriptor/capture parsers, offline
+vendor-format parsers such as NGENUITY `.hxp`, and typed report
+encoders/decoders.
 Encoders must validate ranges, use fixed packet sizes and have golden tests.
 Raw TX/RX logging is emitted only at `trace` level.
 
