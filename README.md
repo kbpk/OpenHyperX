@@ -32,7 +32,7 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
   Play Once macros with keyboard chords, per-event timings and
   left/right/middle mouse clicks
 - raw hex capture parser/diff for protocol research
-- offline NGENUITY version-40 `.hxp` inspection and partial import to a
+- offline NGENUITY Legacy version-40 `.hxp` inspection and partial import to a
   portable OpenHyperX TOML profile
 - offline DPI-stage, polling and button-profile parser/patcher with golden tests
 - no primary-click remapping or onboard hardware writes yet
@@ -85,8 +85,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
 ```
 
 `info` sends only the repeated, capture-backed runtime-profile read sequence;
-it does not send the profile-write packet. Close NGENUITY first so two programs
-do not access the configuration collection concurrently.
+it does not send the profile-write packet. Close every NGENUITY variant first
+so two programs do not access the configuration collection concurrently.
 
 Read or change runtime DPI stages and polling rate:
 
@@ -177,34 +177,35 @@ buttons. Unsupported keys, playback modes and malformed timelines are rejected
 before the mouse is opened. See [docs/macro-format.md](docs/macro-format.md).
 These commands do not save onboard.
 
-Inspect an exported NGENUITY preset or import every currently understood field
-to a new OpenHyperX TOML profile:
+Inspect an exported NGENUITY Legacy preset or import every currently understood
+field to a new OpenHyperX TOML profile:
 
 ```bash
 cargo run --locked --bin hyperx-cli -- \
-  profile inspect-ngenuity "/mnt/c/Users/you/Desktop/Base Settings.hxp"
+  profile inspect-ngenuity-legacy "/mnt/c/Users/you/Desktop/Base Settings.hxp"
 
 cargo run --locked --bin hyperx-cli -- \
-  profile diff-ngenuity before.hxp after.hxp
+  profile diff-ngenuity-legacy before.hxp after.hxp
 
 cargo run --locked --bin hyperx-cli -- \
-  profile import-ngenuity "/mnt/c/Users/you/Desktop/Base Settings.hxp" \
+  profile import-ngenuity-legacy "/mnt/c/Users/you/Desktop/Base Settings.hxp" \
   base-settings.toml
 ```
 
 These are platform-independent offline operations: they do not enumerate or
-open HID devices. The importer currently supports NGENUITY preset format
-version 40 and creates, rather than overwrites, its output. DPI stages and
-confirmed macro event types are converted. Unknown physical button targets,
-polling, lighting and the unconfirmed active-stage indexing are retained or
-reported as partial instead of guessed. The resulting profile is not
-automatically applied to the mouse and cannot invoke `Save to mouse`. See
-[docs/profile-format.md](docs/profile-format.md).
+open HID devices. The importer currently supports only the NGENUITY Legacy
+preset format version 40 observed in Microsoft Store version `5.38.0.0`; it
+does not claim compatibility with current NGENUITY. It creates, rather than
+overwrites, its output. DPI stages and confirmed macro event types are
+converted. Unknown physical button targets, polling, lighting and the
+unconfirmed active-stage indexing are retained or reported as partial instead
+of guessed. The resulting profile is not automatically applied to the mouse
+and cannot invoke `Save to mouse`. See [docs/profile-format.md](docs/profile-format.md).
 
-`diff-ngenuity` compares decoded settings first and then prints exact offsets
-for changes in the embedded binary preset. Export-wrapper/footer differences
-are excluded. Raw output is limited to 256 changed bytes unless `--all-raw` is
-used, and may include regenerated source identifiers.
+`diff-ngenuity-legacy` compares decoded settings first and then prints exact
+offsets for changes in the embedded binary preset. Export-wrapper/footer
+differences are excluded. Raw output is limited to 256 changed bytes unless
+`--all-raw` is used, and may include regenerated source identifiers.
 
 Apply one volatile color to both zones, set wheel and logo independently, or
 keep the direct colors active in the foreground for 30 seconds:
@@ -241,11 +242,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
 
 When the positional color is omitted, an unspecified zone is black. Zone
 options also accept `off`; when a positional color is present they override it.
-Direct RGB does not write onboard memory. Close NGENUITY and other device/RGB
-writers before using it. `rgb cycle` is rendered only while the CLI remains in
-the foreground; it does not install a service. Once keepalive ends, the prior
-lighting state may return. Advanced programs assign a different effect and
-phase to each LED; see [docs/lighting.md](docs/lighting.md).
+Direct RGB does not write onboard memory. Close every NGENUITY variant and
+other device/RGB writers before using it. `rgb cycle` is rendered only while
+the CLI remains in the foreground; it does not install a service. Once
+keepalive ends, the prior lighting state may return. Advanced programs assign
+a different effect and phase to each LED; see [docs/lighting.md](docs/lighting.md).
 
 ## Build on macOS
 

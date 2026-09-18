@@ -96,7 +96,7 @@ const fn default_fade_ms() -> u64 {
 
 /// One portable software-rendered effect.
 ///
-/// Names mirror familiar NGENUITY choices, but animation curves and palettes
+/// Names mirror familiar NGENUITY Legacy choices, but animation curves and palettes
 /// are explicitly OpenHyperX definitions until captures establish otherwise.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "effect", rename_all = "kebab-case", deny_unknown_fields)]

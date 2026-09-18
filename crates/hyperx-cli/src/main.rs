@@ -23,10 +23,10 @@ use hyperx_protocol::{
     capture::{diff_captures, parse_hex_capture},
     format_hex,
     hid_descriptor::parse_report_layouts,
-    ngenuity::{
-        format_ngenuity_id, keyboard_usage_name, ngenuity_embedded_payload, parse_ngenuity_preset,
-        NgenuityContainer, NgenuityInputAction, NgenuityMacro, NgenuityMacroItem,
-        NgenuityMouseButton, NgenuityPreset,
+    ngenuity_legacy::{
+        format_ngenuity_legacy_id, keyboard_usage_name, ngenuity_legacy_embedded_payload,
+        parse_ngenuity_legacy_preset, NgenuityContainer, NgenuityInputAction, NgenuityMacro,
+        NgenuityMacroItem, NgenuityMouseButton, NgenuityPreset,
     },
     pulsefire_raid::{PerformanceProfile, PulsefireRaidControl},
 };
@@ -101,14 +101,14 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum ProfileCommand {
-    /// Display confirmed fields from an NGENUITY version-40 .hxp preset.
-    #[command(name = "inspect-ngenuity")]
+    /// Display confirmed fields from an NGENUITY Legacy version-40 .hxp preset.
+    #[command(name = "inspect-ngenuity-legacy")]
     Inspect {
-        /// Exported .hxp file or NGENUITY's internal Master.hxp/Preset file.
+        /// Exported .hxp or internal NGENUITY Legacy Master.hxp/Preset file.
         file: PathBuf,
     },
-    /// Compare decoded fields and embedded bytes of two NGENUITY presets.
-    #[command(name = "diff-ngenuity")]
+    /// Compare two NGENUITY Legacy presets semantically and byte by byte.
+    #[command(name = "diff-ngenuity-legacy")]
     Diff {
         /// Baseline exported .hxp or internal preset file.
         before: PathBuf,
@@ -119,9 +119,9 @@ enum ProfileCommand {
         all_raw: bool,
     },
     /// Convert confirmed .hxp fields to a partial OpenHyperX TOML profile.
-    #[command(name = "import-ngenuity")]
+    #[command(name = "import-ngenuity-legacy")]
     Import {
-        /// Exported .hxp file or NGENUITY's internal Master.hxp/Preset file.
+        /// Exported .hxp or internal NGENUITY Legacy Master.hxp/Preset file.
         source: PathBuf,
         /// New TOML file. Existing files are never overwritten.
         output: PathBuf,
@@ -515,22 +515,22 @@ fn main() -> Result<()> {
     }
 }
 
-const MAX_NGENUITY_PRESET_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_NGENUITY_LEGACY_PRESET_BYTES: u64 = 16 * 1024 * 1024;
 
 fn profile(command: ProfileCommand) -> Result<()> {
     match command {
         ProfileCommand::Inspect { file } => {
-            let preset = load_ngenuity_preset(&file)?;
-            print_ngenuity_preset(&preset);
+            let preset = load_ngenuity_legacy_preset(&file)?;
+            print_ngenuity_legacy_preset(&preset);
             Ok(())
         }
         ProfileCommand::Diff {
             before,
             after,
             all_raw,
-        } => diff_ngenuity_profiles(&before, &after, all_raw),
+        } => diff_ngenuity_legacy_profiles(&before, &after, all_raw),
         ProfileCommand::Import { source, output } => {
-            let preset = load_ngenuity_preset(&source)?;
+            let preset = load_ngenuity_legacy_preset(&source)?;
             let profile = preset
                 .to_software_profile("pulsefire-raid")
                 .with_context(|| format!("failed to import {}", source.display()))?;
@@ -552,7 +552,7 @@ fn profile(command: ProfileCommand) -> Result<()> {
                 .with_context(|| format!("failed to write {}", output.display()))?;
 
             println!(
-                "Imported NGENUITY preset {:?} to {}.",
+                "Imported NGENUITY Legacy preset {:?} to {}.",
                 preset.name,
                 output.display()
             );
@@ -571,27 +571,32 @@ fn profile(command: ProfileCommand) -> Result<()> {
     }
 }
 
-fn load_ngenuity_preset(path: &Path) -> Result<NgenuityPreset> {
-    let bytes = load_ngenuity_bytes(path)?;
-    parse_ngenuity_preset(&bytes)
-        .with_context(|| format!("failed to parse NGENUITY preset {}", path.display()))
+fn load_ngenuity_legacy_preset(path: &Path) -> Result<NgenuityPreset> {
+    let bytes = load_ngenuity_legacy_bytes(path)?;
+    parse_ngenuity_legacy_preset(&bytes)
+        .with_context(|| format!("failed to parse NGENUITY Legacy preset {}", path.display()))
 }
 
-fn load_ngenuity_bytes(path: &Path) -> Result<Vec<u8>> {
-    let metadata = fs::metadata(path)
-        .with_context(|| format!("failed to inspect NGENUITY preset {}", path.display()))?;
-    if metadata.len() > MAX_NGENUITY_PRESET_BYTES {
+fn load_ngenuity_legacy_bytes(path: &Path) -> Result<Vec<u8>> {
+    let metadata = fs::metadata(path).with_context(|| {
+        format!(
+            "failed to inspect NGENUITY Legacy preset {}",
+            path.display()
+        )
+    })?;
+    if metadata.len() > MAX_NGENUITY_LEGACY_PRESET_BYTES {
         return Err(anyhow!(
-            "NGENUITY preset {} is {} bytes; the offline parser limit is {} bytes",
+            "NGENUITY Legacy preset {} is {} bytes; the offline parser limit is {} bytes",
             path.display(),
             metadata.len(),
-            MAX_NGENUITY_PRESET_BYTES,
+            MAX_NGENUITY_LEGACY_PRESET_BYTES,
         ));
     }
-    fs::read(path).with_context(|| format!("failed to read NGENUITY preset {}", path.display()))
+    fs::read(path)
+        .with_context(|| format!("failed to read NGENUITY Legacy preset {}", path.display()))
 }
 
-const DEFAULT_RAW_NGENUITY_CHANGE_LIMIT: usize = 256;
+const DEFAULT_RAW_NGENUITY_LEGACY_CHANGE_LIMIT: usize = 256;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct RawByteChange {
@@ -600,22 +605,26 @@ struct RawByteChange {
     after: Option<u8>,
 }
 
-fn diff_ngenuity_profiles(before_path: &Path, after_path: &Path, all_raw: bool) -> Result<()> {
-    let before_bytes = load_ngenuity_bytes(before_path)?;
-    let after_bytes = load_ngenuity_bytes(after_path)?;
-    let before = parse_ngenuity_preset(&before_bytes)
+fn diff_ngenuity_legacy_profiles(
+    before_path: &Path,
+    after_path: &Path,
+    all_raw: bool,
+) -> Result<()> {
+    let before_bytes = load_ngenuity_legacy_bytes(before_path)?;
+    let after_bytes = load_ngenuity_legacy_bytes(after_path)?;
+    let before = parse_ngenuity_legacy_preset(&before_bytes)
         .with_context(|| format!("failed to parse {}", before_path.display()))?;
-    let after = parse_ngenuity_preset(&after_bytes)
+    let after = parse_ngenuity_legacy_preset(&after_bytes)
         .with_context(|| format!("failed to parse {}", after_path.display()))?;
-    let before_payload = ngenuity_embedded_payload(&before_bytes)?;
-    let after_payload = ngenuity_embedded_payload(&after_bytes)?;
+    let before_payload = ngenuity_legacy_embedded_payload(&before_bytes)?;
+    let after_payload = ngenuity_legacy_embedded_payload(&after_bytes)?;
 
     println!(
-        "Compared NGENUITY presets {:?} and {:?}.",
+        "Compared NGENUITY Legacy presets {:?} and {:?}.",
         before.name, after.name
     );
     println!("Decoded changes:");
-    let semantic = semantic_ngenuity_changes(&before, &after);
+    let semantic = semantic_ngenuity_legacy_changes(&before, &after);
     if semantic.is_empty() {
         println!("  <none>");
     } else {
@@ -639,7 +648,7 @@ fn diff_ngenuity_profiles(before_path: &Path, after_path: &Path, all_raw: bool) 
     let limit = if all_raw {
         raw.len()
     } else {
-        DEFAULT_RAW_NGENUITY_CHANGE_LIMIT
+        DEFAULT_RAW_NGENUITY_LEGACY_CHANGE_LIMIT
     };
     for change in raw.iter().take(limit) {
         println!(
@@ -664,7 +673,10 @@ fn diff_ngenuity_profiles(before_path: &Path, after_path: &Path, all_raw: bool) 
     Ok(())
 }
 
-fn semantic_ngenuity_changes(before: &NgenuityPreset, after: &NgenuityPreset) -> Vec<String> {
+fn semantic_ngenuity_legacy_changes(
+    before: &NgenuityPreset,
+    after: &NgenuityPreset,
+) -> Vec<String> {
     let mut changes = Vec::new();
     if before.name != after.name {
         changes.push(format!("name: {:?} -> {:?}", before.name, after.name));
@@ -727,7 +739,9 @@ fn semantic_ngenuity_changes(before: &NgenuityPreset, after: &NgenuityPreset) ->
     }
     for index in 0..before.macros.len().max(after.macros.len()) {
         match (before.macros.get(index), after.macros.get(index)) {
-            (Some(left), Some(right)) => compare_ngenuity_macro(index, left, right, &mut changes),
+            (Some(left), Some(right)) => {
+                compare_ngenuity_legacy_macro(index, left, right, &mut changes)
+            }
             (None, Some(source_macro)) => changes.push(format!(
                 "macro {} added: {:?}",
                 index + 1,
@@ -774,7 +788,7 @@ fn semantic_ngenuity_changes(before: &NgenuityPreset, after: &NgenuityPreset) ->
     changes
 }
 
-fn compare_ngenuity_macro(
+fn compare_ngenuity_legacy_macro(
     index: usize,
     before: &NgenuityMacro,
     after: &NgenuityMacro,
@@ -823,26 +837,26 @@ fn compare_ngenuity_macro(
     }
     for event in 0..before.items.len().max(after.items.len()) {
         match (before.items.get(event), after.items.get(event)) {
-            (Some(left), Some(right)) if !same_ngenuity_macro_item(left, right) => {
+            (Some(left), Some(right)) if !same_ngenuity_legacy_macro_item(left, right) => {
                 changes.push(format!(
                     "macro {number} event {}: {} (stored {} ms) -> {} (stored {} ms)",
                     event + 1,
-                    describe_ngenuity_macro_item(left),
+                    describe_ngenuity_legacy_macro_item(left),
                     left.timing_ms,
-                    describe_ngenuity_macro_item(right),
+                    describe_ngenuity_legacy_macro_item(right),
                     right.timing_ms,
                 ));
             }
             (None, Some(item)) => changes.push(format!(
                 "macro {number} event {} added: {} (stored {} ms)",
                 event + 1,
-                describe_ngenuity_macro_item(item),
+                describe_ngenuity_legacy_macro_item(item),
                 item.timing_ms,
             )),
             (Some(item), None) => changes.push(format!(
                 "macro {number} event {} removed: {} (stored {} ms)",
                 event + 1,
-                describe_ngenuity_macro_item(item),
+                describe_ngenuity_legacy_macro_item(item),
                 item.timing_ms,
             )),
             _ => {}
@@ -850,7 +864,7 @@ fn compare_ngenuity_macro(
     }
 }
 
-fn same_ngenuity_macro_item(before: &NgenuityMacroItem, after: &NgenuityMacroItem) -> bool {
+fn same_ngenuity_legacy_macro_item(before: &NgenuityMacroItem, after: &NgenuityMacroItem) -> bool {
     before.item_type == after.item_type
         && before.action == after.action
         && before.state == after.state
@@ -892,12 +906,12 @@ fn raw_byte_changes(before: &[u8], after: &[u8]) -> Vec<RawByteChange> {
     changes
 }
 
-fn print_ngenuity_preset(preset: &NgenuityPreset) {
+fn print_ngenuity_legacy_preset(preset: &NgenuityPreset) {
     let container = match preset.container {
         NgenuityContainer::Export => "exported .hxp wrapper",
         NgenuityContainer::InternalPreset => "internal preset",
     };
-    println!("NGENUITY preset: {}", preset.name);
+    println!("NGENUITY Legacy preset: {}", preset.name);
     println!("Container: {container}");
     println!("Format version: {}", preset.version);
     println!("Embedded preset: {} bytes", preset.embedded_length);
@@ -927,19 +941,19 @@ fn print_ngenuity_preset(preset: &NgenuityPreset) {
         println!("  <none>");
     }
     for (index, source_macro) in preset.macros.iter().enumerate() {
-        print_ngenuity_macro(index + 1, source_macro);
+        print_ngenuity_legacy_macro(index + 1, source_macro);
     }
 
     println!("Button assignments: {}", preset.key_assignments.len());
     for (index, assignment) in preset.key_assignments.iter().enumerate() {
         let reference = assignment.macro_source_id.as_ref().map_or_else(
             || "no decoded macro reference".to_owned(),
-            |id| format!("macro {}", format_ngenuity_id(id)),
+            |id| format!("macro {}", format_ngenuity_legacy_id(id)),
         );
         println!(
             "  {}: source_id={}, {reference}; physical control unresolved",
             index + 1,
-            format_ngenuity_id(&assignment.source_id),
+            format_ngenuity_legacy_id(&assignment.source_id),
         );
     }
     println!(
@@ -948,7 +962,7 @@ fn print_ngenuity_preset(preset: &NgenuityPreset) {
     println!("Inspection was offline; no HID device was opened.");
 }
 
-fn print_ngenuity_macro(index: usize, source_macro: &NgenuityMacro) {
+fn print_ngenuity_legacy_macro(index: usize, source_macro: &NgenuityMacro) {
     let timing = if source_macro.use_standard_timing {
         format!("standard {} ms", source_macro.standard_timing_ms)
     } else {
@@ -962,7 +976,7 @@ fn print_ngenuity_macro(index: usize, source_macro: &NgenuityMacro) {
     println!(
         "  {index}: {:?} id={} ({timing}, {playback}, raw mode={}, play-times={}, events={})",
         source_macro.name,
-        format_ngenuity_id(&source_macro.source_id),
+        format_ngenuity_legacy_id(&source_macro.source_id),
         source_macro.playback_mode,
         source_macro.play_times,
         source_macro.items.len(),
@@ -977,14 +991,14 @@ fn print_ngenuity_macro(index: usize, source_macro: &NgenuityMacro) {
         println!(
             "    {}: {}, delay={} ms{}",
             event + 1,
-            describe_ngenuity_macro_item(item),
+            describe_ngenuity_legacy_macro_item(item),
             effective,
             stored,
         );
     }
 }
 
-fn describe_ngenuity_macro_item(item: &NgenuityMacroItem) -> String {
+fn describe_ngenuity_legacy_macro_item(item: &NgenuityMacroItem) -> String {
     match item.decoded_action() {
         Some(NgenuityInputAction::Keyboard { usage, pressed }) => {
             let key = keyboard_usage_name(usage).unwrap_or_else(|| format!("usage-0x{usage:04X}"));
@@ -1226,9 +1240,9 @@ fn info(discovery: &dyn HidDiscovery, show_descriptor: bool) -> Result<()> {
     }
 
     let mut device = PulsefireRaid::new(transport)?;
-    let profile = device
-        .runtime_profile()
-        .context("failed to read the Pulsefire Raid runtime profile; close NGENUITY and retry")?;
+    let profile = device.runtime_profile().context(
+        "failed to read the Pulsefire Raid runtime profile; close every NGENUITY variant and retry",
+    )?;
     print_runtime_profile(&profile);
 
     Ok(())
@@ -1356,7 +1370,7 @@ fn dpi(command: DpiCommand) -> Result<()> {
     match command {
         DpiCommand::Get => {
             let profile = device.runtime_profile().context(
-                "failed to read the Pulsefire Raid runtime profile; close NGENUITY and retry",
+                "failed to read the Pulsefire Raid runtime profile; close every NGENUITY variant and retry",
             )?;
             let dpi_profile = profile.dpi_profile()?;
             println!("DPI stages:");
@@ -1432,7 +1446,7 @@ fn polling(command: PollingCommand) -> Result<()> {
     match command {
         PollingCommand::Get => {
             let profile = device.runtime_profile().context(
-                "failed to read the Pulsefire Raid runtime profile; close NGENUITY and retry",
+                "failed to read the Pulsefire Raid runtime profile; close every NGENUITY variant and retry",
             )?;
             println!("Polling rate: {} Hz", profile.polling_rate()?.hz());
         }
@@ -1452,7 +1466,7 @@ fn buttons(command: ButtonsCommand) -> Result<()> {
         ButtonsCommand::List => {
             let mut device = open_pulsefire_raid()?;
             let profile = device.runtime_profile().context(
-                "failed to read the Pulsefire Raid runtime profile; close NGENUITY and retry",
+                "failed to read the Pulsefire Raid runtime profile; close every NGENUITY variant and retry",
             )?;
             println!("Button mappings:");
             print_button_profile(&profile, "  ");
@@ -1488,7 +1502,7 @@ fn open_pulsefire_raid() -> Result<PulsefireRaid<HidApiTransport>> {
     let configuration = select_configuration_interface(&interfaces)?;
     let transport = HidApiTransport::open(configuration).with_context(|| {
         format!(
-            "failed to open the Pulsefire Raid configuration collection; close NGENUITY and retry: {}",
+            "failed to open the Pulsefire Raid configuration collection; close every NGENUITY variant and retry: {}",
             configuration.path
         )
     })?;
@@ -1950,18 +1964,18 @@ mod tests {
     }
 
     #[test]
-    fn cli_exposes_offline_ngenuity_inspection_and_import() {
+    fn cli_exposes_only_explicit_ngenuity_legacy_profile_commands() {
         assert!(Cli::try_parse_from([
             "hyperx-cli",
             "profile",
-            "inspect-ngenuity",
+            "inspect-ngenuity-legacy",
             "Base Settings.hxp",
         ])
         .is_ok());
         assert!(Cli::try_parse_from([
             "hyperx-cli",
             "profile",
-            "diff-ngenuity",
+            "diff-ngenuity-legacy",
             "before.hxp",
             "after.hxp",
         ])
@@ -1969,7 +1983,7 @@ mod tests {
         assert!(Cli::try_parse_from([
             "hyperx-cli",
             "profile",
-            "diff-ngenuity",
+            "diff-ngenuity-legacy",
             "before.hxp",
             "after.hxp",
             "--all-raw",
@@ -1978,7 +1992,7 @@ mod tests {
         assert!(Cli::try_parse_from([
             "hyperx-cli",
             "profile",
-            "import-ngenuity",
+            "import-ngenuity-legacy",
             "Base Settings.hxp",
             "base-settings.toml",
         ])
@@ -1986,15 +2000,22 @@ mod tests {
         assert!(Cli::try_parse_from([
             "hyperx-cli",
             "profile",
-            "import-ngenuity",
+            "import-ngenuity-legacy",
+            "Base Settings.hxp",
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "hyperx-cli",
+            "profile",
+            "inspect-ngenuity",
             "Base Settings.hxp",
         ])
         .is_err());
     }
 
     #[test]
-    fn ngenuity_diff_reports_semantics_but_ignores_source_ids() {
-        use hyperx_protocol::ngenuity::NgenuityDpiStage;
+    fn ngenuity_legacy_diff_reports_semantics_but_ignores_source_ids() {
+        use hyperx_protocol::ngenuity_legacy::NgenuityDpiStage;
 
         let before = NgenuityPreset {
             container: NgenuityContainer::Export,
@@ -2013,13 +2034,13 @@ mod tests {
         };
         let mut identifiers_only = before.clone();
         identifiers_only.dpi_stages[0].source_id = [2; 16];
-        assert!(semantic_ngenuity_changes(&before, &identifiers_only).is_empty());
+        assert!(semantic_ngenuity_legacy_changes(&before, &identifiers_only).is_empty());
 
         let mut changed = identifiers_only;
         changed.dpi_stages[0].dpi = 900;
         changed.active_dpi_stage = 2;
         assert_eq!(
-            semantic_ngenuity_changes(&before, &changed),
+            semantic_ngenuity_legacy_changes(&before, &changed),
             vec![
                 "DPI stage 1: 800 DPI #010203/alpha 255 -> 900 DPI #010203/alpha 255",
                 "stored active-stage value: 1 -> 2",
@@ -2028,7 +2049,7 @@ mod tests {
     }
 
     #[test]
-    fn raw_ngenuity_diff_tracks_offsets_and_length_changes() {
+    fn raw_ngenuity_legacy_diff_tracks_offsets_and_length_changes() {
         assert_eq!(
             raw_byte_changes(&[0x10, 0x20, 0x30], &[0x10, 0x21, 0x30, 0x40]),
             vec![

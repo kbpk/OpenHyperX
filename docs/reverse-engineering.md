@@ -5,11 +5,12 @@ closed and do not capture or replay firmware, bootloader or DFU sessions.
 
 ## Capture procedure
 
-1. Record mouse part number, firmware/release value, Windows version and
-   NGENUITY version.
+1. Record mouse part number, firmware/release value, Windows version, exact
+   NGENUITY product line (`current` or `legacy`), version and install source.
 2. Close other software that may write RGB or profiles.
 3. Start USBPcap on the controller containing `0951:16E4`, then open Wireshark.
-4. Start NGENUITY and wait for background traffic to settle.
+4. Start the recorded NGENUITY variant and wait for background traffic to
+   settle.
 5. Change exactly one value once, wait several seconds, then stop the capture.
 6. Save the original `.pcapng` outside Git if it contains unrelated USB data.
 7. Export only relevant HID control/interrupt payloads as ordered hex lines.

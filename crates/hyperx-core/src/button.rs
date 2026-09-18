@@ -12,7 +12,7 @@ pub enum ButtonBinding {
     Disabled,
 }
 
-/// Mouse actions exposed by NGENUITY for Pulsefire Raid buttons.
+/// Mouse actions exposed by NGENUITY Legacy for Pulsefire Raid buttons.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MouseFunction {
     LeftClick,
@@ -27,7 +27,7 @@ pub enum MouseFunction {
     ScrollDown,
 }
 
-/// Consumer-control actions exposed by NGENUITY.
+/// Consumer-control actions exposed by NGENUITY Legacy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MultimediaFunction {
     PlayPause,
@@ -39,7 +39,7 @@ pub enum MultimediaFunction {
     VolumeDown,
 }
 
-/// Named Windows actions exposed by NGENUITY.
+/// Named Windows actions exposed by NGENUITY Legacy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WindowsShortcut {
     CycleApps,
@@ -205,7 +205,7 @@ pub struct MacroBinding {
     pub playback: MacroPlayback,
 }
 
-/// Macro playback policies observed in NGENUITY.
+/// Macro playback policies observed in NGENUITY Legacy.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum MacroPlayback {

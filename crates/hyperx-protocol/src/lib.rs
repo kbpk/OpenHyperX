@@ -6,7 +6,7 @@ use std::fmt::Write;
 
 pub mod capture;
 pub mod hid_descriptor;
-pub mod ngenuity;
+pub mod ngenuity_legacy;
 pub mod pulsefire_raid;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

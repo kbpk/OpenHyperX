@@ -43,8 +43,10 @@ Once Button 5 keyboard chords, nonuniform timings and left/right/middle mouse
 clicks, with a conservative 14-transition limit matching the largest local
 capture. Other targets, playback modes, longer macros and unconfirmed mouse
 events remain absent. A separate offline parser reads confirmed fields from
-NGENUITY version-40 `.hxp` presets and converts them to a partial
-software profile without opening a HID device.
+NGENUITY Legacy version-40 `.hxp` presets and converts them to a partial
+software profile without opening a HID device. Current NGENUITY is a distinct,
+unsupported source format and must not share the Legacy parser without
+evidence.
 
 ## Crate responsibilities
 
@@ -77,7 +79,7 @@ unverified there.
 ### `hyperx-protocol`
 
 Owns protocol-neutral wire logging, HID descriptor/capture parsers, offline
-vendor-format parsers such as NGENUITY `.hxp`, and typed report
+vendor-format parsers such as NGENUITY Legacy `.hxp`, and typed report
 encoders/decoders.
 Encoders must validate ranges, use fixed packet sizes and have golden tests.
 Raw TX/RX logging is emitted only at `trace` level.

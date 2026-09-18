@@ -35,9 +35,10 @@ effect. Program duration is `1..=3600` seconds and frame interval is
 
 ## Effects
 
-The effect names match choices visible in NGENUITY, but the official HyperX
-documentation does not define their curves or palettes. Until capture analysis
-establishes those details, the renderer uses documented OpenHyperX semantics:
+The effect names match choices visible in NGENUITY Legacy `5.38.0.0`, but the
+official HyperX documentation does not define their curves or palettes. Until
+capture analysis establishes those details, the renderer uses documented
+OpenHyperX semantics:
 
 | Effect | Fields | OpenHyperX behavior |
 | --- | --- | --- |

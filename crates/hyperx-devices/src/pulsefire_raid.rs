@@ -97,7 +97,7 @@ enum PulsefireRaidRuntimeAction {
 
 impl PulsefireRaidRuntimeAssignment {
     /// Validate an ordinary binding against captured record evidence and the
-    /// target control's observed NGENUITY capabilities.
+    /// target control's observed NGENUITY Legacy capabilities.
     ///
     /// This performs no discovery or I/O. Binding records seen on only one
     /// physical control remain target-specific.
@@ -484,7 +484,7 @@ impl<T: HidTransport> PulsefireRaid<T> {
     /// Remove the final runtime DPI stage, preserving at least one stage.
     ///
     /// Removing only the final stage matches the device's contiguous stage
-    /// layout and the captured NGENUITY add/remove behavior.
+    /// layout and the captured NGENUITY Legacy add/remove behavior.
     pub fn remove_runtime_last_dpi_stage(&mut self) -> Result<DpiProfile, PulsefireRaidError> {
         self.remove_runtime_last_dpi_stage_with_wait(std::thread::sleep)
     }
@@ -518,7 +518,7 @@ impl<T: HidTransport> PulsefireRaid<T> {
     /// Assign one target-specific, capture-backed action in runtime memory.
     ///
     /// Button 5 macros transmit their validated definition immediately before
-    /// the profile reference, matching the captured NGENUITY transaction.
+    /// the profile reference, matching the captured NGENUITY Legacy transaction.
     /// No variant writes the onboard profile.
     pub fn set_runtime_button_assignment(
         &mut self,

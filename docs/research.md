@@ -1,6 +1,6 @@
 # Pulsefire Raid research
 
-Last updated: 2026-09-17.
+Last updated: 2026-09-18.
 
 This document separates manufacturer facts, public implementation evidence,
 local observations and hypotheses. Do not promote a hypothesis into a device
@@ -14,9 +14,12 @@ command without a capture or an independently reviewed implementation.
 - [HyperX user guide](https://media.kingston.com/support/downloads/HyperX-Pulsefire-Raid-User-guide.pdf)
   identifies part number `HX-MC005B`, documents the factory button layout and
   warns that the hardware factory reset clears onboard memory.
-- [HyperX NGENUITY page](https://hyperx.com/pages/ngenuity) confirms built-in
-  dynamic RGB effects but does not document individual animation curves,
-  palettes or timing semantics.
+- [Official HyperX NGENUITY page](https://row.hyperx.com/pages/ngenuity)
+  distinguishes current NGENUITY (2025) from NGENUITY Legacy (2020-2025).
+  On 2026-09-18 its download buttons pointed to current NGENUITY `3.0.0` and
+  NGENUITY Legacy `2.38.0.0`, and its Legacy compatibility list explicitly
+  included Pulsefire Raid. The page confirms built-in dynamic RGB effects but
+  does not document individual animation curves, palettes or timing semantics.
 - [OpenRGB new-device issue #2097](https://gitlab.com/CalcProgrammer1/OpenRGB/-/issues/2097)
   reports `HID\\VID_0951&PID_16E4&REV_1124&MI_00`.
 - [OpenRGB detector at the inspected revision](https://gitlab.com/CalcProgrammer1/OpenRGB/-/blob/1da6a652fd0ee484be5b5844f8673f8590257cbb/Controllers/HyperXMouseController/HyperXMouseControllerDetect.cpp)
@@ -135,22 +138,36 @@ The manufacturer page calls this one RGB lighting zone while the direct
 protocol exposes two independently controllable physical LEDs. OpenHyperX
 uses the more useful physical `wheel` and `logo` zone model.
 
-## Local NGENUITY captures
+## NGENUITY generations and evidence scope
 
-Captures were made with NGENUITY `5.38.0.0`, USBPcap and Wireshark on Windows
-11. They were filtered to the Pulsefire Raid device address before capture;
-raw files remain outside Git because they contain normal mouse input reports.
+All NGENUITY captures, UI observations and `.hxp` files documented below were
+made with Microsoft Store NGENUITY Legacy `5.38.0.0`. `winget search ngenuity`
+identifies that Store product as `HyperX NGENUITY (Legacy)`, ID
+`9P1TBXR6QDCX`. Current NGENUITY has not been installed, captured or used to
+infer any packet or profile format in this repository.
 
-With only `NGenuity2Helper` running, NGENUITY sends the confirmed direct RGB
-feature report about every 62 ms. The locally observed all-red transaction is:
+The two product lines must remain separate in research notes, fixtures, parser
+names and CLI commands. Similar UI labels do not prove matching USB protocols
+or profile formats.
+
+## Local NGENUITY Legacy captures
+
+Captures were made with NGENUITY Legacy `5.38.0.0`, USBPcap and Wireshark on
+Windows 11. They were filtered to the Pulsefire Raid device address before
+capture; raw files remain outside Git because they contain normal mouse input
+reports.
+
+With only `NGenuity2Helper` running, NGENUITY Legacy sends the confirmed direct
+RGB feature report about every 62 ms. The locally observed all-red transaction
+is:
 
 - `bmRequestType = 0x21`, `SET_REPORT`, feature report ID `0x07`;
 - `wIndex = 1`, `wLength = 264`;
 - payload prefix `07 0A FF 00 00 FF 00 00 A0`, followed by zero fill.
 
-Opening the NGENUITY GUI without changing a setting produced the same control
+Opening the NGENUITY Legacy GUI without changing a setting produced the same control
 traffic. This locally confirms the OpenRGB report layout and shows that
-NGENUITY's keepalive cadence is substantially faster than OpenRGB's timeout
+NGENUITY Legacy's keepalive cadence is substantially faster than OpenRGB's timeout
 avoidance strategy.
 
 ### DPI profile observations
@@ -183,7 +200,7 @@ byte of each two-byte value:
 | 4 | `0x1F` | `0x2B` | `00 80` | 6400 |
 | 5 | `0x21` | `0x2D` | `01 40` | 16000 |
 
-NGENUITY displayed these same five values. The fifth level displayed 16000
+NGENUITY Legacy displayed these same five values. The fifth level displayed 16000
 DPI and white, independently confirming `0x0140 * 50 = 16000`. Separate X/Y
 editing has not been tested, so the UI's axis-control behavior remains
 unknown.
@@ -208,7 +225,7 @@ captures and exact stage-5 add/remove pair, cover all five mapped DPI slots.
 The active stage is a zero-based index at offset `0x31`: isolated `1 -> 2`
 and `2 -> 3` UI transitions changed it from `00 -> 01 -> 02`. Stage enabled
 flags are bytes `0x32..0x36`, one byte per stage, with `00` disabled and `01`
-enabled. NGENUITY keeps enabled stages contiguous. Starting with three enabled
+enabled. NGENUITY Legacy keeps enabled stages contiguous. Starting with three enabled
 levels, `Add level` set `0x35` for stage 4 and then `0x36` for stage 5. The UI
 no longer offered `Add level` after the fifth stage.
 
@@ -230,18 +247,18 @@ Adding stage 4 initialized it to 6400 DPI and red. Adding stage 5 initialized
 it to 16000 DPI and white. Removing stage 5 cleared its X value at
 `0x21..0x22`, Y value at `0x2D..0x2E`, enable flag at `0x36`, and color at
 `0x75..0x77`. The captured `4 -> 5` and `5 -> 4` byte changes are exact
-reverses. NGENUITY emitted an additional no-op read/write transaction before
+reverses. NGENUITY Legacy emitted an additional no-op read/write transaction before
 the actual removal transaction; the no-op changed only the response/write
 opcode.
 
 OpenHyperX has a profile patcher for DPI values, active stage, stage count and
-colors. NGENUITY locally exposed a minimum of 200 DPI; the manufacturer
+colors. NGENUITY Legacy locally exposed a minimum of 200 DPI; the manufacturer
 documents a maximum of 16000 DPI, and captures confirm a 50-DPI step. The
 patcher therefore accepts multiples of 50 in the inclusive `200..=16000` range
 and preserves unrelated profile bytes.
 
 On 2026-09-16, the resulting runtime API and CLI were validated against the
-physical release-`1124` unit with NGENUITY and other writers stopped. Starting
+physical release-`1124` unit with NGENUITY Legacy and other writers stopped. Starting
 from four stages with stage 1 active, OpenHyperX appended stage 5 at 16000 DPI
 and `#FFFFFF`, independently read all five stages back, removed and cleared
 stage 5, and independently read the original four-stage profile back. It then
@@ -267,7 +284,7 @@ conservative 65 ms and 110 ms, respectively, requests report ID `0x07` once,
 and rejects anything other than an exact 264-byte `07 81 04` response. It does
 not retry and does not transmit the subsequent `07 01 04` profile write.
 The OpenHyperX read path was then validated on the Windows host against the
-physical `0951:16E4`, release `1124` unit with NGENUITY and its helper closed.
+physical `0951:16E4`, release `1124` unit with NGENUITY Legacy and its helper closed.
 The device returned an exact 264-byte `07 81 04` response. The CLI decoded
 1000 Hz polling, four DPI stages (800 active, 1600, 3200 and 6400), their four
 captured colors, ten ordinary button records, and the confirmed Button 5 macro
@@ -294,7 +311,7 @@ runtime read/modify/write sequence confirmed above.
 
 ### Polling-rate profile observations
 
-The NGENUITY profile image changed only offset `0x18`. Repeated transitions
+The NGENUITY Legacy profile image changed only offset `0x18`. Repeated transitions
 confirmed that the value is the USB polling interval in milliseconds:
 
 | Polling rate | Offset `0x18` |
@@ -315,7 +332,7 @@ separate onboard-save transaction.
 
 ### Onboard save observations
 
-Two captures of an explicit NGENUITY `Save to mouse` click were made on
+Two captures of an explicit NGENUITY Legacy `Save to mouse` click were made on
 2026-09-13. Both used feature report ID `0x07`, interface 1 and 264-byte
 buffers. The repeated ordered sequence was:
 
@@ -328,7 +345,7 @@ buffers. The repeated ordered sequence was:
 6. after about one second, `SET_REPORT` prefix `07 03 04 64`.
 
 The first save read an onboard profile containing polling code `0x02`
-(500 Hz) and first-stage DPI code `0x10` (800 DPI). NGENUITY wrote the current
+(500 Hz) and first-stage DPI code `0x10` (800 DPI). NGENUITY Legacy wrote the current
 1000 Hz / 1000 DPI settings. Comparing the complete read response with the
 write found only these differences:
 
@@ -341,22 +358,22 @@ write found only these differences:
 
 The second save read the newly stored 1000 Hz / 1000 DPI values. Its full
 read/write comparison differed only at offset `0x01`, confirming that
-NGENUITY preserved all other bytes in the no-op case.
+NGENUITY Legacy preserved all other bytes in the no-op case.
 
-NGENUITY and its helper were then closed, the mouse was physically unplugged
+NGENUITY Legacy and its helper were then closed, the mouse was physically unplugged
 for about five seconds and reconnected, and all seven HID collections returned
-with the same identity. A capture of the next NGENUITY startup read a profile
+with the same identity. A capture of the next NGENUITY Legacy startup read a profile
 with prefix `07 81 04`, polling code `0x01` and DPI codes `0x14` at offsets
-`0x1A` and `0x26`. NGENUITY's corresponding `07 01 04` write differed only in
+`0x1A` and `0x26`. NGENUITY Legacy's corresponding `07 01 04` write differed only in
 the opcode. This confirms persistence of the saved performance values across
 a power-cycle and shows that sections `0x01` and `0x04` share the confirmed
 performance-field layout.
 
 The person at the machine confirmed that cursor movement and the basic mouse
 buttons still worked normally after the power-cycle. The lighting did not
-remain at the previously visible static red: with NGENUITY and its helper
+remain at the previously visible static red: with NGENUITY Legacy and its helper
 stopped, the mouse displayed a rainbow effect. This is consistent with the red
-being supplied by NGENUITY's periodic volatile `07 0A` direct-RGB reports and
+being supplied by NGENUITY Legacy's periodic volatile `07 0A` direct-RGB reports and
 the mouse returning to a different stored lighting effect. It confirms
 performance-field persistence only; persistent lighting storage is not yet
 understood and must be tested separately.
@@ -364,7 +381,7 @@ understood and must be tested separately.
 The two no-op saves reproduced the same timing as well as the same payloads.
 The first indexed `0x18` packet was sent about 64 ms after `07 03 01 64`; the
 second followed about 35 ms later, while the third and `07 81` request followed
-at roughly 2 ms intervals. NGENUITY waited about 113--115 ms between `07 81`
+at roughly 2 ms intervals. NGENUITY Legacy waited about 113--115 ms between `07 81`
 and the `GET_REPORT`, wrote the full profile immediately after the response,
 then waited about one second before selecting runtime section `0x04` again.
 
@@ -377,7 +394,7 @@ profile writes from both red saves and the green save were byte-for-byte
 identical, proving that this observed color data lives outside the main
 profile image. The two triplets correlate with the direct-RGB wheel/logo
 colors, but their persistent meaning is not established: the saved green did
-not survive without NGENUITY's volatile lighting stream.
+not survive without NGENUITY Legacy's volatile lighting stream.
 
 The legal contents and full semantics of the three `0x18` packets therefore
 remain unknown. They are part of the captured save transaction and block a
@@ -387,7 +404,7 @@ a macro establishes how auxiliary macro definitions participate. Raw
 
 ### Runtime lighting and persistence observations
 
-On the tested NGENUITY profile, the Lighting UI showed `Solid`, red, target
+On the tested NGENUITY Legacy profile, the Lighting UI showed `Solid`, red, target
 `All Lights`, maximum opacity and `Visible`. Opening that tab changed the
 mouse from its standalone rainbow effect to static red. This coincided with
 the periodic direct-RGB report and did not require a profile transaction.
@@ -409,33 +426,33 @@ The latter value is `#32FF00` for both physical LEDs; it was not pure
 `#00FF00`. Clicking `Save to mouse` while this green preview was active
 changed only the two RGB triplets at offsets `0x08` and `0x0B` of the first
 indexed `0x18` report. The complete onboard profile write was byte-for-byte
-identical to the earlier red save. After NGENUITY and its helper stopped, the
+identical to the earlier red save. After NGENUITY Legacy and its helper stopped, the
 mouse briefly displayed static red and then returned to its standalone
 rainbow effect. The green color therefore did not persist.
 
-Changing the NGENUITY effect from `Solid` to its cycle/rainbow option produced
+Changing the NGENUITY Legacy effect from `Solid` to its cycle/rainbow option produced
 289 direct-RGB reports containing 131 distinct pairs of colors during one
 20-second capture, and no non-direct feature report. On this unit and
-NGENUITY version, both Solid and cycle lighting are software-rendered through
+NGENUITY Legacy version, both Solid and cycle lighting are software-rendered through
 the volatile `0x0A` path. There is no local evidence that `Save to mouse`
 persists a lighting effect, despite its `0x18` color payloads. Treat those
 payloads as unknown until their purpose is isolated; do not use them as a
 persistent-lighting encoder.
 
-On 2026-09-17, with NGENUITY, OpenRGB and other device writers stopped,
+On 2026-09-17, with NGENUITY Legacy, OpenRGB and other device writers stopped,
 OpenHyperX exercised the two direct fields independently on the physical
 release-`1124` unit. For five seconds, `wheel=#FF0000, logo=#000000` lit only
 the scroll wheel red. The reversed test, `wheel=#000000, logo=#0000FF`, lit
 only the HyperX logo blue. A third test used `wheel=#FF0000, logo=#0000FF`;
 both LEDs simultaneously displayed their distinct requested colors even though
-the tested NGENUITY Solid UI did not expose separate per-LED colors. After each
+the tested NGENUITY Legacy Solid UI did not expose separate per-LED colors. After each
 foreground keepalive ended, both LEDs returned to their pre-test red state.
 This confirms field-to-LED ordering, simultaneous independent colors,
 per-LED black/off behavior and volatile reversion. None of these tests sent an
 onboard-profile write.
 
 OpenHyperX's `rgb cycle` is deliberately described as a software spectrum,
-not as a decoded firmware effect or a byte-for-byte clone of NGENUITY's
+not as a decoded firmware effect or a byte-for-byte clone of NGENUITY Legacy's
 animation. It computes portable RGB frames in `hyperx-core`, sends them through
 the same confirmed two-LED direct report at roughly 60-ms intervals including
 transport pacing, and stops after an explicit foreground duration. The target
@@ -446,7 +463,7 @@ The first physical test ran `rgb cycle --target all --duration 5 --period 2`
 on the release-`1124` unit with other writers stopped. Both the wheel and logo
 visibly moved through the spectrum in sync for the requested five seconds.
 This validates the foreground renderer and sustained direct-report pacing on
-Windows hardware; it does not imply persistence or reproduce NGENUITY's exact
+Windows hardware; it does not imply persistence or reproduce NGENUITY Legacy's exact
 animation curve.
 
 The generalized program path was then tested with Cycle on the wheel at a
@@ -460,7 +477,7 @@ the standard mouse HID collection left untouched, system mouse-button down
 edges restarted an orange one-second wheel fade and a blue 1.5-second logo
 fade. Repeated clicks restarted both envelopes, and the mouse continued to
 operate normally. This validates the foreground trigger adapter and independent
-per-zone fade durations; it does not establish NGENUITY's exact fade curve.
+per-zone fade durations; it does not establish NGENUITY Legacy's exact fade curve.
 
 Two further eight-second programs exercised the remaining renderer families.
 The first displayed the warm OpenHyperX Sun palette on the wheel and the cool
@@ -470,21 +487,21 @@ logo stepped through deterministic pseudo-random saturated Confetti colors.
 Both pairs ran independently and reverted after the foreground program ended.
 Together with the earlier tests, this hardware-validates the TOML execution
 path for Solid, Cycle, Pulse, Breathing, Triggered Fade, Confetti, Sun and
-Twilight, but not visual parity with NGENUITY's undocumented definitions.
+Twilight, but not visual parity with NGENUITY Legacy's undocumented definitions.
 
-The observed legacy NGENUITY device view exposes Solid, Cycle, Pulse,
+The observed NGENUITY Legacy device view exposes Solid, Cycle, Pulse,
 Breathing and a triggered Fade effect. Its Light Sync view exposes Solid,
 Breathing, Cycle, Confetti, Sun and Twilight. HyperX's public material does not
 define these animations. OpenHyperX therefore models the same names as
 portable software effects with explicitly project-defined curves and palettes;
-it does not claim exact visual parity until each NGENUITY output stream is
+it does not claim exact visual parity until each NGENUITY Legacy output stream is
 captured and compared. Programs can assign a different effect and phase to
 `wheel` and `logo`. Triggered Fade consumes foreground Windows system
 mouse-button down edges and never opens the standard mouse HID collection.
 
 ### Button-remapping UI observations
 
-The Pulsefire Raid page in NGENUITY `5.38.0.0` exposed all 11 physical
+The Pulsefire Raid page in NGENUITY Legacy `5.38.0.0` exposed all 11 physical
 controls: left and right click, five side buttons, the DPI button below the
 wheel, wheel click, wheel tilt left and wheel tilt right. The left and right
 buttons were restricted to swapping left/right click. The other nine controls
@@ -503,7 +520,7 @@ The macro UI offered `Add Macro`, recording of keyboard and mouse-button
 events, and playback policies Play Once, Toggle Repeat and Hold Repeat.
 `Standard Timing` is a separate optional numeric setting rather than a
 playback enum. Its field accepts at least four digits and appeared to permit
-`0..9999`, but that range has not been boundary-tested. NGENUITY became
+`0..9999`, but that range has not been boundary-tested. NGENUITY Legacy became
 unresponsive while many inputs were clicked in the first macro-recorder
 exploration, so no packet inference is made from that earlier session.
 
@@ -606,11 +623,11 @@ release: 00 14 04 -> 01 2C 04
 `20 = 0x0014` and `300 = 0x012C`. This confirms that each event stores the
 timing as seven high bits plus an eight-bit low byte, while bit 7 of the high
 byte distinguishes press from release. The representation has 15 payload bits,
-but neither the device's accepted range nor the apparent NGENUITY `0..9999`
+but neither the device's accepted range nor the apparent NGENUITY Legacy `0..9999`
 range has been boundary-tested.
 
 A separate macro recorded `A` followed by `B`, still using Play Once and
-Standard Timing 20 ms. NGENUITY emitted the same complete transaction twice
+Standard Timing 20 ms. NGENUITY Legacy emitted the same complete transaction twice
 during the single `Done` action. Both macro reports had this nonzero prefix:
 
 ```text
@@ -626,7 +643,7 @@ Offset `0x09` remained `01` when the macro grew from one key to two, proving
 that it is not an event or key count and strengthening its correlation with
 the unchanged Play Once mode.
 
-NGENUITY can disable Standard Timing and retain different timing values between
+NGENUITY Legacy can disable Standard Timing and retain different timing values between
 events. The protocol model therefore stores timing on every input transition,
 not as one global macro property.
 
@@ -641,7 +658,7 @@ Button 5 macro reference and those three exact event lists. It rejected other
 event lists until modifier, mouse and nonuniform-timing records were isolated.
 
 On 2026-09-17, OpenHyperX's runtime setter was tested on the physical
-release-`1124` unit with NGENUITY and other writers stopped. The initial read
+release-`1124` unit with NGENUITY Legacy and other writers stopped. The initial read
 showed the existing Button 5 macro reference. OpenHyperX changed only Button 5
 to the captured Mouse Forward record, and an independent read decoded it as
 Forward while the other ten mappings were unchanged. It then sent the exact
@@ -679,7 +696,7 @@ human-readable key set parsed by `KeyboardUsage` (letters, digits, punctuation,
 navigation, F1-F24, keypad and modifiers), while rejecting raw numeric and
 unknown usages. No onboard save was sent.
 
-With NGENUITY and its helper stopped, OpenHyperX then read the captured
+With NGENUITY Legacy and its helper stopped, OpenHyperX then read the captured
 Keyboard B state, changed the DPI control to Keyboard A and independently read
 back usage `0x0004`. It changed the same control to Keyboard B and independently
 read back `0x0005`. The other ten mapping records were identical after both
@@ -694,7 +711,7 @@ changed exactly those bytes back to `02 F8 00 03`. The driver and CLI therefore
 expose only Disabled and Mouse Back for Button 4. Other actions on this target
 remain rejected before device discovery. No onboard save was sent.
 
-With NGENUITY and its helper stopped, OpenHyperX then changed Button 4 from
+With NGENUITY Legacy and its helper stopped, OpenHyperX then changed Button 4 from
 Mouse Back to Disabled on the physical release-`1124` unit. An independent
 runtime read returned Disabled while the other ten mappings were unchanged. A
 guarded cleanup write restored Mouse Back, and a final independent read
@@ -708,7 +725,7 @@ confirming this multimedia record across two physical controls. The driver and
 CLI therefore expose Volume Up and Volume Down for Button 7; other actions on
 that target remain blocked. No onboard save was sent.
 
-After NGENUITY was stopped, OpenHyperX began from the captured Volume Down
+After NGENUITY Legacy was stopped, OpenHyperX began from the captured Volume Down
 state and exercised Button 7 through `Volume Down -> Volume Up -> Volume Down
 -> Volume Up`. An independent runtime read confirmed every transition, the
 other ten mappings remained unchanged, and the final state was Volume Up. No
@@ -717,7 +734,7 @@ onboard save was sent.
 Together with earlier captures, six ordinary record families now repeat on at
 least two physical controls: Disabled (Buttons 4/5), Mouse Back (Buttons 4/5),
 Volume Up (Buttons 5/7), Volume Down (Buttons 6/7), keyboard usage (Button 5
-and DPI, with A/B isolated on DPI) and DPI Toggle (Button 5 and DPI). NGENUITY
+and DPI, with A/B isolated on DPI) and DPI Toggle (Button 5 and DPI). NGENUITY Legacy
 exposes the same assignment categories for the middle click, five numbered
 side controls, DPI control and both wheel tilts. The runtime writer therefore
 treats those six records as portable across these nine general controls while
@@ -725,7 +742,7 @@ keeping the primary left and right clicks unavailable. Forward, Copy and macro
 references remain Button-5-specific until their portability is independently
 established.
 
-With NGENUITY stopped, OpenHyperX then applied the portable Mouse Back record
+With NGENUITY Legacy stopped, OpenHyperX then applied the portable Mouse Back record
 to Button 6, whose initial mapping was Volume Down. An independent runtime read
 returned Mouse Back while the other ten mappings were unchanged. A guarded
 cleanup restored Volume Down and a final read confirmed it. This validates the
@@ -747,7 +764,7 @@ topology plus an injected descriptor identified the unit as
 `openhyperx-macro-coverage-play-once-recorded-timing-20260917.pcapng` assigned
 one Button 5 macro with Standard Timing disabled and Play Once. Its ordered
 inputs were `LeftShift+A`, `LeftControl+B`, left click, right click and middle
-click. NGENUITY's compact view grouped each chord, while Expanded View retained
+click. NGENUITY Legacy's compact view grouped each chord, while Expanded View retained
 the individual down/up transitions.
 
 The complete nonzero macro report was:
@@ -780,12 +797,12 @@ used Button 5 reference `53 00 00 04`; no onboard save occurred.
 The encoder now accepts balanced Play Once timelines using those established
 event families. It conservatively limits a macro to 14 transitions, the
 largest locally captured timeline. Its `0..9999` ms validation mirrors the
-observed NGENUITY numeric editor and fits the confirmed 15-bit field, but the
+observed NGENUITY Legacy numeric editor and fits the confirmed 15-bit field, but the
 two boundary values have not yet been hardware-tested. Repeat modes, longer
 timelines, other mouse inputs, other target controls and onboard macro storage
 remain blocked.
 
-Later on 2026-09-17, with NGENUITY and other device writers stopped,
+Later on 2026-09-17, with NGENUITY Legacy and other device writers stopped,
 OpenHyperX loaded `examples/macros/shift-a-20ms.toml` and assigned its four
 20-ms transitions (`LeftShift` down, `A` down, `A` up, `LeftShift` up) to
 Button 5 on the physical release-`1124` unit. An independent runtime-profile
@@ -794,10 +811,10 @@ unchanged. Pressing Button 5 emitted uppercase `A`, functionally confirming
 modifier state, event ordering and the general TOML-to-report path. The mouse
 continued to operate normally. No onboard-save transaction was sent.
 
-## NGENUITY `.hxp` preset format
+## NGENUITY Legacy `.hxp` preset format
 
-On 2026-09-18, an exported `Base Settings.hxp` from NGENUITY `5.38.0.0` was
-examined offline. The file was not copied into the repository because it
+On 2026-09-18, an exported `Base Settings.hxp` from NGENUITY Legacy `5.38.0.0`
+was examined offline. The file was not copied into the repository because it
 contains local identifiers and recorded macro content. It is an uncompressed,
 versioned binary serialization rather than a HID capture.
 
@@ -806,8 +823,8 @@ an embedded length of 5,904 bytes. The embedded preset begins with
 `HEADER = 0x4D2C83CE`, format version `40`, a .NET-style seven-bit-length UTF-8
 name, and serialized model data. The 60-byte export footer uses the observed
 icon/game-link markers `0x12345670`, `0x12345672`, `0x12345673`, `0x12345671`
-and `0x23456780`. The embedded payload differed from NGENUITY's contemporaneous
-local `Master.hxp` only in two 16-byte identifiers.
+and `0x23456780`. The embedded payload differed from NGENUITY Legacy's
+contemporaneous local `Master.hxp` only in two 16-byte identifiers.
 
 The mouse object uses header `0x1A4A0099`. Its observed DPI list contains
 64-byte records with a 16-byte source identifier, a direct little-endian DPI
@@ -833,29 +850,31 @@ preset. One assignment contained the exact 16-byte source identifier of the
 has not been established, so imports preserve these references without
 creating button bindings.
 
-`hyperx-protocol::ngenuity` now parses both the version-40 export wrapper and
-the internal preset form with bounds checks and synthetic fixtures. The CLI
-can inspect the decoded data, compare two presets semantically and byte by
-byte, or import confirmed DPI/macro fields to a partial OpenHyperX TOML
+`hyperx-protocol::ngenuity_legacy` now parses both the version-40 export
+wrapper and the internal preset form with bounds checks and synthetic fixtures.
+The CLI can inspect the decoded data, compare two presets semantically and byte
+by byte, or import confirmed DPI/macro fields to a partial OpenHyperX TOML
 profile. These operations are offline and have no HID or onboard write path.
-Polling, lighting, physical assignment targets and other preset versions
-require isolated export comparisons before being decoded.
+Polling, lighting, physical assignment targets and other Legacy preset
+versions require isolated export comparisons before being decoded. Current
+NGENUITY requires separate discovery and must not be passed to this parser by
+assumption.
 
 ## Unknowns and required evidence
 
 | Area | Current state | Required next experiment |
 | --- | --- | --- |
-| firmware/device info query | unknown | capture NGENUITY startup with no setting changes; identify repeated IN/feature queries |
+| firmware/device info query | unknown | capture NGENUITY Legacy startup with no setting changes; identify repeated IN/feature queries |
 | report descriptor for configuration collection | confirmed | optionally dump the two other vendor collections for research without sending reports |
-| direct RGB transport | hardware-validated for independent wheel/logo colors and black/off; NGENUITY Solid and Cycle both use it, and the previous lighting state returns without keepalive | optionally measure the exact timeout/revert interval |
-| RGB off semantics | direct black independently extinguishes both physical LEDs | compare NGENUITY's explicit lighting-off UI, if present, only to determine whether it differs from black |
-| persistent RGB/effects | OpenHyperX effects are foreground-rendered; a standalone firmware rainbow was observed after NGENUITY stopped, but NGENUITY Solid/Cycle and red/green save captures did not select or persist it | identify a confirmed hardware-mode selector and its save semantics before exposing hardware rainbow or other persistent effects |
+| direct RGB transport | hardware-validated for independent wheel/logo colors and black/off; NGENUITY Legacy Solid and Cycle both use it, and the previous lighting state returns without keepalive | optionally measure the exact timeout/revert interval |
+| RGB off semantics | direct black independently extinguishes both physical LEDs | compare NGENUITY Legacy's explicit lighting-off UI, if present, only to determine whether it differs from black |
+| persistent RGB/effects | OpenHyperX effects are foreground-rendered; a standalone firmware rainbow was observed after NGENUITY Legacy stopped, but NGENUITY Legacy Solid/Cycle and red/green save captures did not select or persist it | identify a confirmed hardware-mode selector and its save semantics before exposing hardware rainbow or other persistent effects |
 | DPI and stages | runtime read/set, per-stage value/color edits, active-stage selection and final-stage add/remove are implemented and hardware-validated; five big-endian X/Y slots, 200-16000 range and 50-DPI units are confirmed | determine whether independent X/Y values are supported; onboard persistence remains part of the separate save blocker |
-| polling | all four interval codes captured; runtime 1000→500→1000 set/readback validated; 1000 Hz persisted through a separate NGENUITY save and power-cycle | verify effective USB report rate with an external rate tester |
-| NGENUITY `.hxp` | version-40 container, DPI records, Play Once keyboard/primary-click macros and macro references are parsed offline; imports are explicitly partial | compare exports differing only in active stage, polling, lighting, one physical assignment and each repeat mode |
+| polling | all four interval codes captured; runtime 1000→500→1000 set/readback validated; 1000 Hz persisted through a separate NGENUITY Legacy save and power-cycle | verify effective USB report rate with an external rate tester |
+| NGENUITY Legacy `.hxp` | version-40 container, DPI records, Play Once keyboard/primary-click macros and macro references are parsed offline; imports are explicitly partial | compare Legacy exports differing only in active stage, polling, lighting, one physical assignment and each repeat mode |
 | button bindings | all 11 mappings are readable; five fixed records plus named one-byte keyboard usages are writable on the nine general controls, while Forward, Copy and macros remain Button-5-specific; the portable path is hardware-tested on Button 6, direct Keyboard A/B is hardware-tested on DPI, and target-specific Button 4, Button 5, Button 7 and DPI writes are also hardware-tested; bounded Button 5 Play Once macros support keyboard chords, nonuniform timing and left/right/middle clicks | capture primary-click swaps and the remaining ordinary records; isolate macro portability, repeat modes, longer timelines, remaining mouse events and timing boundaries |
 | onboard save | repeated transaction, timing and read-modify-write captured; performance persistence confirmed; `0x18[0]` carries two correlated RGB triplets while `0x18[1..2]` were zero for Solid/All Lights | capture isolated wheel/logo and non-Solid saves, then save a profile containing a macro; determine acknowledgements and failure behavior before replay |
-| NGENUITY locking | unknown | run `devices`, then future read-only `info`, with NGENUITY open and closed; record open errors |
+| NGENUITY Legacy locking | unknown | run `devices`, then future read-only `info`, with NGENUITY Legacy open and closed; record open errors |
 | admin requirement | configuration collection opens without elevation | retest on a second Windows machine/account |
 
 Firmware update, bootloader and DFU traffic is excluded from captures intended

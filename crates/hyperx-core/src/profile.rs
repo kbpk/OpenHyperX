@@ -71,7 +71,7 @@ mod tests {
             device: "pulsefire-raid".to_owned(),
             partial: true,
             source: Some(SoftwareProfileSource {
-                format: "ngenuity-hxp".to_owned(),
+                format: "ngenuity-legacy-hxp".to_owned(),
                 format_version: 40,
             }),
             dpi: Some(SoftwareDpiProfile {

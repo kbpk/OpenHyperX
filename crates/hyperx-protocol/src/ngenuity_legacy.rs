@@ -1,7 +1,9 @@
-//! Read-only parser for the NGENUITY `.hxp` preset format.
+//! Read-only parser for the NGENUITY Legacy `.hxp` preset format.
 //!
-//! Only fields confirmed from local NGENUITY 5.38.0.0 version-40 presets are
-//! decoded. Parsing and conversion never perform HID I/O.
+//! Only fields confirmed from local NGENUITY Legacy 5.38.0.0 version-40
+//! presets are decoded. Parsing and conversion never perform HID I/O. The
+//! format used by the current NGENUITY application is intentionally treated
+//! as separate and is not supported by this module.
 
 use hyperx_core::{
     DpiStage, MacroDefinition, MacroEvent, MacroPlayback, NamedMacro, RgbColor, SoftwareDpiProfile,
@@ -36,7 +38,7 @@ pub struct NgenuityPreset {
     pub version: u32,
     pub name: String,
     pub dpi_stages: Vec<NgenuityDpiStage>,
-    /// The exact one-based value stored by NGENUITY version 40.
+    /// The exact one-based value stored by NGENUITY Legacy version 40.
     pub active_dpi_stage: u32,
     pub macros: Vec<NgenuityMacro>,
     pub key_assignments: Vec<NgenuityKeyAssignment>,
@@ -160,24 +162,24 @@ pub struct NgenuityKeyAssignment {
 
 #[derive(Debug, Error, Eq, PartialEq)]
 pub enum NgenuityPresetError {
-    #[error("NGENUITY preset is truncated while reading {context} at offset 0x{offset:X}")]
+    #[error("NGENUITY Legacy preset is truncated while reading {context} at offset 0x{offset:X}")]
     Truncated {
         context: &'static str,
         offset: usize,
     },
-    #[error("unknown NGENUITY preset header 0x{0:08X}")]
+    #[error("unknown NGENUITY Legacy preset header 0x{0:08X}")]
     UnknownHeader(u32),
     #[error("embedded preset length {declared} exceeds the {available} available bytes")]
     InvalidEmbeddedLength { declared: usize, available: usize },
-    #[error("unsupported NGENUITY preset version {0}; only version 40 is decoded")]
+    #[error("unsupported NGENUITY Legacy preset version {0}; only version 40 is decoded")]
     UnsupportedVersion(u32),
-    #[error("NGENUITY string length uses an invalid 7-bit integer")]
+    #[error("NGENUITY Legacy string length uses an invalid 7-bit integer")]
     InvalidStringLength,
-    #[error("NGENUITY preset contains invalid UTF-8 in {0}")]
+    #[error("NGENUITY Legacy preset contains invalid UTF-8 in {0}")]
     InvalidUtf8(&'static str),
-    #[error("NGENUITY mouse preset block was not found")]
+    #[error("NGENUITY Legacy mouse preset block was not found")]
     MissingMousePreset,
-    #[error("NGENUITY collection {name} contains an unreasonable item count {count}")]
+    #[error("NGENUITY Legacy collection {name} contains an unreasonable item count {count}")]
     InvalidItemCount { name: &'static str, count: usize },
     #[error("expected {name} header 0x{expected:08X} at offset 0x{offset:X}")]
     WrongObjectHeader {
@@ -189,7 +191,7 @@ pub enum NgenuityPresetError {
 
 #[derive(Debug, Error, Eq, PartialEq)]
 pub enum NgenuityImportError {
-    #[error("macro {name:?} uses unconfirmed NGENUITY playback mode {mode}")]
+    #[error("macro {name:?} uses unconfirmed NGENUITY Legacy playback mode {mode}")]
     UnsupportedPlayback { name: String, mode: u32 },
     #[error("macro {name:?} event {event} has unsupported type/action/state {item_type}/{action}/{state}")]
     UnsupportedMacroItem {
@@ -217,11 +219,11 @@ pub enum NgenuityImportError {
 
 /// Return the embedded versioned preset bytes without the optional export
 /// wrapper and footer.
-pub fn ngenuity_embedded_payload(bytes: &[u8]) -> Result<&[u8], NgenuityPresetError> {
+pub fn ngenuity_legacy_embedded_payload(bytes: &[u8]) -> Result<&[u8], NgenuityPresetError> {
     select_payload(bytes).map(|(_, payload)| payload)
 }
 
-pub fn parse_ngenuity_preset(bytes: &[u8]) -> Result<NgenuityPreset, NgenuityPresetError> {
+pub fn parse_ngenuity_legacy_preset(bytes: &[u8]) -> Result<NgenuityPreset, NgenuityPresetError> {
     let (container, payload) = select_payload(bytes)?;
 
     expect_header(payload, 0, HEADER_PRESET, "preset")?;
@@ -319,8 +321,11 @@ impl NgenuityPreset {
             .key_assignments
             .iter()
             .map(|assignment| UnresolvedButtonAssignment {
-                source_id: format_ngenuity_id(&assignment.source_id),
-                macro_source_id: assignment.macro_source_id.as_ref().map(format_ngenuity_id),
+                source_id: format_ngenuity_legacy_id(&assignment.source_id),
+                macro_source_id: assignment
+                    .macro_source_id
+                    .as_ref()
+                    .map(format_ngenuity_legacy_id),
             })
             .collect();
 
@@ -329,7 +334,7 @@ impl NgenuityPreset {
             device: device.into(),
             partial: true,
             source: Some(SoftwareProfileSource {
-                format: "ngenuity-hxp".to_owned(),
+                format: "ngenuity-legacy-hxp".to_owned(),
                 format_version: self.version,
             }),
             dpi: Some(dpi),
@@ -339,7 +344,7 @@ impl NgenuityPreset {
     }
 }
 
-pub fn format_ngenuity_id(id: &[u8; 16]) -> String {
+pub fn format_ngenuity_legacy_id(id: &[u8; 16]) -> String {
     let mut output = String::with_capacity(32);
     for byte in id {
         use std::fmt::Write;
@@ -428,7 +433,7 @@ fn import_macro(source: &NgenuityMacro) -> Result<NamedMacro, NgenuityImportErro
         .map(|(index, item)| import_macro_item(source, item, index))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(NamedMacro {
-        source_id: format_ngenuity_id(&source.source_id),
+        source_id: format_ngenuity_legacy_id(&source.source_id),
         name: source.name.clone(),
         definition: MacroDefinition {
             playback: MacroPlayback::Once,
@@ -697,7 +702,7 @@ mod tests {
     #[test]
     fn parses_export_and_imports_confirmed_fields() {
         let bytes = fixture(true);
-        let preset = parse_ngenuity_preset(&bytes).unwrap();
+        let preset = parse_ngenuity_legacy_preset(&bytes).unwrap();
 
         assert_eq!(preset.container, NgenuityContainer::Export);
         assert_eq!(preset.version, 40);
@@ -712,6 +717,13 @@ mod tests {
 
         let imported = preset.to_software_profile("pulsefire-raid").unwrap();
         assert!(imported.partial);
+        assert_eq!(
+            imported
+                .source
+                .as_ref()
+                .map(|source| source.format.as_str()),
+            Some("ngenuity-legacy-hxp")
+        );
         let dpi = imported.dpi.unwrap();
         assert_eq!(dpi.active_stage, None);
         assert_eq!(dpi.source_active_stage, Some(1));
@@ -734,23 +746,26 @@ mod tests {
     #[test]
     fn parses_internal_preset_without_export_wrapper() {
         let bytes = fixture(false);
-        let preset = parse_ngenuity_preset(&bytes).unwrap();
+        let preset = parse_ngenuity_legacy_preset(&bytes).unwrap();
         assert_eq!(preset.container, NgenuityContainer::InternalPreset);
         assert_eq!(preset.embedded_length, bytes.len());
-        assert_eq!(ngenuity_embedded_payload(&bytes).unwrap(), bytes);
+        assert_eq!(ngenuity_legacy_embedded_payload(&bytes).unwrap(), bytes);
     }
 
     #[test]
     fn extracts_export_payload_without_footer_or_wrapper() {
         let wrapped = fixture(true);
         let internal = fixture(false);
-        assert_eq!(ngenuity_embedded_payload(&wrapped).unwrap(), internal);
+        assert_eq!(
+            ngenuity_legacy_embedded_payload(&wrapped).unwrap(),
+            internal
+        );
     }
 
     #[test]
     fn recorded_timing_and_mouse_actions_are_preserved() {
         let mut bytes = fixture(true);
-        let preset = parse_ngenuity_preset(&bytes).unwrap();
+        let preset = parse_ngenuity_legacy_preset(&bytes).unwrap();
         let first = find_header(&bytes, HEADER_MACRO).unwrap();
         let name_end = first + 20 + 1 + "Test macro".len();
         bytes[name_end] = 0;
@@ -760,7 +775,7 @@ mod tests {
         bytes[first_item + 24] = 1;
         bytes[first_item + 25] = 2;
 
-        let changed = parse_ngenuity_preset(&bytes).unwrap();
+        let changed = parse_ngenuity_legacy_preset(&bytes).unwrap();
         assert_eq!(
             preset.macros[0].effective_timing_ms(&preset.macros[0].items[0]),
             300
@@ -783,13 +798,13 @@ mod tests {
         let mut unknown = fixture(false);
         unknown[4..8].copy_from_slice(&41_u32.to_le_bytes());
         assert_eq!(
-            parse_ngenuity_preset(&unknown),
+            parse_ngenuity_legacy_preset(&unknown),
             Err(NgenuityPresetError::UnsupportedVersion(41))
         );
 
         let truncated = HEADER_ALL.to_le_bytes();
         assert!(matches!(
-            parse_ngenuity_preset(&truncated),
+            parse_ngenuity_legacy_preset(&truncated),
             Err(NgenuityPresetError::Truncated { .. })
         ));
     }
