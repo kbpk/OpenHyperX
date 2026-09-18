@@ -43,7 +43,7 @@ Once Button 5 keyboard chords, nonuniform timings and left/right/middle mouse
 clicks, with a conservative 14-transition limit matching the largest local
 capture. Other targets, playback modes, longer macros and unconfirmed mouse
 events remain absent. A separate offline parser reads confirmed fields from
-NGENUITY version-40 `.hxp` presets and converts them to a partial, versioned
+NGENUITY version-40 `.hxp` presets and converts them to a partial
 software profile without opening a HID device.
 
 ## Crate responsibilities

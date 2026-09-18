@@ -1,8 +1,8 @@
 # Software profile format
 
-OpenHyperX software profiles are versioned TOML files owned by `hyperx-core`.
-They are application data, not HID reports and not onboard-memory images.
-Reading or creating one never opens a device.
+OpenHyperX software profiles are TOML files owned by `hyperx-core`. They are
+application data, not HID reports and not onboard-memory images. Reading or
+creating one never opens a device.
 
 ## NGENUITY import
 
@@ -34,12 +34,11 @@ The observed source active-stage value is retained as
 export comparison establishes whether NGENUITY stores that field as a
 zero-based index, a one-based index or another enum.
 
-## Version 1 shape
+## Profile shape
 
 A shortened imported profile looks like this:
 
 ```toml
-format_version = 1
 name = "Base Settings"
 device = "pulsefire-raid"
 partial = true

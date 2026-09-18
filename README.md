@@ -33,7 +33,7 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
   left/right/middle mouse clicks
 - raw hex capture parser/diff for protocol research
 - offline NGENUITY version-40 `.hxp` inspection and partial import to a
-  portable, versioned OpenHyperX TOML profile
+  portable OpenHyperX TOML profile
 - offline DPI-stage, polling and button-profile parser/patcher with golden tests
 - no primary-click remapping or onboard hardware writes yet
 

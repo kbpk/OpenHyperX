@@ -2,9 +2,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::{DpiStage, MacroDefinition};
 
-/// Current version of the portable OpenHyperX software-profile format.
-pub const SOFTWARE_PROFILE_FORMAT_VERSION: u16 = 1;
-
 /// A portable application profile.
 ///
 /// A profile may be partial when it was imported from a format whose fields
@@ -13,7 +10,6 @@ pub const SOFTWARE_PROFILE_FORMAT_VERSION: u16 = 1;
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SoftwareProfile {
-    pub format_version: u16,
     pub name: String,
     pub device: String,
     pub partial: bool,
@@ -71,7 +67,6 @@ mod tests {
     #[test]
     fn portable_profile_round_trips_through_toml_shape() {
         let profile = SoftwareProfile {
-            format_version: SOFTWARE_PROFILE_FORMAT_VERSION,
             name: "Imported preset".to_owned(),
             device: "pulsefire-raid".to_owned(),
             partial: true,

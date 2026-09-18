@@ -6,7 +6,6 @@
 use hyperx_core::{
     DpiStage, MacroDefinition, MacroEvent, MacroPlayback, NamedMacro, RgbColor, SoftwareDpiProfile,
     SoftwareProfile, SoftwareProfileSource, UnresolvedButtonAssignment,
-    SOFTWARE_PROFILE_FORMAT_VERSION,
 };
 use thiserror::Error;
 
@@ -316,7 +315,6 @@ impl NgenuityPreset {
             .collect();
 
         Ok(SoftwareProfile {
-            format_version: SOFTWARE_PROFILE_FORMAT_VERSION,
             name: self.name.clone(),
             device: device.into(),
             partial: true,
