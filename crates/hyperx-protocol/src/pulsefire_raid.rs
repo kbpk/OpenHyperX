@@ -473,9 +473,9 @@ impl PerformanceProfile {
 
     /// Patch one confirmed four-byte button record in an existing profile.
     ///
-    /// This operation itself performs no I/O. Inferred members use standard
-    /// USB HID usage IDs; the device driver exposes a separate evidence gate
-    /// and transmits only the exact Button 5 records captured locally.
+    /// This operation itself performs no I/O. The device driver exposes a
+    /// separate evidence gate and transmits only records promoted by local
+    /// captures for the selected physical control.
     pub fn set_button_binding(
         &mut self,
         control: PulsefireRaidControl,
@@ -832,10 +832,14 @@ fn decode_button_binding(
         [0x00, 0x00, 0x00, 0x00] => ButtonBinding::Disabled,
         [0x00, usage, 0x00, 0x00] => ButtonBinding::Keyboard(KeyboardUsage(u16::from(usage))),
         [0x02, 0xF0, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::LeftClick),
-        [0x02, 0xF1, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::MiddleClick),
-        [0x02, 0xF2, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::RightClick),
-        [0x02, 0xF3, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::ScrollUp),
-        [0x02, 0xF4, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::ScrollDown),
+        [0x02, 0xF1, 0x00, 0x00] | [0x02, 0xF1, 0x00, 0x01] => {
+            ButtonBinding::Mouse(MouseFunction::MiddleClick)
+        }
+        [0x02, 0xF2, 0x00, 0x00] | [0x02, 0xF2, 0x00, 0x02] => {
+            ButtonBinding::Mouse(MouseFunction::RightClick)
+        }
+        [0x02, 0xF3, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::ScrollDown),
+        [0x02, 0xF4, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::ScrollUp),
         [0x02, 0xF5, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::TiltLeft),
         [0x02, 0xF6, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::TiltRight),
         [0x02, 0xF8, 0x00, 0x00] | [0x02, 0xF8, 0x00, 0x03] => {
@@ -880,10 +884,10 @@ fn encode_button_binding(
         }
         ButtonBinding::Mouse(function) => match function {
             MouseFunction::LeftClick => [0x02, 0xF0, 0x00, 0x00],
-            MouseFunction::MiddleClick => [0x02, 0xF1, 0x00, 0x00],
-            MouseFunction::RightClick => [0x02, 0xF2, 0x00, 0x00],
-            MouseFunction::ScrollUp => [0x02, 0xF3, 0x00, 0x00],
-            MouseFunction::ScrollDown => [0x02, 0xF4, 0x00, 0x00],
+            MouseFunction::MiddleClick => [0x02, 0xF1, 0x00, 0x01],
+            MouseFunction::RightClick => [0x02, 0xF2, 0x00, 0x02],
+            MouseFunction::ScrollUp => [0x02, 0xF4, 0x00, 0x00],
+            MouseFunction::ScrollDown => [0x02, 0xF3, 0x00, 0x00],
             MouseFunction::TiltLeft => [0x02, 0xF5, 0x00, 0x00],
             MouseFunction::TiltRight => [0x02, 0xF6, 0x00, 0x00],
             MouseFunction::Back => [0x02, 0xF8, 0x00, 0x03],
@@ -1636,6 +1640,42 @@ mod tests {
             vec![0x8C, 0x8D, 0x8F]
         );
         assert_eq!(&profile.as_bytes()[0x8C..0x90], &[0x02, 0xF9, 0x00, 0x04]);
+    }
+
+    #[test]
+    fn golden_button4_mouse_function_matrix_matches_local_capture_series() {
+        let original = captured_button_profile();
+        let cases = [
+            (MouseFunction::LeftClick, [0x02, 0xF0, 0x00, 0x00]),
+            (MouseFunction::RightClick, [0x02, 0xF2, 0x00, 0x02]),
+            (MouseFunction::MiddleClick, [0x02, 0xF1, 0x00, 0x01]),
+            (MouseFunction::Forward, [0x02, 0xF9, 0x00, 0x04]),
+            (MouseFunction::TiltLeft, [0x02, 0xF5, 0x00, 0x00]),
+            (MouseFunction::TiltRight, [0x02, 0xF6, 0x00, 0x00]),
+            (MouseFunction::DpiToggle, [0x71, 0xF0, 0x00, 0x00]),
+            (MouseFunction::ScrollUp, [0x02, 0xF4, 0x00, 0x00]),
+            (MouseFunction::ScrollDown, [0x02, 0xF3, 0x00, 0x00]),
+            (MouseFunction::Back, [0x02, 0xF8, 0x00, 0x03]),
+        ];
+
+        for (function, expected) in cases {
+            let binding = ButtonBinding::Mouse(function);
+            let mut profile = PerformanceProfile::parse(&original).unwrap();
+            profile
+                .set_button_binding(PulsefireRaidControl::Button4, &binding)
+                .unwrap();
+
+            assert_eq!(&profile.as_bytes()[0x88..0x8C], &expected);
+            assert_eq!(
+                profile
+                    .button_binding(PulsefireRaidControl::Button4)
+                    .unwrap(),
+                binding
+            );
+            assert!(changed_offsets(&original, profile.as_bytes())
+                .iter()
+                .all(|offset| (0x88..0x8C).contains(offset)));
+        }
     }
 
     #[test]

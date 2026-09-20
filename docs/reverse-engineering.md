@@ -43,6 +43,29 @@ USBPcap may contain traffic from other devices on the same host controller.
 Treat raw captures as potentially sensitive. The repository ignores `*.pcap`,
 `*.pcapng`, `*.etl` and `captures/private/` by default.
 
+For a matrix of related choices, use a reviewed JSON plan with the series
+runner. It retains one UI transition per capture while using a single elevated
+PowerShell session:
+
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/capture-series-windows.ps1")" \
+  -Interface '\\.\USBPcap1' \
+  -VendorId 2385 \
+  -ProductId 5860 \
+  -DurationSeconds 10 \
+  -PlanPath "$(wslpath -w "$PWD/scripts/capture-plans/pulsefire-raid-button4-mouse-functions.json")"
+```
+
+The elevated window shows one instruction at a time. Press Enter, return to
+NGENUITY Legacy and perform exactly the named change during that capture. The
+runner resolves the current device address again for every file, rejects an
+existing series prefix, checks every file through `capture-windows.ps1`, and
+writes a prefixed manifest beside the raw captures directly under `%TEMP%`.
+Keeping the files directly in the caller's existing Temp directory avoids the
+different ACL inheritance of a directory created by an elevated process. Keep
+the raw files outside Git.
+
 ## Minimal text fixture format
 
 Until a capture parser is justified, normalize reports into a small reviewable

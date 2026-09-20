@@ -1,0 +1,57 @@
+{
+  "name": "pulsefire-raid-button4-mouse-functions-20260920",
+  "steps": [
+    {
+      "slug": "baseline-no-op",
+      "instruction": "Do not change anything; leave Button 4 assigned to Mouse Back."
+    },
+    {
+      "slug": "back-to-left-click",
+      "instruction": "During capture set Button 4 to Mouse Function > Left Click exactly once."
+    },
+    {
+      "slug": "left-to-right-click",
+      "instruction": "During capture set Button 4 to Mouse Function > Right Click exactly once."
+    },
+    {
+      "slug": "right-to-middle-click",
+      "instruction": "During capture set Button 4 to Mouse Function > Middle exactly once."
+    },
+    {
+      "slug": "middle-to-forward",
+      "instruction": "During capture set Button 4 to Mouse Function > Forward exactly once."
+    },
+    {
+      "slug": "forward-to-tilt-left",
+      "instruction": "During capture set Button 4 to Mouse Function > Tilt L exactly once."
+    },
+    {
+      "slug": "tilt-left-to-tilt-right",
+      "instruction": "During capture set Button 4 to Mouse Function > Tilt R exactly once."
+    },
+    {
+      "slug": "tilt-right-to-dpi-toggle",
+      "instruction": "During capture set Button 4 to Mouse Function > DPI Toggle exactly once."
+    },
+    {
+      "slug": "dpi-toggle-to-scroll-up",
+      "instruction": "During capture set Button 4 to Mouse Function > Scroll Up exactly once."
+    },
+    {
+      "slug": "scroll-up-to-scroll-down",
+      "instruction": "During capture set Button 4 to Mouse Function > Scroll Down exactly once."
+    },
+    {
+      "slug": "scroll-down-to-scroll-up-repeat",
+      "instruction": "During capture set Button 4 back to Mouse Function > Scroll Up exactly once."
+    },
+    {
+      "slug": "scroll-up-to-scroll-down-repeat",
+      "instruction": "During capture set Button 4 back to Mouse Function > Scroll Down exactly once."
+    },
+    {
+      "slug": "scroll-down-to-back-restore",
+      "instruction": "During capture restore Button 4 to Mouse Function > Back exactly once."
+    }
+  ]
+}

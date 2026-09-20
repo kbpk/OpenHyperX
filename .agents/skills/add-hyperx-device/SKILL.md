@@ -57,6 +57,15 @@ For a manual capture:
 4. Before requesting another operator action, extract and inspect all candidate
    feature reports and prove whether the expected transition is present.
 
+For an option matrix, keep the same one-change-per-file rule but prefer
+`scripts/capture-series-windows.ps1` with a reviewed JSON plan. It elevates
+once, resolves the device identity immediately before every bounded capture,
+prompts the operator for each named transition, refuses to overwrite a prior
+series, and writes a manifest beside the captures. Include a no-op step and a
+final restoration step. Do not replace isolated files with one long ambiguous
+capture, and do not ask for separate UAC approvals when the series runner can
+perform the same experiment safely.
+
 Keep raw captures outside Git and treat them as potentially sensitive.
 
 Mutable hardware testing must state what will change and whether it is volatile

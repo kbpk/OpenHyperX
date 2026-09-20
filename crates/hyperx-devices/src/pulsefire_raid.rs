@@ -133,7 +133,18 @@ impl PulsefireRaidRuntimeAssignment {
         );
         let portable_binding = match &binding {
             ButtonBinding::Disabled
-            | ButtonBinding::Mouse(MouseFunction::Back | MouseFunction::DpiToggle)
+            | ButtonBinding::Mouse(
+                MouseFunction::LeftClick
+                | MouseFunction::RightClick
+                | MouseFunction::MiddleClick
+                | MouseFunction::Back
+                | MouseFunction::Forward
+                | MouseFunction::TiltLeft
+                | MouseFunction::TiltRight
+                | MouseFunction::DpiToggle
+                | MouseFunction::ScrollUp
+                | MouseFunction::ScrollDown,
+            )
             | ButtonBinding::Multimedia(
                 MultimediaFunction::VolumeUp | MultimediaFunction::VolumeDown,
             ) => true,
@@ -143,8 +154,7 @@ impl PulsefireRaidRuntimeAssignment {
         let button5_only = control == PulsefireRaidControl::Button5
             && matches!(
                 &binding,
-                ButtonBinding::Mouse(MouseFunction::Forward)
-                    | ButtonBinding::WindowsShortcut(WindowsShortcut::Copy)
+                ButtonBinding::WindowsShortcut(WindowsShortcut::Copy)
             );
         let confirmed = (general_control && portable_binding) || button5_only;
         if !confirmed {
@@ -1415,13 +1425,13 @@ mod tests {
     }
 
     #[test]
-    fn driver_writes_only_the_captured_button4_record() {
+    fn driver_writes_only_the_captured_button4_scroll_up_record() {
         let mut response = performance_profile_response();
         response[0x88..0x8C].copy_from_slice(&[0x02, 0xF8, 0x00, 0x03]);
         assert_eq!(&response[0x88..0x8C], &[0x02, 0xF8, 0x00, 0x03]);
         let mut expected_write = response;
         expected_write[1] = 0x01;
-        expected_write[0x88..0x8C].copy_from_slice(&[0x00; 4]);
+        expected_write[0x88..0x8C].copy_from_slice(&[0x02, 0xF4, 0x00, 0x00]);
 
         let mut transport = MockHidTransport::new(1);
         transport.expect_feature_report(encode_runtime_profile_read_prelude());
@@ -1431,7 +1441,7 @@ mod tests {
 
         let assignment = PulsefireRaidRuntimeAssignment::ordinary(
             PulsefireRaidControl::Button4,
-            ButtonBinding::Disabled,
+            ButtonBinding::Mouse(MouseFunction::ScrollUp),
         )
         .unwrap();
         let mut device = PulsefireRaid::new(transport).unwrap();
@@ -1584,36 +1594,35 @@ mod tests {
         ];
         let portable_bindings = [
             ButtonBinding::Disabled,
+            ButtonBinding::Mouse(MouseFunction::LeftClick),
+            ButtonBinding::Mouse(MouseFunction::RightClick),
+            ButtonBinding::Mouse(MouseFunction::MiddleClick),
             ButtonBinding::Mouse(MouseFunction::Back),
+            ButtonBinding::Mouse(MouseFunction::Forward),
+            ButtonBinding::Mouse(MouseFunction::TiltLeft),
+            ButtonBinding::Mouse(MouseFunction::TiltRight),
+            ButtonBinding::Mouse(MouseFunction::DpiToggle),
+            ButtonBinding::Mouse(MouseFunction::ScrollUp),
+            ButtonBinding::Mouse(MouseFunction::ScrollDown),
             ButtonBinding::Multimedia(MultimediaFunction::VolumeUp),
             ButtonBinding::Multimedia(MultimediaFunction::VolumeDown),
             ButtonBinding::Keyboard(KeyboardUsage(0x04)),
             ButtonBinding::Keyboard(KeyboardUsage(0x05)),
             ButtonBinding::Keyboard(KeyboardUsage(0x2C)),
             ButtonBinding::Keyboard(KeyboardUsage(0xE1)),
-            ButtonBinding::Mouse(MouseFunction::DpiToggle),
         ];
         for control in general_controls {
             for binding in portable_bindings.iter().cloned() {
                 assert!(PulsefireRaidRuntimeAssignment::ordinary(control, binding).is_ok());
             }
         }
-        for binding in [
-            ButtonBinding::Mouse(MouseFunction::Forward),
+        assert!(PulsefireRaidRuntimeAssignment::ordinary(
+            PulsefireRaidControl::Button5,
             ButtonBinding::WindowsShortcut(WindowsShortcut::Copy),
-        ] {
-            assert!(PulsefireRaidRuntimeAssignment::ordinary(
-                PulsefireRaidControl::Button5,
-                binding
-            )
-            .is_ok());
-        }
+        )
+        .is_ok());
         for (control, binding) in [
             (PulsefireRaidControl::LeftClick, ButtonBinding::Disabled),
-            (
-                PulsefireRaidControl::Button4,
-                ButtonBinding::Mouse(MouseFunction::Forward),
-            ),
             (
                 PulsefireRaidControl::Button7,
                 ButtonBinding::WindowsShortcut(WindowsShortcut::Copy),

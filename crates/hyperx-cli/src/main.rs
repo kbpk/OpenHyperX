@@ -415,9 +415,16 @@ enum ButtonAssignmentCommand {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum ButtonMouseFunctionArg {
+    LeftClick,
+    RightClick,
+    Middle,
     Forward,
     Back,
+    TiltLeft,
+    TiltRight,
     DpiToggle,
+    ScrollUp,
+    ScrollDown,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -439,6 +446,18 @@ impl ButtonAssignmentCommand {
         let (binding, description) = match self {
             Self::Disabled => (ButtonBinding::Disabled, "disabled"),
             Self::Mouse { function } => match function {
+                ButtonMouseFunctionArg::LeftClick => (
+                    ButtonBinding::Mouse(MouseFunction::LeftClick),
+                    "mouse left click",
+                ),
+                ButtonMouseFunctionArg::RightClick => (
+                    ButtonBinding::Mouse(MouseFunction::RightClick),
+                    "mouse right click",
+                ),
+                ButtonMouseFunctionArg::Middle => (
+                    ButtonBinding::Mouse(MouseFunction::MiddleClick),
+                    "mouse middle click",
+                ),
                 ButtonMouseFunctionArg::Forward => (
                     ButtonBinding::Mouse(MouseFunction::Forward),
                     "mouse forward",
@@ -446,9 +465,25 @@ impl ButtonAssignmentCommand {
                 ButtonMouseFunctionArg::Back => {
                     (ButtonBinding::Mouse(MouseFunction::Back), "mouse back")
                 }
+                ButtonMouseFunctionArg::TiltLeft => (
+                    ButtonBinding::Mouse(MouseFunction::TiltLeft),
+                    "mouse tilt left",
+                ),
+                ButtonMouseFunctionArg::TiltRight => (
+                    ButtonBinding::Mouse(MouseFunction::TiltRight),
+                    "mouse tilt right",
+                ),
                 ButtonMouseFunctionArg::DpiToggle => (
                     ButtonBinding::Mouse(MouseFunction::DpiToggle),
                     "mouse DPI toggle",
+                ),
+                ButtonMouseFunctionArg::ScrollUp => (
+                    ButtonBinding::Mouse(MouseFunction::ScrollUp),
+                    "mouse scroll up",
+                ),
+                ButtonMouseFunctionArg::ScrollDown => (
+                    ButtonBinding::Mouse(MouseFunction::ScrollDown),
+                    "mouse scroll down",
                 ),
             },
             Self::Multimedia { function } => match function {
@@ -2246,7 +2281,18 @@ mod tests {
         assert!(
             Cli::try_parse_from(["hyperx-cli", "buttons", "set", "button5", "disabled",]).is_ok()
         );
-        for function in ["forward", "back", "dpi-toggle"] {
+        for function in [
+            "left-click",
+            "right-click",
+            "middle",
+            "forward",
+            "back",
+            "tilt-left",
+            "tilt-right",
+            "dpi-toggle",
+            "scroll-up",
+            "scroll-down",
+        ] {
             assert!(Cli::try_parse_from([
                 "hyperx-cli",
                 "buttons",
@@ -2353,11 +2399,22 @@ mod tests {
         assert!(ButtonAssignmentCommand::Disabled
             .into_assignment(PulsefireRaidControl::Dpi)
             .is_ok());
-        assert!(ButtonAssignmentCommand::Mouse {
-            function: ButtonMouseFunctionArg::Forward,
+        for function in [
+            ButtonMouseFunctionArg::LeftClick,
+            ButtonMouseFunctionArg::RightClick,
+            ButtonMouseFunctionArg::Middle,
+            ButtonMouseFunctionArg::Forward,
+            ButtonMouseFunctionArg::Back,
+            ButtonMouseFunctionArg::TiltLeft,
+            ButtonMouseFunctionArg::TiltRight,
+            ButtonMouseFunctionArg::DpiToggle,
+            ButtonMouseFunctionArg::ScrollUp,
+            ButtonMouseFunctionArg::ScrollDown,
+        ] {
+            assert!(ButtonAssignmentCommand::Mouse { function }
+                .into_assignment(PulsefireRaidControl::Dpi)
+                .is_ok());
         }
-        .into_assignment(PulsefireRaidControl::Dpi)
-        .is_err());
         assert!(ButtonAssignmentCommand::Disabled
             .into_assignment(PulsefireRaidControl::Button4)
             .is_ok());
@@ -2370,7 +2427,7 @@ mod tests {
             function: ButtonMouseFunctionArg::Forward,
         }
         .into_assignment(PulsefireRaidControl::Button4)
-        .is_err());
+        .is_ok());
         for function in [
             ButtonMultimediaFunctionArg::VolumeUp,
             ButtonMultimediaFunctionArg::VolumeDown,
