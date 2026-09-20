@@ -48,6 +48,17 @@ software profile without opening a HID device. Current NGENUITY is a distinct,
 unsupported source format and must not share the Legacy parser without
 evidence.
 
+The driver also owns the acknowledged Pulsefire Raid onboard-save transaction.
+It validates the complete runtime source before selecting onboard memory, reads
+the existing onboard image, and patches only the confirmed DPI, polling and 11
+button-record fields. Unknown onboard bytes are preserved. A referenced Button
+5 macro requires its caller-supplied typed definition because the event stream
+cannot be recovered from the profile image. Every save-stage interrupt
+acknowledgement is checked and an unexpected response aborts without retry.
+Feature reports use the interface-1 configuration collection, while the
+eight-byte acknowledgements are read through a separate interface-2 HID
+handle. The complete path is hardware-validated across a physical power-cycle.
+
 ## Crate responsibilities
 
 ### `hyperx-core`
@@ -59,8 +70,8 @@ toolkit. Imported profiles explicitly distinguish confirmed normalized fields
 from unresolved source values.
 
 Hardware capabilities and implemented protocol operations are separate facts.
-For example, Pulsefire Raid advertises onboard memory, but no onboard write API
-will exist until the command is verified.
+For example, Pulsefire Raid advertises onboard memory, while its write API is
+limited to the fields and transaction variants established by captures.
 
 ### `hyperx-hid`
 
@@ -88,11 +99,12 @@ Raw TX/RX logging is emitted only at `trace` level.
 
 Owns model identities, capability declarations and per-model protocol drivers.
 `pulsefire_raid` is the first module and exposes the confirmed runtime-profile
-read, DPI-stage/polling runtime setters and volatile direct RGB. A model driver
-may depend on the core, protocol and transport traits, but never on CLI/Tauri
-types. Its stage API uses zero-based indexes internally; user-facing clients
-translate those to one-based numbers. Device-specific, target-aware assignment
-evidence gates live in the driver so a future GUI cannot bypass the CLI's
+read, DPI-stage/polling runtime setters, volatile direct RGB and an explicit
+onboard save. A model driver may depend on the core, protocol and transport
+traits, but never on CLI/Tauri types. Its stage API uses zero-based indexes
+internally; user-facing clients translate those to one-based numbers.
+Device-specific, target-aware assignment evidence gates and persistent-write
+validation live in the driver so a future GUI cannot bypass the CLI's
 restricted writable set.
 
 ### `hyperx-cli`

@@ -6,9 +6,10 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
 > **Experimental software:** discovery, report-descriptor reads and the
 > capture-backed runtime-profile query are read-only; direct RGB is a confirmed
 > but volatile hardware write. Runtime DPI and polling writes are
-> capture-backed and do not save to onboard memory.
+> capture-backed and do not save to onboard memory unless the explicit
+> `profile save-to-mouse --confirm` command is used.
 > Firmware update, bootloader and DFU operations are deliberately out of scope.
-> No current command writes firmware or onboard profile data.
+> No current command writes firmware.
 
 ## Current status
 
@@ -35,7 +36,10 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
 - offline NGENUITY Legacy version-40 `.hxp` inspection and partial import to a
   portable OpenHyperX TOML profile
 - offline DPI-stage, polling and button-profile parser/patcher with golden tests
-- no primary-click remapping or onboard hardware writes yet
+- capture-backed, acknowledged onboard save for current DPI, polling, all 11
+  button records, an optional Button 5 Play Once macro and independent
+  wheel/logo Solid colors, hardware-verified across a physical power-cycle
+- no primary-click remapping or non-Solid persistent firmware-lighting effects yet
 
 The implementation stops wherever protocol evidence stops. Known facts and
 their confidence level are recorded in [docs/research.md](docs/research.md).
@@ -177,6 +181,34 @@ buttons. Unsupported keys, playback modes and malformed timelines are rejected
 before the mouse is opened. See [docs/macro-format.md](docs/macro-format.md).
 These commands do not save onboard.
 
+Persist the current runtime performance/button profile to the mouse:
+
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
+  run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
+  profile save-to-mouse \
+  --wheel off --logo 0000FF \
+  --macro-definition examples/macros/coverage-recorded-timing.toml \
+  --confirm
+```
+
+Close every NGENUITY variant and other device writers first. The command reads
+and validates the runtime profile, reads the existing onboard image, copies
+only confirmed DPI, polling and button fields, checks every eight-byte device
+acknowledgement through the mouse's separate acknowledgement collection, and
+restores the runtime section after the commit delay. If
+Button 5 contains the known macro reference, `--macro-definition FILE` is
+required because its event timeline cannot be read from the profile image. Do
+not supply it when Button 5 is not a macro.
+
+Both `--wheel` and `--logo` are mandatory (`off` means black). They describe
+the two-zone static snapshot carried by NGENUITY Legacy's save transaction.
+Independent wheel/logo Solid colors, including `off`, were verified to persist
+across a physical power-cycle. This does not establish persistence for any
+other lighting effect. The `--confirm` flag is mandatory because this operation
+writes onboard memory.
+
 Inspect an exported NGENUITY Legacy preset or import every currently understood
 field to a new OpenHyperX TOML profile:
 
@@ -200,7 +232,8 @@ overwrites, its output. DPI stages and confirmed macro event types are
 converted. Unknown physical button targets, polling, lighting and the
 unconfirmed active-stage indexing are retained or reported as partial instead
 of guessed. The resulting profile is not automatically applied to the mouse
-and cannot invoke `Save to mouse`. See [docs/profile-format.md](docs/profile-format.md).
+and does not automatically invoke `Save to mouse`. See
+[docs/profile-format.md](docs/profile-format.md).
 
 `diff-ngenuity-legacy` compares decoded settings first and then prints exact
 offsets for changes in the embedded binary preset. Export-wrapper/footer
@@ -279,8 +312,9 @@ publishing them.
    explicit foreground keepalive.
 4. **Protocol exploration:** DPI stages/colors, polling runtime control,
    capture-backed Button 5 and DPI-button bindings plus bounded Play Once
-   Button 5 macros are implemented; other controls, repeat modes, longer macros
-   and onboard profiles remain capture-gated.
+   Button 5 macros and the confirmed onboard-save path are implemented; other
+   bindings, repeat modes, longer macros and non-Solid firmware lighting remain
+   capture-gated.
 5. **GUI:** Tauri client using only the public core API.
 
 See [docs/reverse-engineering.md](docs/reverse-engineering.md) for the capture

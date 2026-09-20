@@ -10,6 +10,12 @@ const DIRECT_START: u8 = 0x0A;
 const DIRECT_END: u8 = 0xA0;
 const PROFILE_ACCESS_OPCODE: u8 = 0x03;
 const PROFILE_ACCESS_TRAILER: u8 = 0x64;
+const ONBOARD_AUXILIARY_OPCODE: u8 = 0x18;
+const ONBOARD_AUXILIARY_KIND: u8 = 0x01;
+const ONBOARD_AUXILIARY_COUNT: usize = 3;
+const ONBOARD_AUXILIARY_INDEX_OFFSET: usize = 0x04;
+const ONBOARD_AUXILIARY_WHEEL_COLOR_OFFSET: usize = 0x08;
+const ONBOARD_AUXILIARY_LOGO_COLOR_OFFSET: usize = 0x0B;
 
 const PROFILE_WRITE_OPCODE: u8 = 0x01;
 const PROFILE_READ_RESPONSE_OPCODE: u8 = 0x81;
@@ -268,6 +274,15 @@ pub enum PerformanceProfileError {
     },
     #[error("binding {0:?} does not yet have a capture-backed Pulsefire Raid encoding")]
     UnconfirmedButtonBinding(ButtonBinding),
+    #[error(
+        "confirmed settings can only be copied from a runtime profile to an onboard profile, got {source_section:?} -> {destination:?}"
+    )]
+    WrongSettingsCopySections {
+        source_section: ProfileSection,
+        destination: ProfileSection,
+    },
+    #[error("expected a runtime profile as the onboard-save source, got {0:?}")]
+    ExpectedRuntimeSettingsSource(ProfileSection),
 }
 
 /// Axis identifying an invalid DPI value in a profile.
@@ -484,6 +499,64 @@ impl PerformanceProfile {
         Ok(())
     }
 
+    /// Copy only fields whose layout is confirmed to be shared by the runtime
+    /// and onboard profile sections.
+    ///
+    /// Unknown onboard bytes are deliberately retained from the destination
+    /// image. All source fields are validated before either image is changed.
+    pub fn copy_confirmed_runtime_settings_from(
+        &mut self,
+        runtime: &Self,
+    ) -> Result<(), PerformanceProfileError> {
+        if runtime.section != ProfileSection::Runtime || self.section != ProfileSection::Onboard {
+            return Err(PerformanceProfileError::WrongSettingsCopySections {
+                source_section: runtime.section,
+                destination: self.section,
+            });
+        }
+
+        runtime.validate_confirmed_runtime_settings()?;
+        let polling_rate = runtime.polling_rate()?;
+        let dpi_profile = runtime.dpi_profile()?;
+        self.set_polling_rate(polling_rate);
+        self.set_dpi_profile(&dpi_profile)?;
+        for control in PulsefireRaidControl::ALL {
+            let offset = control.profile_offset();
+            self.report[offset..offset + BUTTON_RECORD_LENGTH]
+                .copy_from_slice(&runtime.report[offset..offset + BUTTON_RECORD_LENGTH]);
+        }
+        Ok(())
+    }
+
+    /// Validate every field that the capture-backed onboard save will copy.
+    ///
+    /// Callers can use this before beginning the persistent transaction so an
+    /// unknown runtime record fails without touching onboard memory.
+    pub fn validate_confirmed_runtime_settings(&self) -> Result<(), PerformanceProfileError> {
+        if self.section != ProfileSection::Runtime {
+            return Err(PerformanceProfileError::ExpectedRuntimeSettingsSource(
+                self.section,
+            ));
+        }
+        self.polling_rate()?;
+        self.dpi_profile()?;
+        for control in PulsefireRaidControl::ALL {
+            if self.has_confirmed_macro_reference(control) {
+                continue;
+            }
+            let binding = self.button_binding(control)?;
+            if control.is_primary_click()
+                && !matches!(
+                    binding,
+                    ButtonBinding::Mouse(MouseFunction::LeftClick | MouseFunction::RightClick)
+                )
+            {
+                return Err(PerformanceProfileError::ButtonBindingNotAllowed { control, binding });
+            }
+        }
+        Ok(())
+    }
+
     /// Produce the confirmed host-write form without transmitting it.
     pub fn to_write_report(&self) -> [u8; DIRECT_REPORT_LENGTH] {
         let mut report = self.report;
@@ -619,6 +692,16 @@ impl PulsefireRaidMacro {
 
     pub const fn as_bytes(&self) -> &[u8; DIRECT_REPORT_LENGTH] {
         &self.report
+    }
+
+    /// Produce the capture-confirmed onboard variant of the macro report.
+    ///
+    /// A Save-to-mouse capture containing the same 14-event macro changed only
+    /// the profile-section byte from runtime `0x04` to onboard `0x01`.
+    pub fn to_onboard_report(&self) -> [u8; DIRECT_REPORT_LENGTH] {
+        let mut report = self.report;
+        report[2] = ONBOARD_PROFILE_SECTION;
+        report
     }
 }
 
@@ -859,14 +942,54 @@ pub fn encode_direct_rgb(wheel: RgbColor, logo: RgbColor) -> [u8; DIRECT_REPORT_
 /// Its individual fields are not generalized: only the exact locally
 /// repeated `07 03 04 64` report is exposed.
 pub fn encode_runtime_profile_read_prelude() -> [u8; DIRECT_REPORT_LENGTH] {
+    encode_profile_access_prelude(ProfileSection::Runtime)
+}
+
+/// Encode the fixed onboard-profile access prelude observed before persistent
+/// Save-to-mouse transactions.
+pub fn encode_onboard_profile_read_prelude() -> [u8; DIRECT_REPORT_LENGTH] {
+    encode_profile_access_prelude(ProfileSection::Onboard)
+}
+
+fn encode_profile_access_prelude(section: ProfileSection) -> [u8; DIRECT_REPORT_LENGTH] {
     let mut report = [0_u8; DIRECT_REPORT_LENGTH];
     report[..4].copy_from_slice(&[
         DIRECT_REPORT_ID,
         PROFILE_ACCESS_OPCODE,
-        RUNTIME_PROFILE_SECTION,
+        match section {
+            ProfileSection::Onboard => ONBOARD_PROFILE_SECTION,
+            ProfileSection::Runtime => RUNTIME_PROFILE_SECTION,
+        },
         PROFILE_ACCESS_TRAILER,
     ]);
     report
+}
+
+/// Encode the three indexed auxiliary reports observed in every onboard save.
+///
+/// Four isolated captures establish the two RGB triplets as wheel then logo,
+/// including independent black/off and all three color channels. The remaining
+/// bytes and reports with indexes 1 and 2 are always zero-filled in the
+/// capture-backed Solid path.
+pub fn encode_onboard_static_lighting_reports(
+    wheel: RgbColor,
+    logo: RgbColor,
+) -> [[u8; DIRECT_REPORT_LENGTH]; ONBOARD_AUXILIARY_COUNT] {
+    let mut reports = [[0_u8; DIRECT_REPORT_LENGTH]; ONBOARD_AUXILIARY_COUNT];
+    for (index, report) in reports.iter_mut().enumerate() {
+        report[..4].copy_from_slice(&[
+            DIRECT_REPORT_ID,
+            ONBOARD_AUXILIARY_OPCODE,
+            ONBOARD_AUXILIARY_KIND,
+            0x00,
+        ]);
+        report[ONBOARD_AUXILIARY_INDEX_OFFSET] = index as u8;
+    }
+    reports[0][ONBOARD_AUXILIARY_WHEEL_COLOR_OFFSET..ONBOARD_AUXILIARY_WHEEL_COLOR_OFFSET + 3]
+        .copy_from_slice(&wheel.bytes());
+    reports[0][ONBOARD_AUXILIARY_LOGO_COLOR_OFFSET..ONBOARD_AUXILIARY_LOGO_COLOR_OFFSET + 3]
+        .copy_from_slice(&logo.bytes());
+    reports
 }
 
 /// Encode the fixed feature-report request observed before runtime reads.
@@ -1027,6 +1150,36 @@ mod tests {
     }
 
     #[test]
+    fn golden_onboard_save_reports_match_isolated_zone_captures() {
+        let prelude = encode_onboard_profile_read_prelude();
+        assert_eq!(&prelude[..4], &[0x07, 0x03, 0x01, 0x64]);
+        assert!(prelude[4..].iter().all(|byte| *byte == 0));
+
+        let reports = encode_onboard_static_lighting_reports(
+            RgbColor::new(0x12, 0x34, 0x56),
+            RgbColor::new(0xAB, 0xCD, 0xEF),
+        );
+        assert_eq!(
+            &reports[0][..14],
+            &[0x07, 0x18, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0x34, 0x56, 0xAB, 0xCD, 0xEF,]
+        );
+        assert!(reports[0][14..].iter().all(|byte| *byte == 0));
+        for (index, report) in reports.iter().enumerate().skip(1) {
+            assert_eq!(&report[..5], &[0x07, 0x18, 0x01, 0x00, index as u8]);
+            assert!(report[5..].iter().all(|byte| *byte == 0));
+        }
+
+        let wheel_only = encode_onboard_static_lighting_reports(
+            RgbColor::new(0xFF, 0x00, 0x00),
+            RgbColor::BLACK,
+        );
+        assert_eq!(&wheel_only[0][8..14], &[0xFF, 0, 0, 0, 0, 0]);
+        let logo_only =
+            encode_onboard_static_lighting_reports(RgbColor::BLACK, RgbColor::new(0, 0, 0xFF));
+        assert_eq!(&logo_only[0][8..14], &[0, 0, 0, 0, 0, 0xFF]);
+    }
+
+    #[test]
     fn golden_macro_reports_match_local_captures() {
         let a_events = key_tap(0x04, 20);
         let macro_definition = PulsefireRaidMacro::button5_play_once(&a_events).unwrap();
@@ -1076,6 +1229,73 @@ mod tests {
             PulsefireRaidMacro::parse(&expected_coverage).unwrap(),
             coverage
         );
+
+        let mut expected_onboard = expected_coverage;
+        expected_onboard[2] = 0x01;
+        assert_eq!(coverage.to_onboard_report(), expected_onboard);
+    }
+
+    #[test]
+    fn onboard_copy_patches_only_confirmed_runtime_fields() {
+        let runtime_bytes = captured_button_profile();
+        let runtime = PerformanceProfile::parse(&runtime_bytes).unwrap();
+        let mut onboard_bytes = profile_fixture(
+            ProfileImageKind::DeviceReadResponse,
+            ProfileSection::Onboard,
+        );
+        onboard_bytes[0x10] = 0xA5;
+        onboard_bytes[0x7C..0xA8].fill(0xCC);
+        let mut onboard = PerformanceProfile::parse(&onboard_bytes).unwrap();
+
+        onboard
+            .copy_confirmed_runtime_settings_from(&runtime)
+            .unwrap();
+
+        assert_eq!(onboard.as_bytes()[0x10], 0xA5);
+        assert_eq!(
+            onboard.polling_rate().unwrap(),
+            runtime.polling_rate().unwrap()
+        );
+        assert_eq!(
+            onboard.dpi_profile().unwrap(),
+            runtime.dpi_profile().unwrap()
+        );
+        assert_eq!(
+            &onboard.as_bytes()[0x7C..0xA8],
+            &runtime.as_bytes()[0x7C..0xA8]
+        );
+        assert_eq!(&onboard.to_write_report()[..3], &[0x07, 0x01, 0x01]);
+    }
+
+    #[test]
+    fn onboard_copy_rejects_wrong_sections_and_unknown_buttons_without_mutating() {
+        let runtime_bytes = captured_button_profile();
+        let runtime = PerformanceProfile::parse(&runtime_bytes).unwrap();
+        let mut wrong_destination = runtime.clone();
+        assert_eq!(
+            wrong_destination.copy_confirmed_runtime_settings_from(&runtime),
+            Err(PerformanceProfileError::WrongSettingsCopySections {
+                source_section: ProfileSection::Runtime,
+                destination: ProfileSection::Runtime,
+            })
+        );
+
+        let mut unknown_runtime_bytes = runtime_bytes;
+        unknown_runtime_bytes[0x90..0x94].copy_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
+        let unknown_runtime = PerformanceProfile::parse(&unknown_runtime_bytes).unwrap();
+        let onboard_bytes = profile_fixture(
+            ProfileImageKind::DeviceReadResponse,
+            ProfileSection::Onboard,
+        );
+        let mut onboard = PerformanceProfile::parse(&onboard_bytes).unwrap();
+        assert!(matches!(
+            onboard.copy_confirmed_runtime_settings_from(&unknown_runtime),
+            Err(PerformanceProfileError::UnknownButtonBinding {
+                control: PulsefireRaidControl::Button7,
+                ..
+            })
+        ));
+        assert_eq!(onboard.as_bytes(), &onboard_bytes);
     }
 
     #[test]

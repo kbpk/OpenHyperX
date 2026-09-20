@@ -16,7 +16,7 @@ use hyperx_core::{
 };
 use hyperx_devices::{
     find_supported_device, PulsefireRaid, PulsefireRaidRuntimeAssignment, PULSEFIRE_RAID,
-    PULSEFIRE_RAID_DPI,
+    PULSEFIRE_RAID_ACKNOWLEDGEMENT_INTERFACE, PULSEFIRE_RAID_DPI,
 };
 use hyperx_hid::{HidApiDiscovery, HidApiTransport, HidDiscovery, HidTransport};
 use hyperx_protocol::{
@@ -85,7 +85,7 @@ enum Command {
         #[command(subcommand)]
         command: ButtonsCommand,
     },
-    /// Inspect or import an application profile without accessing hardware.
+    /// Inspect/import application profiles or explicitly save runtime settings onboard.
     Profile {
         #[command(subcommand)]
         command: ProfileCommand,
@@ -125,6 +125,22 @@ enum ProfileCommand {
         source: PathBuf,
         /// New TOML file. Existing files are never overwritten.
         output: PathBuf,
+    },
+    /// Persist confirmed runtime settings to the mouse's onboard profile.
+    #[command(name = "save-to-mouse")]
+    SaveToMouse {
+        /// Static scroll-wheel snapshot carried by the save transaction, or "off".
+        #[arg(long, value_parser = parse_rgb_or_off)]
+        wheel: RgbColor,
+        /// Static HyperX-logo snapshot carried by the save transaction, or "off".
+        #[arg(long, value_parser = parse_rgb_or_off)]
+        logo: RgbColor,
+        /// Button 5 macro definition required when runtime contains its macro reference.
+        #[arg(long, value_name = "FILE")]
+        macro_definition: Option<PathBuf>,
+        /// Acknowledge that this command writes persistent onboard memory.
+        #[arg(long, required = true)]
+        confirm: bool,
     },
 }
 
@@ -469,13 +485,17 @@ fn load_button_macro(
     control: PulsefireRaidControl,
     path: &Path,
 ) -> Result<(PulsefireRaidRuntimeAssignment, String)> {
-    let source = fs::read_to_string(path)
-        .with_context(|| format!("failed to read macro file {}", path.display()))?;
-    let definition: MacroDefinition = toml::from_str(&source)
-        .with_context(|| format!("failed to parse macro file {}", path.display()))?;
+    let definition = load_macro_definition(path)?;
     let assignment = PulsefireRaidRuntimeAssignment::macro_timeline(control, definition)
         .with_context(|| format!("unsupported Pulsefire Raid macro in {}", path.display()))?;
     Ok((assignment, format!("macro from {}", path.display())))
+}
+
+fn load_macro_definition(path: &Path) -> Result<MacroDefinition> {
+    let source = fs::read_to_string(path)
+        .with_context(|| format!("failed to read macro file {}", path.display()))?;
+    toml::from_str(&source)
+        .with_context(|| format!("failed to parse macro file {}", path.display()))
 }
 
 fn main() -> Result<()> {
@@ -566,6 +586,51 @@ fn profile(command: ProfileCommand) -> Result<()> {
                 "The profile is marked partial: polling, lighting and physical assignment targets are not decoded from .hxp yet."
             );
             println!("No HID device was opened and no onboard profile was written.");
+            Ok(())
+        }
+        ProfileCommand::SaveToMouse {
+            wheel,
+            logo,
+            macro_definition,
+            confirm,
+        } => {
+            debug_assert!(confirm, "clap requires --confirm");
+            let macro_definition = macro_definition
+                .as_deref()
+                .map(load_macro_definition)
+                .transpose()?;
+            let (mut device, mut acknowledgements) = open_pulsefire_raid_for_save()?;
+            let saved = device
+                .save_runtime_to_onboard(
+                    &mut acknowledgements,
+                    wheel,
+                    logo,
+                    macro_definition.as_ref(),
+                )
+                .context(
+                    "failed to complete the acknowledged onboard save; do not retry blindly, close every NGENUITY variant and inspect --trace output",
+                )?;
+
+            println!("Saved confirmed runtime settings to Pulsefire Raid onboard memory.");
+            println!("Polling rate: {} Hz", saved.polling_rate.hz());
+            println!("DPI stages:");
+            print_dpi_profile(&saved.dpi_profile);
+            println!("Button mappings: 11 profile records copied from runtime.");
+            println!(
+                "Button 5 macro definition: {}.",
+                if saved.macro_saved {
+                    "saved"
+                } else {
+                    "not present"
+                }
+            );
+            println!(
+                "Lighting snapshot: wheel=#{:02X}{:02X}{:02X}, logo=#{:02X}{:02X}{:02X}.",
+                wheel.red, wheel.green, wheel.blue, logo.red, logo.green, logo.blue
+            );
+            println!(
+                "The static snapshot is stored onboard; other persistent firmware lighting effects are not decoded."
+            );
             Ok(())
         }
     }
@@ -1509,6 +1574,29 @@ fn open_pulsefire_raid() -> Result<PulsefireRaid<HidApiTransport>> {
     Ok(PulsefireRaid::new(transport)?)
 }
 
+fn open_pulsefire_raid_for_save() -> Result<(PulsefireRaid<HidApiTransport>, HidApiTransport)> {
+    let discovery = HidApiDiscovery;
+    let interfaces = discovery.enumerate()?;
+    let configuration = select_configuration_interface(&interfaces)?;
+    let acknowledgement = select_acknowledgement_interface(&interfaces)?;
+    let configuration_transport = HidApiTransport::open(configuration).with_context(|| {
+        format!(
+            "failed to open the Pulsefire Raid configuration collection; close every NGENUITY variant and retry: {}",
+            configuration.path
+        )
+    })?;
+    let acknowledgement_transport = HidApiTransport::open(acknowledgement).with_context(|| {
+        format!(
+            "failed to open the Pulsefire Raid acknowledgement collection; close every NGENUITY variant and retry: {}",
+            acknowledgement.path
+        )
+    })?;
+    Ok((
+        PulsefireRaid::new(configuration_transport)?,
+        acknowledgement_transport,
+    ))
+}
+
 fn rgb(wheel: RgbColor, logo: RgbColor, duration_seconds: u64) -> Result<()> {
     if duration_seconds > 3600 {
         return Err(anyhow!("--duration cannot exceed 3600 seconds"));
@@ -1685,6 +1773,26 @@ fn select_configuration_interface(interfaces: &[HidInterfaceInfo]) -> Result<&Hi
         [configuration] => Ok(*configuration),
         _ => Err(anyhow!(
             "multiple Pulsefire Raid configuration collections found; explicit device selection is not implemented yet"
+        )),
+    }
+}
+
+fn select_acknowledgement_interface(interfaces: &[HidInterfaceInfo]) -> Result<&HidInterfaceInfo> {
+    let matches: Vec<_> = interfaces
+        .iter()
+        .filter(|info| {
+            info.usb_id() == PULSEFIRE_RAID.usb_id
+                && info.matches(PULSEFIRE_RAID_ACKNOWLEDGEMENT_INTERFACE)
+        })
+        .collect();
+
+    match matches.as_slice() {
+        [] => Err(anyhow!(
+            "Pulsefire Raid acknowledgement collection MI_02/FF00:FF00 was not found"
+        )),
+        [acknowledgement] => Ok(*acknowledgement),
+        _ => Err(anyhow!(
+            "multiple Pulsefire Raid acknowledgement collections found; explicit device selection is not implemented yet"
         )),
     }
 }
@@ -2011,6 +2119,52 @@ mod tests {
             "Base Settings.hxp",
         ])
         .is_err());
+
+        assert!(Cli::try_parse_from([
+            "hyperx-cli",
+            "profile",
+            "save-to-mouse",
+            "--wheel",
+            "FF0000",
+            "--logo",
+            "off",
+            "--confirm",
+        ])
+        .is_ok());
+        assert!(Cli::try_parse_from([
+            "hyperx-cli",
+            "profile",
+            "save-to-mouse",
+            "--wheel",
+            "off",
+            "--logo",
+            "0000FF",
+            "--macro-definition",
+            "macro.toml",
+            "--confirm",
+        ])
+        .is_ok());
+        for missing in [
+            vec![
+                "hyperx-cli",
+                "profile",
+                "save-to-mouse",
+                "--wheel",
+                "FF0000",
+                "--logo",
+                "off",
+            ],
+            vec![
+                "hyperx-cli",
+                "profile",
+                "save-to-mouse",
+                "--logo",
+                "off",
+                "--confirm",
+            ],
+        ] {
+            assert!(Cli::try_parse_from(missing).is_err());
+        }
     }
 
     #[test]

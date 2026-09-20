@@ -8,16 +8,19 @@ use hyperx_core::{
 };
 use hyperx_hid::{HidError, HidTransport};
 use hyperx_protocol::pulsefire_raid::{
-    encode_direct_rgb, encode_profile_read_request, encode_runtime_profile_read_prelude,
-    PerformanceProfile, PerformanceProfileError, ProfileImageKind, ProfileSection,
-    PulsefireRaidControl, PulsefireRaidMacro, PulsefireRaidMacroError, PulsefireRaidMacroEvent,
-    PulsefireRaidMacroInput, PulsefireRaidMacroMouseButton, PulsefireRaidMacroState,
-    DIRECT_REPORT_ID, DIRECT_REPORT_LENGTH,
+    encode_direct_rgb, encode_onboard_profile_read_prelude, encode_onboard_static_lighting_reports,
+    encode_profile_read_request, encode_runtime_profile_read_prelude, PerformanceProfile,
+    PerformanceProfileError, ProfileImageKind, ProfileSection, PulsefireRaidControl,
+    PulsefireRaidMacro, PulsefireRaidMacroError, PulsefireRaidMacroEvent, PulsefireRaidMacroInput,
+    PulsefireRaidMacroMouseButton, PulsefireRaidMacroState, DIRECT_REPORT_ID, DIRECT_REPORT_LENGTH,
 };
 use thiserror::Error;
 
 const PROFILE_PRELUDE_DELAY: Duration = Duration::from_millis(65);
 const PROFILE_READ_DELAY: Duration = Duration::from_millis(110);
+const ONBOARD_COMMIT_DELAY: Duration = Duration::from_secs(1);
+const SAVE_ACK_LENGTH: usize = 8;
+const SAVE_ACK_TIMEOUT_MS: i32 = 500;
 
 pub const PULSEFIRE_RAID_DPI: DpiCapabilities = DpiCapabilities {
     minimum: 200,
@@ -77,6 +80,17 @@ pub const PULSEFIRE_RAID: DeviceDescriptor = DeviceDescriptor {
         usage_page: 0xFF01,
         usage: 0x0001,
     },
+};
+
+/// Vendor collection carrying eight-byte acknowledgements for profile saves.
+///
+/// Feature reports remain on the configuration collection. Windows exposes
+/// endpoint `0x83` through this separate HID interface, as confirmed by
+/// USBPcap and the physical device topology.
+pub const PULSEFIRE_RAID_ACKNOWLEDGEMENT_INTERFACE: InterfaceSelector = InterfaceSelector {
+    interface_number: 2,
+    usage_page: 0xFF00,
+    usage: 0xFF00,
 };
 
 /// One validated, capture-backed runtime button assignment.
@@ -183,18 +197,24 @@ impl PulsefireRaidRuntimeAssignment {
         let PulsefireRaidRuntimeAction::Macro(definition) = &self.action else {
             return Ok(None);
         };
-        if definition.playback != MacroPlayback::Once {
-            return Err(PulsefireRaidError::UnsupportedMacroPlayback(
-                definition.playback,
-            ));
-        }
-        let events = definition
-            .events
-            .iter()
-            .map(encode_macro_event)
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Some(PulsefireRaidMacro::button5_play_once(&events)?))
+        Ok(Some(encode_macro_definition(definition)?))
     }
+}
+
+fn encode_macro_definition(
+    definition: &MacroDefinition,
+) -> Result<PulsefireRaidMacro, PulsefireRaidError> {
+    if definition.playback != MacroPlayback::Once {
+        return Err(PulsefireRaidError::UnsupportedMacroPlayback(
+            definition.playback,
+        ));
+    }
+    let events = definition
+        .events
+        .iter()
+        .map(encode_macro_event)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(PulsefireRaidMacro::button5_play_once(&events)?)
 }
 
 const fn is_supported_runtime_keyboard_usage(usage: KeyboardUsage) -> bool {
@@ -261,11 +281,24 @@ pub enum PulsefireRaidError {
     ShortFeatureWrite { expected: usize, actual: usize },
     #[error("expected a 264-byte Pulsefire Raid profile response, got {0} bytes")]
     WrongProfileResponseLength(usize),
-    #[error("expected a runtime profile read response, got {kind:?} {section:?}")]
+    #[error("unexpected profile read response: got {kind:?} {section:?}")]
     WrongProfileResponse {
         kind: ProfileImageKind,
         section: ProfileSection,
     },
+    #[error("save acknowledgement for opcode 0x{opcode:02X} was {actual} bytes, expected 8")]
+    WrongSaveAcknowledgementLength { opcode: u8, actual: usize },
+    #[error("unexpected save acknowledgement for opcode 0x{opcode:02X}: {actual:02X?}")]
+    UnexpectedSaveAcknowledgement {
+        opcode: u8,
+        actual: [u8; SAVE_ACK_LENGTH],
+    },
+    #[error("runtime Button 5 references a macro; provide its definition to save it onboard")]
+    MissingOnboardMacroDefinition,
+    #[error("a macro definition was supplied, but runtime Button 5 does not reference a macro")]
+    UnexpectedOnboardMacroDefinition,
+    #[error("Pulsefire Raid save acknowledgements require HID interface 2, got {0}")]
+    WrongAcknowledgementInterface(i32),
     #[error("DPI stage {stage} does not exist; the runtime profile has {stage_count} stage(s)")]
     DpiStageNotFound { stage: usize, stage_count: usize },
     #[error("DPI stage update must change its DPI, color, or active state")]
@@ -295,6 +328,14 @@ pub enum PulsefireRaidError {
     InvalidProfile(#[from] PerformanceProfileError),
     #[error(transparent)]
     Transport(#[from] HidError),
+}
+
+/// Confirmed settings included in one completed onboard save transaction.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PulsefireRaidOnboardSaveResult {
+    pub polling_rate: PollingRate,
+    pub dpi_profile: DpiProfile,
+    pub macro_saved: bool,
 }
 
 pub struct PulsefireRaid<T> {
@@ -365,6 +406,134 @@ impl<T: HidTransport> PulsefireRaid<T> {
             });
         }
 
+        Ok(profile)
+    }
+
+    /// Persist the confirmed runtime DPI, polling and button records to the
+    /// mouse's onboard profile.
+    ///
+    /// `wheel` and `logo` are the capture-confirmed static lighting snapshot
+    /// carried by NGENUITY Legacy's save transaction and hardware-verified
+    /// across a power-cycle. If runtime Button 5 contains the known macro
+    /// reference, its definition is required because the profile image contains
+    /// no macro timeline to read back.
+    pub fn save_runtime_to_onboard<A: HidTransport>(
+        &mut self,
+        acknowledgements: &mut A,
+        wheel: RgbColor,
+        logo: RgbColor,
+        macro_definition: Option<&MacroDefinition>,
+    ) -> Result<PulsefireRaidOnboardSaveResult, PulsefireRaidError> {
+        self.save_runtime_to_onboard_with_wait(
+            acknowledgements,
+            wheel,
+            logo,
+            macro_definition,
+            std::thread::sleep,
+        )
+    }
+
+    fn save_runtime_to_onboard_with_wait<A: HidTransport>(
+        &mut self,
+        acknowledgements: &mut A,
+        wheel: RgbColor,
+        logo: RgbColor,
+        macro_definition: Option<&MacroDefinition>,
+        mut wait: impl FnMut(Duration),
+    ) -> Result<PulsefireRaidOnboardSaveResult, PulsefireRaidError> {
+        if acknowledgements.interface_number()
+            != PULSEFIRE_RAID_ACKNOWLEDGEMENT_INTERFACE.interface_number
+        {
+            return Err(PulsefireRaidError::WrongAcknowledgementInterface(
+                acknowledgements.interface_number(),
+            ));
+        }
+        // Validate the optional macro before opening the persistent part of
+        // the transaction. Runtime fields are validated immediately after the
+        // read and before selecting the onboard section.
+        let macro_report = macro_definition.map(encode_macro_definition).transpose()?;
+        let runtime = self.read_runtime_profile_for_save(acknowledgements, &mut wait)?;
+        runtime.validate_confirmed_runtime_settings()?;
+
+        let has_macro_reference =
+            runtime.has_confirmed_macro_reference(PulsefireRaidControl::Button5);
+        match (has_macro_reference, macro_report.is_some()) {
+            (true, false) => return Err(PulsefireRaidError::MissingOnboardMacroDefinition),
+            (false, true) => return Err(PulsefireRaidError::UnexpectedOnboardMacroDefinition),
+            _ => {}
+        }
+
+        let polling_rate = runtime.polling_rate()?;
+        let dpi_profile = runtime.dpi_profile()?;
+
+        self.send_feature_report_with_save_ack(
+            acknowledgements,
+            &encode_onboard_profile_read_prelude(),
+        )?;
+        for report in encode_onboard_static_lighting_reports(wheel, logo) {
+            self.send_feature_report_with_save_ack(acknowledgements, &report)?;
+        }
+        self.send_feature_report_with_save_ack(acknowledgements, &encode_profile_read_request())?;
+        wait(PROFILE_READ_DELAY);
+
+        let mut onboard = self.read_profile_response(ProfileSection::Onboard)?;
+        onboard.copy_confirmed_runtime_settings_from(&runtime)?;
+
+        if let Some(macro_report) = &macro_report {
+            self.send_feature_report_with_save_ack(
+                acknowledgements,
+                &macro_report.to_onboard_report(),
+            )?;
+        }
+        self.send_feature_report_with_save_ack(acknowledgements, &onboard.to_write_report())?;
+        wait(ONBOARD_COMMIT_DELAY);
+        self.send_feature_report_with_save_ack(
+            acknowledgements,
+            &encode_runtime_profile_read_prelude(),
+        )?;
+
+        Ok(PulsefireRaidOnboardSaveResult {
+            polling_rate,
+            dpi_profile,
+            macro_saved: macro_report.is_some(),
+        })
+    }
+
+    fn read_runtime_profile_for_save<A: HidTransport>(
+        &mut self,
+        acknowledgements: &mut A,
+        wait: &mut impl FnMut(Duration),
+    ) -> Result<PerformanceProfile, PulsefireRaidError> {
+        self.send_feature_report_with_save_ack(
+            acknowledgements,
+            &encode_runtime_profile_read_prelude(),
+        )?;
+        self.send_feature_report_with_save_ack(acknowledgements, &encode_profile_read_request())?;
+        wait(PROFILE_READ_DELAY);
+        self.read_profile_response(ProfileSection::Runtime)
+    }
+
+    fn read_profile_response(
+        &mut self,
+        expected_section: ProfileSection,
+    ) -> Result<PerformanceProfile, PulsefireRaidError> {
+        let mut response = [0_u8; DIRECT_REPORT_LENGTH];
+        response[0] = DIRECT_REPORT_ID;
+        let response_length = self.transport.get_feature_report(&mut response)?;
+        if response_length != DIRECT_REPORT_LENGTH {
+            return Err(PulsefireRaidError::WrongProfileResponseLength(
+                response_length,
+            ));
+        }
+        let profile = PerformanceProfile::parse(&response)?;
+        if profile.kind() != ProfileImageKind::DeviceReadResponse
+            || profile.section() != expected_section
+        {
+            return Err(PulsefireRaidError::WrongProfileResponse {
+                kind: profile.kind(),
+                section: profile.section(),
+            });
+        }
         Ok(profile)
     }
 
@@ -595,9 +764,44 @@ impl<T: HidTransport> PulsefireRaid<T> {
         Ok(())
     }
 
+    fn send_feature_report_with_save_ack<A: HidTransport>(
+        &mut self,
+        acknowledgements: &mut A,
+        report: &[u8],
+    ) -> Result<(), PulsefireRaidError> {
+        self.send_feature_report(report)?;
+        let opcode = report[1];
+        let mut actual = [0_u8; SAVE_ACK_LENGTH];
+        let length = acknowledgements.read_timeout(&mut actual, SAVE_ACK_TIMEOUT_MS)?;
+        if length != SAVE_ACK_LENGTH {
+            return Err(PulsefireRaidError::WrongSaveAcknowledgementLength {
+                opcode,
+                actual: length,
+            });
+        }
+        let expected = save_acknowledgement(opcode);
+        if actual != expected {
+            return Err(PulsefireRaidError::UnexpectedSaveAcknowledgement { opcode, actual });
+        }
+        Ok(())
+    }
+
     pub fn into_transport(self) -> T {
         self.transport
     }
+}
+
+fn save_acknowledgement(opcode: u8) -> [u8; SAVE_ACK_LENGTH] {
+    [
+        0x00,
+        0x00,
+        DIRECT_REPORT_ID,
+        opcode,
+        u8::from(opcode == 0x81) * 0xFF,
+        0x00,
+        0x00,
+        0x00,
+    ]
 }
 
 #[cfg(test)]
@@ -730,6 +934,105 @@ mod tests {
         response
     }
 
+    fn save_profile_response(
+        section: ProfileSection,
+        with_macro: bool,
+    ) -> [u8; DIRECT_REPORT_LENGTH] {
+        let mut response = performance_profile_response();
+        response[2] = match section {
+            ProfileSection::Onboard => 0x01,
+            ProfileSection::Runtime => 0x04,
+        };
+        response[0x7C..0xA8].copy_from_slice(&[
+            0x02, 0xF0, 0x00, 0x00, // left click
+            0x02, 0xF2, 0x00, 0x00, // right click
+            0x02, 0xF1, 0x00, 0x00, // middle click
+            0x02, 0xF8, 0x00, 0x03, // Button 4: Back
+            0x02, 0xF9, 0x00, 0x04, // Button 5: Forward
+            0x04, 0x00, 0x00, 0xE9, // Button 7: Volume Up
+            0x04, 0x00, 0x00, 0xEA, // Button 6: Volume Down
+            0x04, 0x00, 0x00, 0xE2, // Button 8: Mute
+            0x71, 0xF0, 0x00, 0x00, // DPI toggle
+            0x02, 0xF5, 0x00, 0x00, // wheel tilt left
+            0x02, 0xF6, 0x00, 0x00, // wheel tilt right
+        ]);
+        if with_macro {
+            response[0x8C..0x90].copy_from_slice(&[0x53, 0x00, 0x00, 0x04]);
+        }
+        response
+    }
+
+    fn expect_acked_feature(
+        configuration: &mut MockHidTransport,
+        acknowledgements: &mut MockHidTransport,
+        report: [u8; DIRECT_REPORT_LENGTH],
+    ) {
+        let opcode = report[1];
+        configuration.expect_feature_report(report);
+        acknowledgements.queue_input_report(save_acknowledgement(opcode));
+    }
+
+    fn script_onboard_save(
+        configuration: &mut MockHidTransport,
+        acknowledgements: &mut MockHidTransport,
+        runtime: [u8; DIRECT_REPORT_LENGTH],
+        onboard: [u8; DIRECT_REPORT_LENGTH],
+        wheel: RgbColor,
+        logo: RgbColor,
+        macro_definition: Option<&MacroDefinition>,
+    ) {
+        expect_acked_feature(
+            configuration,
+            acknowledgements,
+            encode_runtime_profile_read_prelude(),
+        );
+        expect_acked_feature(
+            configuration,
+            acknowledgements,
+            encode_profile_read_request(),
+        );
+        configuration.queue_feature_response(runtime);
+
+        expect_acked_feature(
+            configuration,
+            acknowledgements,
+            encode_onboard_profile_read_prelude(),
+        );
+        for report in encode_onboard_static_lighting_reports(wheel, logo) {
+            expect_acked_feature(configuration, acknowledgements, report);
+        }
+        expect_acked_feature(
+            configuration,
+            acknowledgements,
+            encode_profile_read_request(),
+        );
+        configuration.queue_feature_response(onboard);
+
+        let runtime_profile = PerformanceProfile::parse(&runtime).unwrap();
+        let mut onboard_profile = PerformanceProfile::parse(&onboard).unwrap();
+        onboard_profile
+            .copy_confirmed_runtime_settings_from(&runtime_profile)
+            .unwrap();
+        if let Some(definition) = macro_definition {
+            let macro_report = encode_macro_definition(definition).unwrap();
+            expect_acked_feature(
+                configuration,
+                acknowledgements,
+                macro_report.to_onboard_report(),
+            );
+        }
+        expect_acked_feature(
+            configuration,
+            acknowledgements,
+            onboard_profile.to_write_report(),
+        );
+        expect_acked_feature(
+            configuration,
+            acknowledgements,
+            encode_runtime_profile_read_prelude(),
+        );
+    }
+
     fn two_stage_profile_response() -> [u8; DIRECT_REPORT_LENGTH] {
         let mut response = performance_profile_response();
         response[0x1B..0x1D].copy_from_slice(&[0x00, 0x20]);
@@ -745,6 +1048,161 @@ mod tests {
         response[0x27..0x2F].copy_from_slice(&[0x00, 0x20, 0x00, 0x40, 0x00, 0x80, 0x01, 0x40]);
         response[0x32..0x37].fill(0x01);
         response
+    }
+
+    #[test]
+    fn driver_saves_confirmed_runtime_fields_with_exact_acked_sequence() {
+        let runtime = save_profile_response(ProfileSection::Runtime, false);
+        let mut onboard = save_profile_response(ProfileSection::Onboard, false);
+        onboard[0x18] = 0x08;
+        onboard[0x19..0x1B].copy_from_slice(&[0x00, 0x20]);
+        onboard[0x25..0x27].copy_from_slice(&[0x00, 0x20]);
+        onboard[0x10] = 0xA5;
+        let wheel = RgbColor::new(0xFF, 0x00, 0x00);
+        let logo = RgbColor::BLACK;
+
+        let mut configuration = MockHidTransport::new(1);
+        let mut acknowledgements = MockHidTransport::new(2);
+        script_onboard_save(
+            &mut configuration,
+            &mut acknowledgements,
+            runtime,
+            onboard,
+            wheel,
+            logo,
+            None,
+        );
+
+        let mut device = PulsefireRaid::new(configuration).unwrap();
+        let mut waits = Vec::new();
+        let result = device
+            .save_runtime_to_onboard_with_wait(
+                &mut acknowledgements,
+                wheel,
+                logo,
+                None,
+                |duration| waits.push(duration),
+            )
+            .unwrap();
+
+        assert_eq!(result.polling_rate, PollingRate::Hz500);
+        assert_eq!(result.dpi_profile.stages[0].x, 800);
+        assert!(!result.macro_saved);
+        assert_eq!(
+            waits,
+            [PROFILE_READ_DELAY, PROFILE_READ_DELAY, ONBOARD_COMMIT_DELAY]
+        );
+        device.into_transport().assert_drained();
+        acknowledgements.assert_drained();
+    }
+
+    #[test]
+    fn driver_saves_capture_backed_macro_in_onboard_section() {
+        let runtime = save_profile_response(ProfileSection::Runtime, true);
+        let onboard = save_profile_response(ProfileSection::Onboard, false);
+        let macro_definition = captured_coverage_macro();
+        let wheel = RgbColor::BLACK;
+        let logo = RgbColor::new(0x00, 0x00, 0xFF);
+
+        let mut configuration = MockHidTransport::new(1);
+        let mut acknowledgements = MockHidTransport::new(2);
+        script_onboard_save(
+            &mut configuration,
+            &mut acknowledgements,
+            runtime,
+            onboard,
+            wheel,
+            logo,
+            Some(&macro_definition),
+        );
+
+        let mut device = PulsefireRaid::new(configuration).unwrap();
+        let result = device
+            .save_runtime_to_onboard_with_wait(
+                &mut acknowledgements,
+                wheel,
+                logo,
+                Some(&macro_definition),
+                |_| {},
+            )
+            .unwrap();
+        assert!(result.macro_saved);
+        device.into_transport().assert_drained();
+        acknowledgements.assert_drained();
+    }
+
+    #[test]
+    fn driver_refuses_missing_macro_before_selecting_onboard_memory() {
+        let runtime = save_profile_response(ProfileSection::Runtime, true);
+        let mut configuration = MockHidTransport::new(1);
+        let mut acknowledgements = MockHidTransport::new(2);
+        expect_acked_feature(
+            &mut configuration,
+            &mut acknowledgements,
+            encode_runtime_profile_read_prelude(),
+        );
+        expect_acked_feature(
+            &mut configuration,
+            &mut acknowledgements,
+            encode_profile_read_request(),
+        );
+        configuration.queue_feature_response(runtime);
+
+        let mut device = PulsefireRaid::new(configuration).unwrap();
+        assert!(matches!(
+            device.save_runtime_to_onboard_with_wait(
+                &mut acknowledgements,
+                RgbColor::BLACK,
+                RgbColor::BLACK,
+                None,
+                |_| {}
+            ),
+            Err(PulsefireRaidError::MissingOnboardMacroDefinition)
+        ));
+        device.into_transport().assert_drained();
+        acknowledgements.assert_drained();
+    }
+
+    #[test]
+    fn driver_aborts_on_an_unexpected_save_acknowledgement() {
+        let mut configuration = MockHidTransport::new(1);
+        configuration.expect_feature_report(encode_runtime_profile_read_prelude());
+        let mut acknowledgements = MockHidTransport::new(2);
+        acknowledgements.queue_input_report([0x00; SAVE_ACK_LENGTH]);
+
+        let mut device = PulsefireRaid::new(configuration).unwrap();
+        assert!(matches!(
+            device.save_runtime_to_onboard_with_wait(
+                &mut acknowledgements,
+                RgbColor::BLACK,
+                RgbColor::BLACK,
+                None,
+                |_| {}
+            ),
+            Err(PulsefireRaidError::UnexpectedSaveAcknowledgement { opcode: 0x03, .. })
+        ));
+        device.into_transport().assert_drained();
+        acknowledgements.assert_drained();
+    }
+
+    #[test]
+    fn driver_rejects_the_wrong_acknowledgement_interface_before_io() {
+        let configuration = MockHidTransport::new(1);
+        let mut wrong_acknowledgements = MockHidTransport::new(1);
+        let mut device = PulsefireRaid::new(configuration).unwrap();
+
+        assert!(matches!(
+            device.save_runtime_to_onboard_with_wait(
+                &mut wrong_acknowledgements,
+                RgbColor::BLACK,
+                RgbColor::BLACK,
+                None,
+                |_| {}
+            ),
+            Err(PulsefireRaidError::WrongAcknowledgementInterface(1))
+        ));
+        device.into_transport().assert_drained();
+        wrong_acknowledgements.assert_drained();
     }
 
     #[test]

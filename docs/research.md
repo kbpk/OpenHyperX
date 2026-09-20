@@ -396,11 +396,75 @@ profile image. The two triplets correlate with the direct-RGB wheel/logo
 colors, but their persistent meaning is not established: the saved green did
 not survive without NGENUITY Legacy's volatile lighting stream.
 
-The legal contents and full semantics of the three `0x18` packets therefore
-remain unknown. They are part of the captured save transaction and block a
-general safe replay until captures isolate zones/effects and a save containing
-a macro establishes how auxiliary macro definitions participate. Raw
-`.pcapng` files remain outside Git.
+Two further eight-second captures on 2026-09-18 isolated the zones while
+retaining Solid, maximum opacity and no other effect. USBPcap identity mode
+resolved the unit on `\\.\USBPcap1` as address 61. Both files were 63,426
+bytes and remain outside Git:
+
+- `openhyperx-save-wheel-red-logo-off-20260918.pcapng` carried
+  `FF 00 00 00 00 00` at offsets `0x08..0x0D`;
+- `openhyperx-save-wheel-off-logo-blue-20260918.pcapng` carried
+  `00 00 00 00 00 FF` at the same offsets.
+
+Together with the red and green captures, this confirms wheel-first/logo-second
+ordering, independent black/off, and all three RGB channels for the Solid save
+snapshot. Indexed reports 1 and 2 remained zero-filled. This evidence supports
+a typed arbitrary-RGB encoder for that exact three-report Solid layout; it does
+not establish a persistent firmware effect or the layout for non-Solid modes.
+
+Both new captures also contained the existing 14-event Button 5 Play Once
+macro. Immediately after the onboard-profile read and before `07 01 01`,
+NGENUITY Legacy sent its complete definition with prefix `07 05 01 04`. The
+remaining 263 bytes matched the previously captured runtime report
+`07 05 04 04` byte-for-byte. Offset `0x02` is therefore confirmed as the
+runtime/onboard section selector for this macro variant.
+
+Every report in all four examined saves produced an eight-byte interrupt-IN
+acknowledgement. The repeated successful forms are:
+
+| Sent opcode | Acknowledgement |
+| --- | --- |
+| `03` | `00 00 07 03 00 00 00 00` |
+| `18` | `00 00 07 18 00 00 00 00` |
+| `81` | `00 00 07 81 FF 00 00 00` |
+| `05` | `00 00 07 05 00 00 00 00` |
+| `01` | `00 00 07 01 00 00 00 00` |
+
+USB captures place these acknowledgements on endpoint `0x83`, which belongs
+to HID interface 2 (`MI_02`, usage `FF00:FF00`), rather than the configuration
+collection on interface 1 (`MI_01`, usage `FF01:0001`). Windows therefore
+requires a second HID handle for the interrupt-IN acknowledgements. Attempting
+an eight-byte input read on the feature-only configuration collection failed
+with `ERROR_INVALID_USER_BUFFER (1784)`. That first OpenHyperX hardware test
+stopped after the non-persistent runtime-selection prelude and transmitted no
+onboard write.
+
+The new driver transaction validates all runtime source fields before selecting
+onboard memory, preserves unknown onboard bytes, checks each acknowledgement,
+does not retry an ambiguous failure, and copies only confirmed DPI, polling and
+button records. A Button 5 macro reference requires a caller-supplied validated
+definition. Golden protocol tests and an exact `MockHidTransport` script cover
+the macro and no-macro variants.
+
+On 2026-09-18, OpenHyperX completed the transaction on the physical
+release-`1124` unit using separate configuration and acknowledgement handles.
+It saved 1000 Hz, four DPI stages (`800`, `1600`, `3200`, `6400`) with their
+colors, all 11 button records, the confirmed 14-event Button 5 macro, and the
+wheel-off/logo-blue Solid snapshot. Every transmitted stage received the exact
+acknowledgement above. An immediate independent runtime read returned the
+saved performance values and mappings.
+
+On 2026-09-20, the mouse was physically unplugged for about five seconds and
+reconnected without starting NGENUITY Legacy. A native Windows `info` read
+again returned 1000 Hz, all four DPI stages and colors, all 11 mappings, and
+the Button 5 macro reference. The operator also observed that the saved
+wheel-off/logo-blue lighting state survived the power-cycle. This confirms the
+OpenHyperX persistence path for the performance profile, mappings, macro
+reference and this two-zone Solid snapshot. The macro event stream itself is
+write-only in the currently understood protocol, so it cannot be confirmed by
+profile readback. The operator then pressed Button 5 after the power-cycle and
+confirmed that the saved macro executed normally. This functionally verifies
+that its complete 14-event timeline was also stored onboard.
 
 ### Runtime lighting and persistence observations
 
@@ -868,12 +932,12 @@ assumption.
 | report descriptor for configuration collection | confirmed | optionally dump the two other vendor collections for research without sending reports |
 | direct RGB transport | hardware-validated for independent wheel/logo colors and black/off; NGENUITY Legacy Solid and Cycle both use it, and the previous lighting state returns without keepalive | optionally measure the exact timeout/revert interval |
 | RGB off semantics | direct black independently extinguishes both physical LEDs | compare NGENUITY Legacy's explicit lighting-off UI, if present, only to determine whether it differs from black |
-| persistent RGB/effects | OpenHyperX effects are foreground-rendered; a standalone firmware rainbow was observed after NGENUITY Legacy stopped, but NGENUITY Legacy Solid/Cycle and red/green save captures did not select or persist it | identify a confirmed hardware-mode selector and its save semantics before exposing hardware rainbow or other persistent effects |
-| DPI and stages | runtime read/set, per-stage value/color edits, active-stage selection and final-stage add/remove are implemented and hardware-validated; five big-endian X/Y slots, 200-16000 range and 50-DPI units are confirmed | determine whether independent X/Y values are supported; onboard persistence remains part of the separate save blocker |
+| persistent RGB/effects | the two-zone Solid snapshot (including independent off/blue) persists through the OpenHyperX onboard-save path; foreground effects and the standalone firmware rainbow are separate, and other hardware effect selectors remain unknown | identify confirmed hardware-mode selectors and save semantics for rainbow and other non-Solid effects |
+| DPI and stages | runtime read/set, per-stage value/color edits, active-stage selection and final-stage add/remove are implemented and hardware-validated; five big-endian X/Y slots, 200-16000 range and 50-DPI units are confirmed; OpenHyperX onboard save was verified across a power-cycle | determine whether independent X/Y values are supported |
 | polling | all four interval codes captured; runtime 1000→500→1000 set/readback validated; 1000 Hz persisted through a separate NGENUITY Legacy save and power-cycle | verify effective USB report rate with an external rate tester |
 | NGENUITY Legacy `.hxp` | version-40 container, DPI records, Play Once keyboard/primary-click macros and macro references are parsed offline; imports are explicitly partial | compare Legacy exports differing only in active stage, polling, lighting, one physical assignment and each repeat mode |
 | button bindings | all 11 mappings are readable; five fixed records plus named one-byte keyboard usages are writable on the nine general controls, while Forward, Copy and macros remain Button-5-specific; the portable path is hardware-tested on Button 6, direct Keyboard A/B is hardware-tested on DPI, and target-specific Button 4, Button 5, Button 7 and DPI writes are also hardware-tested; bounded Button 5 Play Once macros support keyboard chords, nonuniform timing and left/right/middle clicks | capture primary-click swaps and the remaining ordinary records; isolate macro portability, repeat modes, longer timelines, remaining mouse events and timing boundaries |
-| onboard save | repeated transaction, timing and read-modify-write captured; performance persistence confirmed; `0x18[0]` carries two correlated RGB triplets while `0x18[1..2]` were zero for Solid/All Lights | capture isolated wheel/logo and non-Solid saves, then save a profile containing a macro; determine acknowledgements and failure behavior before replay |
+| onboard save | preservation-first driver/CLI transaction is covered by golden/mock tests and hardware-validated across a power-cycle for DPI, polling, all mappings, the complete Button 5 macro and independent wheel/logo Solid colors; acknowledgements use a separate `MI_02` handle | non-Solid persistent lighting remains separate |
 | NGENUITY Legacy locking | unknown | run `devices`, then future read-only `info`, with NGENUITY Legacy open and closed; record open errors |
 | admin requirement | configuration collection opens without elevation | retest on a second Windows machine/account |
 

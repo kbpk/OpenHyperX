@@ -1,0 +1,71 @@
+playback = "once"
+
+[[events]]
+type = "key-down"
+key = "left-shift"
+delay_ms = 20
+
+[[events]]
+type = "key-down"
+key = "a"
+delay_ms = 953
+
+[[events]]
+type = "key-up"
+key = "a"
+delay_ms = 141
+
+[[events]]
+type = "key-up"
+key = "left-shift"
+delay_ms = 766
+
+[[events]]
+type = "key-down"
+key = "left-control"
+delay_ms = 1171
+
+[[events]]
+type = "key-down"
+key = "b"
+delay_ms = 1110
+
+[[events]]
+type = "key-up"
+key = "b"
+delay_ms = 344
+
+[[events]]
+type = "key-up"
+key = "left-control"
+delay_ms = 453
+
+[[events]]
+type = "mouse-button-down"
+button = "left"
+delay_ms = 1890
+
+[[events]]
+type = "mouse-button-up"
+button = "left"
+delay_ms = 110
+
+[[events]]
+type = "mouse-button-down"
+button = "right"
+delay_ms = 1203
+
+[[events]]
+type = "mouse-button-up"
+button = "right"
+delay_ms = 94
+
+[[events]]
+type = "mouse-button-down"
+button = "middle"
+delay_ms = 718
+
+[[events]]
+type = "mouse-button-up"
+button = "middle"
+delay_ms = 172
