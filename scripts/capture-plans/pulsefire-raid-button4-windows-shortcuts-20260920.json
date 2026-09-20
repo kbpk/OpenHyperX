@@ -1,0 +1,61 @@
+{
+  "name": "pulsefire-raid-button4-windows-shortcuts-20260920",
+  "steps": [
+    {
+      "slug": "baseline-no-op",
+      "instruction": "Do not change anything; leave Button 4 assigned to Mouse Function > Back."
+    },
+    {
+      "slug": "back-to-cycle-apps",
+      "instruction": "During capture set Button 4 to Windows Shortcut > Cycle Apps exactly once."
+    },
+    {
+      "slug": "cycle-to-switch-apps",
+      "instruction": "During capture set Button 4 to Windows Shortcut > Switch Apps exactly once."
+    },
+    {
+      "slug": "switch-to-cut",
+      "instruction": "During capture set Button 4 to Windows Shortcut > Cut exactly once."
+    },
+    {
+      "slug": "cut-to-copy",
+      "instruction": "During capture set Button 4 to Windows Shortcut > Copy exactly once."
+    },
+    {
+      "slug": "copy-to-paste",
+      "instruction": "During capture set Button 4 to Windows Shortcut > Paste exactly once."
+    },
+    {
+      "slug": "paste-to-undo",
+      "instruction": "During capture set Button 4 to Windows Shortcut > Undo exactly once."
+    },
+    {
+      "slug": "undo-to-cycle-apps-repeat",
+      "instruction": "During capture set Button 4 back to Windows Shortcut > Cycle Apps exactly once."
+    },
+    {
+      "slug": "cycle-to-switch-apps-repeat",
+      "instruction": "During capture set Button 4 back to Windows Shortcut > Switch Apps exactly once."
+    },
+    {
+      "slug": "switch-to-cut-repeat",
+      "instruction": "During capture set Button 4 back to Windows Shortcut > Cut exactly once."
+    },
+    {
+      "slug": "cut-to-copy-repeat",
+      "instruction": "During capture set Button 4 back to Windows Shortcut > Copy exactly once."
+    },
+    {
+      "slug": "copy-to-paste-repeat",
+      "instruction": "During capture set Button 4 back to Windows Shortcut > Paste exactly once."
+    },
+    {
+      "slug": "paste-to-undo-repeat",
+      "instruction": "During capture set Button 4 back to Windows Shortcut > Undo exactly once."
+    },
+    {
+      "slug": "undo-to-back-restore",
+      "instruction": "During capture restore Button 4 to Mouse Function > Back exactly once."
+    }
+  ]
+}

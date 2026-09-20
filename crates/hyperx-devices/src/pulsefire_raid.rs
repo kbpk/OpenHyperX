@@ -153,16 +153,19 @@ impl PulsefireRaidRuntimeAssignment {
                 | MultimediaFunction::MuteVolume
                 | MultimediaFunction::VolumeUp
                 | MultimediaFunction::VolumeDown,
+            )
+            | ButtonBinding::WindowsShortcut(
+                WindowsShortcut::CycleApps
+                | WindowsShortcut::SwitchApps
+                | WindowsShortcut::Cut
+                | WindowsShortcut::Copy
+                | WindowsShortcut::Paste
+                | WindowsShortcut::Undo,
             ) => true,
             ButtonBinding::Keyboard(usage) => is_supported_runtime_keyboard_usage(*usage),
             _ => false,
         };
-        let button5_only = control == PulsefireRaidControl::Button5
-            && matches!(
-                &binding,
-                ButtonBinding::WindowsShortcut(WindowsShortcut::Copy)
-            );
-        let confirmed = (general_control && portable_binding) || button5_only;
+        let confirmed = general_control && portable_binding;
         if !confirmed {
             return Err(PulsefireRaidError::UnconfirmedRuntimeButtonBinding { control, binding });
         }
@@ -1490,6 +1493,35 @@ mod tests {
     }
 
     #[test]
+    fn driver_writes_only_the_captured_button4_cycle_apps_record() {
+        let mut response = performance_profile_response();
+        response[0x88..0x8C].copy_from_slice(&[0x02, 0xF8, 0x00, 0x03]);
+        let mut expected_write = response;
+        expected_write[1] = 0x01;
+        expected_write[0x88..0x8C].copy_from_slice(&[0x23, 0xE3, 0x2B, 0x00]);
+
+        let mut transport = MockHidTransport::new(1);
+        transport.expect_feature_report(encode_runtime_profile_read_prelude());
+        transport.expect_feature_report(encode_profile_read_request());
+        transport.queue_feature_response(response);
+        transport.expect_feature_report(expected_write);
+
+        let assignment = PulsefireRaidRuntimeAssignment::ordinary(
+            PulsefireRaidControl::Button4,
+            ButtonBinding::WindowsShortcut(WindowsShortcut::CycleApps),
+        )
+        .unwrap();
+        let mut device = PulsefireRaid::new(transport).unwrap();
+        assert_eq!(
+            device
+                .set_runtime_button_assignment_with_wait(assignment.clone(), |_| {})
+                .unwrap(),
+            assignment
+        );
+        device.into_transport().assert_drained();
+    }
+
+    #[test]
     fn driver_writes_only_the_captured_dpi_control_record() {
         let mut response = performance_profile_response();
         response[0x9C..0xA0].copy_from_slice(&[0x00, 0x04, 0x00, 0x00]);
@@ -1646,6 +1678,12 @@ mod tests {
             ButtonBinding::Multimedia(MultimediaFunction::MuteVolume),
             ButtonBinding::Multimedia(MultimediaFunction::VolumeUp),
             ButtonBinding::Multimedia(MultimediaFunction::VolumeDown),
+            ButtonBinding::WindowsShortcut(WindowsShortcut::CycleApps),
+            ButtonBinding::WindowsShortcut(WindowsShortcut::SwitchApps),
+            ButtonBinding::WindowsShortcut(WindowsShortcut::Cut),
+            ButtonBinding::WindowsShortcut(WindowsShortcut::Copy),
+            ButtonBinding::WindowsShortcut(WindowsShortcut::Paste),
+            ButtonBinding::WindowsShortcut(WindowsShortcut::Undo),
             ButtonBinding::Keyboard(KeyboardUsage(0x04)),
             ButtonBinding::Keyboard(KeyboardUsage(0x05)),
             ButtonBinding::Keyboard(KeyboardUsage(0x2C)),
@@ -1656,17 +1694,8 @@ mod tests {
                 assert!(PulsefireRaidRuntimeAssignment::ordinary(control, binding).is_ok());
             }
         }
-        assert!(PulsefireRaidRuntimeAssignment::ordinary(
-            PulsefireRaidControl::Button5,
-            ButtonBinding::WindowsShortcut(WindowsShortcut::Copy),
-        )
-        .is_ok());
         for (control, binding) in [
             (PulsefireRaidControl::LeftClick, ButtonBinding::Disabled),
-            (
-                PulsefireRaidControl::Button7,
-                ButtonBinding::WindowsShortcut(WindowsShortcut::Copy),
-            ),
             (
                 PulsefireRaidControl::Dpi,
                 ButtonBinding::Keyboard(KeyboardUsage(0x74)),

@@ -440,7 +440,12 @@ enum ButtonMultimediaFunctionArg {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum ButtonWindowsShortcutArg {
+    CycleApps,
+    SwitchApps,
+    Cut,
     Copy,
+    Paste,
+    Undo,
 }
 
 impl ButtonAssignmentCommand {
@@ -521,12 +526,32 @@ impl ButtonAssignmentCommand {
                     "multimedia volume-down",
                 ),
             },
-            Self::WindowsShortcut {
-                shortcut: ButtonWindowsShortcutArg::Copy,
-            } => (
-                ButtonBinding::WindowsShortcut(WindowsShortcut::Copy),
-                "Windows shortcut copy",
-            ),
+            Self::WindowsShortcut { shortcut } => match shortcut {
+                ButtonWindowsShortcutArg::CycleApps => (
+                    ButtonBinding::WindowsShortcut(WindowsShortcut::CycleApps),
+                    "Windows shortcut cycle-apps",
+                ),
+                ButtonWindowsShortcutArg::SwitchApps => (
+                    ButtonBinding::WindowsShortcut(WindowsShortcut::SwitchApps),
+                    "Windows shortcut switch-apps",
+                ),
+                ButtonWindowsShortcutArg::Cut => (
+                    ButtonBinding::WindowsShortcut(WindowsShortcut::Cut),
+                    "Windows shortcut cut",
+                ),
+                ButtonWindowsShortcutArg::Copy => (
+                    ButtonBinding::WindowsShortcut(WindowsShortcut::Copy),
+                    "Windows shortcut copy",
+                ),
+                ButtonWindowsShortcutArg::Paste => (
+                    ButtonBinding::WindowsShortcut(WindowsShortcut::Paste),
+                    "Windows shortcut paste",
+                ),
+                ButtonWindowsShortcutArg::Undo => (
+                    ButtonBinding::WindowsShortcut(WindowsShortcut::Undo),
+                    "Windows shortcut undo",
+                ),
+            },
             Self::Keyboard { key } => {
                 let assignment = PulsefireRaidRuntimeAssignment::ordinary(
                     control,
@@ -2377,15 +2402,17 @@ mod tests {
             "definitely-not-a-key",
         ])
         .is_err());
-        assert!(Cli::try_parse_from([
-            "hyperx-cli",
-            "buttons",
-            "set",
-            "button5",
-            "windows-shortcut",
-            "copy",
-        ])
-        .is_ok());
+        for shortcut in ["cycle-apps", "switch-apps", "cut", "copy", "paste", "undo"] {
+            assert!(Cli::try_parse_from([
+                "hyperx-cli",
+                "buttons",
+                "set",
+                "button5",
+                "windows-shortcut",
+                shortcut,
+            ])
+            .is_ok());
+        }
         assert!(
             Cli::try_parse_from(["hyperx-cli", "buttons", "set", "button5", "keyboard", "a",])
                 .is_ok()
@@ -2484,11 +2511,18 @@ mod tests {
         assert!(ButtonAssignmentCommand::Disabled
             .into_assignment(PulsefireRaidControl::Button7)
             .is_ok());
-        assert!(ButtonAssignmentCommand::WindowsShortcut {
-            shortcut: ButtonWindowsShortcutArg::Copy,
+        for shortcut in [
+            ButtonWindowsShortcutArg::CycleApps,
+            ButtonWindowsShortcutArg::SwitchApps,
+            ButtonWindowsShortcutArg::Cut,
+            ButtonWindowsShortcutArg::Copy,
+            ButtonWindowsShortcutArg::Paste,
+            ButtonWindowsShortcutArg::Undo,
+        ] {
+            assert!(ButtonAssignmentCommand::WindowsShortcut { shortcut }
+                .into_assignment(PulsefireRaidControl::Button7)
+                .is_ok());
         }
-        .into_assignment(PulsefireRaidControl::Button7)
-        .is_err());
     }
 
     #[test]

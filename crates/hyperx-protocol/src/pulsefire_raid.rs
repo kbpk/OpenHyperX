@@ -856,7 +856,7 @@ fn decode_button_binding(
         [0x04, 0x00, 0x00, 0xE2] => ButtonBinding::Multimedia(MultimediaFunction::MuteVolume),
         [0x04, 0x00, 0x00, 0xE9] => ButtonBinding::Multimedia(MultimediaFunction::VolumeUp),
         [0x04, 0x00, 0x00, 0xEA] => ButtonBinding::Multimedia(MultimediaFunction::VolumeDown),
-        [0x23, 0xE2, 0x29, 0x00] => ButtonBinding::WindowsShortcut(WindowsShortcut::CycleApps),
+        [0x23, 0xE3, 0x2B, 0x00] => ButtonBinding::WindowsShortcut(WindowsShortcut::CycleApps),
         [0x23, 0xE2, 0x2B, 0x00] => ButtonBinding::WindowsShortcut(WindowsShortcut::SwitchApps),
         [0x23, 0xE0, 0x1B, 0x00] => ButtonBinding::WindowsShortcut(WindowsShortcut::Cut),
         [0x23, 0xE0, 0x06, 0x00] => ButtonBinding::WindowsShortcut(WindowsShortcut::Copy),
@@ -909,7 +909,7 @@ fn encode_button_binding(
             },
         ],
         ButtonBinding::WindowsShortcut(shortcut) => match shortcut {
-            WindowsShortcut::CycleApps => [0x23, 0xE2, 0x29, 0x00],
+            WindowsShortcut::CycleApps => [0x23, 0xE3, 0x2B, 0x00],
             WindowsShortcut::SwitchApps => [0x23, 0xE2, 0x2B, 0x00],
             WindowsShortcut::Cut => [0x23, 0xE0, 0x1B, 0x00],
             WindowsShortcut::Copy => [0x23, 0xE0, 0x06, 0x00],
@@ -1693,6 +1693,38 @@ mod tests {
 
         for (function, expected) in cases {
             let binding = ButtonBinding::Multimedia(function);
+            let mut profile = PerformanceProfile::parse(&original).unwrap();
+            profile
+                .set_button_binding(PulsefireRaidControl::Button4, &binding)
+                .unwrap();
+
+            assert_eq!(&profile.as_bytes()[0x88..0x8C], &expected);
+            assert_eq!(
+                profile
+                    .button_binding(PulsefireRaidControl::Button4)
+                    .unwrap(),
+                binding
+            );
+            assert!(changed_offsets(&original, profile.as_bytes())
+                .iter()
+                .all(|offset| (0x88..0x8C).contains(offset)));
+        }
+    }
+
+    #[test]
+    fn golden_button4_windows_shortcut_matrix_matches_local_capture_series() {
+        let original = captured_button_profile();
+        let cases = [
+            (WindowsShortcut::CycleApps, [0x23, 0xE3, 0x2B, 0x00]),
+            (WindowsShortcut::SwitchApps, [0x23, 0xE2, 0x2B, 0x00]),
+            (WindowsShortcut::Cut, [0x23, 0xE0, 0x1B, 0x00]),
+            (WindowsShortcut::Copy, [0x23, 0xE0, 0x06, 0x00]),
+            (WindowsShortcut::Paste, [0x23, 0xE0, 0x19, 0x00]),
+            (WindowsShortcut::Undo, [0x23, 0xE0, 0x1D, 0x00]),
+        ];
+
+        for (shortcut, expected) in cases {
+            let binding = ButtonBinding::WindowsShortcut(shortcut);
             let mut profile = PerformanceProfile::parse(&original).unwrap();
             profile
                 .set_button_binding(PulsefireRaidControl::Button4, &binding)
