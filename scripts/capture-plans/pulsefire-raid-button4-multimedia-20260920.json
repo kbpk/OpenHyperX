@@ -1,0 +1,61 @@
+{
+  "name": "pulsefire-raid-button4-multimedia-20260920",
+  "steps": [
+    {
+      "slug": "baseline-no-op",
+      "instruction": "Do not change anything; leave Button 4 assigned to Mouse Function > Back."
+    },
+    {
+      "slug": "back-to-play-pause",
+      "instruction": "During capture set Button 4 to Multimedia > Play/Pause exactly once."
+    },
+    {
+      "slug": "play-pause-to-stop",
+      "instruction": "During capture set Button 4 to Multimedia > Stop exactly once."
+    },
+    {
+      "slug": "stop-to-next",
+      "instruction": "During capture set Button 4 to Multimedia > Next exactly once."
+    },
+    {
+      "slug": "next-to-previous",
+      "instruction": "During capture set Button 4 to Multimedia > Previous exactly once."
+    },
+    {
+      "slug": "previous-to-mute-volume",
+      "instruction": "During capture set Button 4 to Multimedia > Mute Volume exactly once."
+    },
+    {
+      "slug": "mute-to-volume-up",
+      "instruction": "During capture set Button 4 to Multimedia > Volume Up exactly once."
+    },
+    {
+      "slug": "volume-up-to-volume-down",
+      "instruction": "During capture set Button 4 to Multimedia > Volume Down exactly once."
+    },
+    {
+      "slug": "volume-down-to-play-pause-repeat",
+      "instruction": "During capture set Button 4 back to Multimedia > Play/Pause exactly once."
+    },
+    {
+      "slug": "play-pause-to-stop-repeat",
+      "instruction": "During capture set Button 4 back to Multimedia > Stop exactly once."
+    },
+    {
+      "slug": "stop-to-next-repeat",
+      "instruction": "During capture set Button 4 back to Multimedia > Next exactly once."
+    },
+    {
+      "slug": "next-to-previous-repeat",
+      "instruction": "During capture set Button 4 back to Multimedia > Previous exactly once."
+    },
+    {
+      "slug": "previous-to-mute-repeat",
+      "instruction": "During capture set Button 4 back to Multimedia > Mute Volume exactly once."
+    },
+    {
+      "slug": "mute-to-back-restore",
+      "instruction": "During capture restore Button 4 to Mouse Function > Back exactly once."
+    }
+  ]
+}

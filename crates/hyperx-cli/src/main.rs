@@ -429,6 +429,11 @@ enum ButtonMouseFunctionArg {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum ButtonMultimediaFunctionArg {
+    PlayPause,
+    Stop,
+    Next,
+    Previous,
+    MuteVolume,
     VolumeUp,
     VolumeDown,
 }
@@ -487,6 +492,26 @@ impl ButtonAssignmentCommand {
                 ),
             },
             Self::Multimedia { function } => match function {
+                ButtonMultimediaFunctionArg::PlayPause => (
+                    ButtonBinding::Multimedia(MultimediaFunction::PlayPause),
+                    "multimedia play/pause",
+                ),
+                ButtonMultimediaFunctionArg::Stop => (
+                    ButtonBinding::Multimedia(MultimediaFunction::Stop),
+                    "multimedia stop",
+                ),
+                ButtonMultimediaFunctionArg::Next => (
+                    ButtonBinding::Multimedia(MultimediaFunction::NextTrack),
+                    "multimedia next",
+                ),
+                ButtonMultimediaFunctionArg::Previous => (
+                    ButtonBinding::Multimedia(MultimediaFunction::PreviousTrack),
+                    "multimedia previous",
+                ),
+                ButtonMultimediaFunctionArg::MuteVolume => (
+                    ButtonBinding::Multimedia(MultimediaFunction::MuteVolume),
+                    "multimedia mute-volume",
+                ),
                 ButtonMultimediaFunctionArg::VolumeUp => (
                     ButtonBinding::Multimedia(MultimediaFunction::VolumeUp),
                     "multimedia volume-up",
@@ -2303,15 +2328,25 @@ mod tests {
             ])
             .is_ok());
         }
-        assert!(Cli::try_parse_from([
-            "hyperx-cli",
-            "buttons",
-            "set",
-            "button5",
-            "multimedia",
+        for function in [
+            "play-pause",
+            "stop",
+            "next",
+            "previous",
+            "mute-volume",
             "volume-up",
-        ])
-        .is_ok());
+            "volume-down",
+        ] {
+            assert!(Cli::try_parse_from([
+                "hyperx-cli",
+                "buttons",
+                "set",
+                "button5",
+                "multimedia",
+                function,
+            ])
+            .is_ok());
+        }
         assert!(Cli::try_parse_from([
             "hyperx-cli",
             "buttons",
@@ -2429,6 +2464,11 @@ mod tests {
         .into_assignment(PulsefireRaidControl::Button4)
         .is_ok());
         for function in [
+            ButtonMultimediaFunctionArg::PlayPause,
+            ButtonMultimediaFunctionArg::Stop,
+            ButtonMultimediaFunctionArg::Next,
+            ButtonMultimediaFunctionArg::Previous,
+            ButtonMultimediaFunctionArg::MuteVolume,
             ButtonMultimediaFunctionArg::VolumeUp,
             ButtonMultimediaFunctionArg::VolumeDown,
         ] {

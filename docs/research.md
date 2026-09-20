@@ -853,6 +853,38 @@ OpenHyperX restored Button 4 to Back afterward and a final read confirmed the
 restoration without changing the other mappings. Both writes were volatile;
 no onboard save was sent.
 
+The next 2026-09-20 series exercised every Multimedia assignment on Button 4.
+It produced 14 separate five-second captures on `\\.\USBPcap1`, address 57,
+for release `1124`; sizes ranged from 37,188 to 87,868 bytes and the raw files
+remain outside Git. The no-op baseline again contained no runtime-profile
+write, and every named transition contained exactly one 264-byte `07 01 04`
+write. Within the Multimedia sequence only byte `0x8B` changed. The final
+transition changed the complete Button 4 record back to Mouse Back:
+
+| NGENUITY Legacy Multimedia function | Button 4 record |
+| --- | --- |
+| Play/Pause | `04 00 00 CD` |
+| Stop | `04 00 00 B7` |
+| Next | `04 00 00 B5` |
+| Previous | `04 00 00 B6` |
+| Mute Volume | `04 00 00 E2` |
+| Volume Up | `04 00 00 E9` |
+| Volume Down | `04 00 00 EA` |
+
+Play/Pause, Stop, Next, Previous and Mute Volume were each captured twice and
+reproduced the same records. Volume Up/Down additionally match the earlier
+isolated captures and factory records. The final write restored Button 4 to
+`02 F8 00 03` (Back). This promotes all seven Multimedia functions to the
+portable evidence gate for the nine general controls. No onboard save was
+sent.
+
+With NGENUITY Legacy closed, OpenHyperX then wrote the captured Play/Pause
+record (`04 00 00 CD`) to Button 4. An independent runtime read returned
+Multimedia Play/Pause, and pressing the physical button correctly toggled
+media between playback and pause. OpenHyperX restored Button 4 to Back and a
+final read confirmed that the other mappings were unchanged. Both writes were
+volatile; no onboard save was sent.
+
 The public macro model is no longer shaped like those temporary fixtures. A
 TOML macro contains a playback policy and an ordered timeline of keyboard or
 mouse-button down/up events, each with its own delay. The checked-in AB/20-ms
@@ -976,7 +1008,7 @@ assumption.
 | DPI and stages | runtime read/set, per-stage value/color edits, active-stage selection and final-stage add/remove are implemented and hardware-validated; five big-endian X/Y slots, 200-16000 range and 50-DPI units are confirmed; OpenHyperX onboard save was verified across a power-cycle | determine whether independent X/Y values are supported |
 | polling | all four interval codes captured; runtime 1000→500→1000 set/readback validated; 1000 Hz persisted through a separate NGENUITY Legacy save and power-cycle | verify effective USB report rate with an external rate tester |
 | NGENUITY Legacy `.hxp` | version-40 container, DPI records, Play Once keyboard/primary-click macros and macro references are parsed offline; imports are explicitly partial | compare Legacy exports differing only in active stage, polling, lighting, one physical assignment and each repeat mode |
-| button bindings | all 11 mappings are readable; all ten Mouse Functions, Disabled, Volume Up/Down and named keyboard usages are writable on the nine general controls; Copy and macros remain Button-5-specific; the full Button 4 Mouse Function matrix is capture-backed, and OpenHyperX's Scroll Up write was read back and functionally verified on Button 4; portable writes are also hardware-tested on Button 6 and DPI; bounded Button 5 Play Once macros support chords, nonuniform timing and primary clicks | capture primary-click swaps, remaining multimedia/shortcut records, macro portability, repeat modes, longer timelines and remaining macro mouse events |
+| button bindings | all 11 mappings are readable; all ten Mouse Functions, all seven Multimedia functions, Disabled and named keyboard usages are writable on the nine general controls; Copy and macros remain Button-5-specific; the full Button 4 Mouse and Multimedia matrices are capture-backed, and OpenHyperX's Scroll Up and Play/Pause writes were read back and functionally verified on Button 4; portable writes are also hardware-tested on Button 6 and DPI; bounded Button 5 Play Once macros support chords, nonuniform timing and primary clicks | capture primary-click swaps, remaining shortcuts, macro portability, repeat modes, longer timelines and remaining macro mouse events |
 | onboard save | preservation-first driver/CLI transaction is covered by golden/mock tests and hardware-validated across a power-cycle for DPI, polling, all mappings, the complete Button 5 macro and independent wheel/logo Solid colors; acknowledgements use a separate `MI_02` handle | non-Solid persistent lighting remains separate |
 | NGENUITY Legacy locking | unknown | run `devices`, then future read-only `info`, with NGENUITY Legacy open and closed; record open errors |
 | admin requirement | configuration collection opens without elevation | retest on a second Windows machine/account |

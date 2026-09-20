@@ -28,7 +28,8 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
 - capture-backed runtime polling get/set for 125, 250, 500 and 1000 Hz
 - runtime listing of all 11 button mappings
 - capture-backed runtime assignments on all nine non-primary controls for all
-  ten Mouse Functions, Disabled, Volume Up/Down and named keyboard keys
+  ten Mouse Functions, all seven Multimedia functions, Disabled and named
+  keyboard keys
 - additional capture-backed Button 5 assignments for Copy and TOML Play Once
   macros with keyboard chords, per-event timings and left/right/middle clicks
 - raw hex capture parser/diff for protocol research
@@ -151,6 +152,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
   run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
+  buttons set button4 multimedia play-pause
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
+  run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
   buttons set dpi mouse dpi-toggle
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
@@ -172,13 +178,14 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
 The writable list is deliberately narrower than the mappings the decoder can
 recognize. The nine non-primary controls accept Disabled; Left Click, Right
 Click, Middle, Back, Forward, Tilt Left/Right, DPI Toggle and Scroll Up/Down;
-Volume Up/Down; and named USB HID keyboard keys (`a-z`, digits, navigation,
-F1-F24, keypad and modifiers). An isolated DPI-button A-to-B capture proved
-that the key is the standard one-byte Keyboard/Keypad usage. Button 5
-additionally accepts its target-specific Copy and macro captures. Left/right
-primary controls remain read-only, and raw numeric usage values are not
-accepted by the CLI. Macro files model playback plus an ordered timeline of
-individual key/button down/up events and per-event delays, including chords.
+Play/Pause, Stop, Next, Previous, Mute Volume and Volume Up/Down; and named USB
+HID keyboard keys (`a-z`, digits, navigation, F1-F24, keypad and modifiers).
+An isolated DPI-button A-to-B capture proved that the key is the standard
+one-byte Keyboard/Keypad usage. Button 5 additionally accepts its
+target-specific Copy and macro captures. Left/right primary controls remain
+read-only, and raw numeric usage values are not accepted by the CLI. Macro
+files model playback plus an ordered timeline of individual key/button down/up
+events and per-event delays, including chords.
 The current Raid encoder accepts Play Once macros of up to 14 balanced
 transitions, common keyboard usages and the three captured primary mouse
 buttons. Unsupported keys, playback modes and malformed timelines are rejected
@@ -315,10 +322,10 @@ publishing them.
 3. **RGB proof of concept (implemented):** typed static/off direct reports and
    explicit foreground keepalive.
 4. **Protocol exploration:** DPI stages/colors, polling runtime control,
-   all Mouse Functions on the nine general controls, bounded Play Once Button 5
-   macros and the confirmed onboard-save path are implemented; remaining
-   multimedia/shortcut bindings, primary-click swaps, repeat modes, longer
-   macros and non-Solid firmware lighting remain capture-gated.
+   all Mouse and Multimedia functions on the nine general controls, bounded
+   Play Once Button 5 macros and the confirmed onboard-save path are
+   implemented; remaining shortcut bindings, primary-click swaps, repeat
+   modes, longer macros and non-Solid firmware lighting remain capture-gated.
 5. **GUI:** Tauri client using only the public core API.
 
 See [docs/reverse-engineering.md](docs/reverse-engineering.md) for the capture

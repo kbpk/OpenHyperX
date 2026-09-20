@@ -1679,6 +1679,39 @@ mod tests {
     }
 
     #[test]
+    fn golden_button4_multimedia_matrix_matches_local_capture_series() {
+        let original = captured_button_profile();
+        let cases = [
+            (MultimediaFunction::PlayPause, [0x04, 0x00, 0x00, 0xCD]),
+            (MultimediaFunction::Stop, [0x04, 0x00, 0x00, 0xB7]),
+            (MultimediaFunction::NextTrack, [0x04, 0x00, 0x00, 0xB5]),
+            (MultimediaFunction::PreviousTrack, [0x04, 0x00, 0x00, 0xB6]),
+            (MultimediaFunction::MuteVolume, [0x04, 0x00, 0x00, 0xE2]),
+            (MultimediaFunction::VolumeUp, [0x04, 0x00, 0x00, 0xE9]),
+            (MultimediaFunction::VolumeDown, [0x04, 0x00, 0x00, 0xEA]),
+        ];
+
+        for (function, expected) in cases {
+            let binding = ButtonBinding::Multimedia(function);
+            let mut profile = PerformanceProfile::parse(&original).unwrap();
+            profile
+                .set_button_binding(PulsefireRaidControl::Button4, &binding)
+                .unwrap();
+
+            assert_eq!(&profile.as_bytes()[0x88..0x8C], &expected);
+            assert_eq!(
+                profile
+                    .button_binding(PulsefireRaidControl::Button4)
+                    .unwrap(),
+                binding
+            );
+            assert!(changed_offsets(&original, profile.as_bytes())
+                .iter()
+                .all(|offset| (0x88..0x8C).contains(offset)));
+        }
+    }
+
+    #[test]
     fn golden_dpi_keyboard_a_to_b_changes_only_captured_usage_byte() {
         let original = captured_button_profile();
         let mut profile = PerformanceProfile::parse(&original).unwrap();
