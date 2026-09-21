@@ -35,8 +35,10 @@ Pulsefire Raid profile patcher. Runtime DPI setters can edit values and colors,
 select a stage, append up to five contiguous stages, and remove only the final
 stage.
 It also recognizes confirmed button records and exposes a target-aware runtime
-assignment API. Its private evidence gate permits seven captured Button 5
-records and the captured keyboard-A/DPI-Toggle pair for the DPI control. The
+assignment API. The nine general controls accept capture-backed Mouse,
+Multimedia, Windows Shortcut, Disabled and named-keyboard families. The two
+primary controls use a separate coupled standard/swapped API so no caller can
+construct the intermediate state forbidden by NGENUITY Legacy. The
 platform-independent macro model stores an ordered key/button down/up timeline
 and a delay on every event. A capture-backed Raid encoder now supports Play
 Once Button 5 keyboard chords, nonuniform timings and left/right/middle mouse
@@ -99,10 +101,10 @@ Raw TX/RX logging is emitted only at `trace` level.
 
 Owns model identities, capability declarations and per-model protocol drivers.
 `pulsefire_raid` is the first module and exposes the confirmed runtime-profile
-read, DPI-stage/polling runtime setters, volatile direct RGB and an explicit
-onboard save. A model driver may depend on the core, protocol and transport
-traits, but never on CLI/Tauri types. Its stage API uses zero-based indexes
-internally; user-facing clients translate those to one-based numbers.
+read, DPI-stage/polling/button runtime setters, volatile direct RGB and an
+explicit onboard save. A model driver may depend on the core, protocol and
+transport traits, but never on CLI/Tauri types. Its stage API uses zero-based
+indexes internally; user-facing clients translate those to one-based numbers.
 Device-specific, target-aware assignment evidence gates and persistent-write
 validation live in the driver so a future GUI cannot bypass the CLI's
 restricted writable set.

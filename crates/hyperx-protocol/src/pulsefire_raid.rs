@@ -1,6 +1,6 @@
 use hyperx_core::{
     ButtonBinding, DpiProfile, DpiStage, KeyboardUsage, MacroPlayback, MouseFunction,
-    MultimediaFunction, PollingRate, RgbColor, WindowsShortcut,
+    MultimediaFunction, PollingRate, PrimaryButtonLayout, RgbColor, WindowsShortcut,
 };
 use thiserror::Error;
 
@@ -272,6 +272,10 @@ pub enum PerformanceProfileError {
         control: PulsefireRaidControl,
         binding: ButtonBinding,
     },
+    #[error("primary click mappings must be updated as one atomic pair, not through {0:?}")]
+    PrimaryButtonPairRequiresAtomicUpdate(PulsefireRaidControl),
+    #[error("invalid coupled primary click records: left={left:02X?}, right={right:02X?}")]
+    InvalidPrimaryButtonPair { left: [u8; 4], right: [u8; 4] },
     #[error("binding {0:?} does not yet have a capture-backed Pulsefire Raid encoding")]
     UnconfirmedButtonBinding(ButtonBinding),
     #[error(
@@ -481,22 +485,55 @@ impl PerformanceProfile {
         control: PulsefireRaidControl,
         binding: &ButtonBinding,
     ) -> Result<(), PerformanceProfileError> {
-        if control.is_primary_click()
-            && !matches!(
-                binding,
-                ButtonBinding::Mouse(MouseFunction::LeftClick | MouseFunction::RightClick)
-            )
-        {
-            return Err(PerformanceProfileError::ButtonBindingNotAllowed {
-                control,
-                binding: binding.clone(),
-            });
+        if control.is_primary_click() {
+            return Err(PerformanceProfileError::PrimaryButtonPairRequiresAtomicUpdate(control));
         }
 
         let record = encode_button_binding(binding)?;
         let offset = control.profile_offset();
         self.report[offset..offset + BUTTON_RECORD_LENGTH].copy_from_slice(&record);
         Ok(())
+    }
+
+    /// Decode the coupled physical left/right button assignment.
+    pub fn primary_button_layout(&self) -> Result<PrimaryButtonLayout, PerformanceProfileError> {
+        let left_offset = PulsefireRaidControl::LeftClick.profile_offset();
+        let right_offset = PulsefireRaidControl::RightClick.profile_offset();
+        let left: [u8; BUTTON_RECORD_LENGTH] = self.report
+            [left_offset..left_offset + BUTTON_RECORD_LENGTH]
+            .try_into()
+            .expect("the left-click record fits the fixed report");
+        let right: [u8; BUTTON_RECORD_LENGTH] = self.report
+            [right_offset..right_offset + BUTTON_RECORD_LENGTH]
+            .try_into()
+            .expect("the right-click record fits the fixed report");
+
+        match (
+            decode_button_binding(PulsefireRaidControl::LeftClick, left)?,
+            decode_button_binding(PulsefireRaidControl::RightClick, right)?,
+        ) {
+            (
+                ButtonBinding::Mouse(MouseFunction::LeftClick),
+                ButtonBinding::Mouse(MouseFunction::RightClick),
+            ) => Ok(PrimaryButtonLayout::Standard),
+            (
+                ButtonBinding::Mouse(MouseFunction::RightClick),
+                ButtonBinding::Mouse(MouseFunction::LeftClick),
+            ) => Ok(PrimaryButtonLayout::Swapped),
+            _ => Err(PerformanceProfileError::InvalidPrimaryButtonPair { left, right }),
+        }
+    }
+
+    /// Patch both primary-click records as one capture-backed state change.
+    pub fn set_primary_button_layout(&mut self, layout: PrimaryButtonLayout) {
+        let (left, right) = match layout {
+            PrimaryButtonLayout::Standard => ([0x02, 0xF0, 0x00, 0x00], [0x02, 0xF2, 0x00, 0x02]),
+            PrimaryButtonLayout::Swapped => ([0x02, 0xF2, 0x00, 0x02], [0x02, 0xF0, 0x00, 0x00]),
+        };
+        let left_offset = PulsefireRaidControl::LeftClick.profile_offset();
+        let right_offset = PulsefireRaidControl::RightClick.profile_offset();
+        self.report[left_offset..left_offset + BUTTON_RECORD_LENGTH].copy_from_slice(&left);
+        self.report[right_offset..right_offset + BUTTON_RECORD_LENGTH].copy_from_slice(&right);
     }
 
     /// Copy only fields whose layout is confirmed to be shared by the runtime
@@ -540,19 +577,15 @@ impl PerformanceProfile {
         }
         self.polling_rate()?;
         self.dpi_profile()?;
+        self.primary_button_layout()?;
         for control in PulsefireRaidControl::ALL {
+            if control.is_primary_click() {
+                continue;
+            }
             if self.has_confirmed_macro_reference(control) {
                 continue;
             }
-            let binding = self.button_binding(control)?;
-            if control.is_primary_click()
-                && !matches!(
-                    binding,
-                    ButtonBinding::Mouse(MouseFunction::LeftClick | MouseFunction::RightClick)
-                )
-            {
-                return Err(PerformanceProfileError::ButtonBindingNotAllowed { control, binding });
-            }
+            self.button_binding(control)?;
         }
         Ok(())
     }
@@ -1808,6 +1841,53 @@ mod tests {
     }
 
     #[test]
+    fn primary_button_layout_is_an_atomic_capture_backed_pair() {
+        let mut profile = PerformanceProfile::parse(&captured_button_profile()).unwrap();
+
+        // Older reads used the zero trailer for Right Click; both decode to
+        // the same standard semantic layout.
+        assert_eq!(
+            profile.primary_button_layout().unwrap(),
+            PrimaryButtonLayout::Standard
+        );
+
+        profile.set_primary_button_layout(PrimaryButtonLayout::Standard);
+        let standard = *profile.as_bytes();
+        assert_eq!(&standard[0x7C..0x80], &[0x02, 0xF0, 0x00, 0x00]);
+        assert_eq!(&standard[0x80..0x84], &[0x02, 0xF2, 0x00, 0x02]);
+
+        profile.set_primary_button_layout(PrimaryButtonLayout::Swapped);
+        assert_eq!(
+            profile.primary_button_layout().unwrap(),
+            PrimaryButtonLayout::Swapped
+        );
+        assert_eq!(&profile.as_bytes()[0x7C..0x80], &[0x02, 0xF2, 0x00, 0x02]);
+        assert_eq!(&profile.as_bytes()[0x80..0x84], &[0x02, 0xF0, 0x00, 0x00]);
+        let changed = standard
+            .iter()
+            .zip(profile.as_bytes())
+            .enumerate()
+            .filter_map(|(offset, (before, after))| (before != after).then_some(offset))
+            .collect::<Vec<_>>();
+        assert_eq!(changed, vec![0x7D, 0x7F, 0x81, 0x83]);
+
+        profile.set_primary_button_layout(PrimaryButtonLayout::Standard);
+        assert_eq!(profile.as_bytes(), &standard);
+
+        let mut invalid = standard;
+        invalid[0x80..0x84].copy_from_slice(&[0x02, 0xF0, 0x00, 0x00]);
+        let invalid = PerformanceProfile::parse(&invalid).unwrap();
+        assert_eq!(
+            invalid.primary_button_layout(),
+            Err(PerformanceProfileError::InvalidPrimaryButtonPair {
+                left: [0x02, 0xF0, 0x00, 0x00],
+                right: [0x02, 0xF0, 0x00, 0x00],
+            })
+        );
+        assert!(invalid.validate_confirmed_runtime_settings().is_err());
+    }
+
+    #[test]
     fn rejects_unconfirmed_or_illegal_button_bindings_without_mutating() {
         use hyperx_core::{MacroBinding, MacroPlayback};
 
@@ -1817,10 +1897,11 @@ mod tests {
         let disabled = ButtonBinding::Disabled;
         assert_eq!(
             profile.set_button_binding(PulsefireRaidControl::LeftClick, &disabled),
-            Err(PerformanceProfileError::ButtonBindingNotAllowed {
-                control: PulsefireRaidControl::LeftClick,
-                binding: disabled,
-            })
+            Err(
+                PerformanceProfileError::PrimaryButtonPairRequiresAtomicUpdate(
+                    PulsefireRaidControl::LeftClick,
+                )
+            )
         );
         assert_eq!(profile.as_bytes(), &original);
 

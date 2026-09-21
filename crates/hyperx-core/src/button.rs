@@ -27,6 +27,16 @@ pub enum MouseFunction {
     ScrollDown,
 }
 
+/// The two legal, coupled assignments for the physical primary buttons.
+///
+/// Devices may require both records to be changed in one transaction, so this
+/// is deliberately not represented as two independent button assignments.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PrimaryButtonLayout {
+    Standard,
+    Swapped,
+}
+
 /// Consumer-control actions exposed by NGENUITY Legacy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MultimediaFunction {

@@ -11,8 +11,8 @@ use anyhow::{anyhow, Context, Result};
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use hyperx_core::{
     ButtonBinding, DeviceDescriptor, DpiProfile, HidInterfaceInfo, KeyboardUsage, MacroDefinition,
-    MouseFunction, MultimediaFunction, PollingRate, RgbColor, SoftwareLightingEffect,
-    SoftwareLightingProgram, UsbId, WindowsShortcut,
+    MouseFunction, MultimediaFunction, PollingRate, PrimaryButtonLayout, RgbColor,
+    SoftwareLightingEffect, SoftwareLightingProgram, UsbId, WindowsShortcut,
 };
 use hyperx_devices::{
     find_supported_device, PulsefireRaid, PulsefireRaidRuntimeAssignment, PULSEFIRE_RAID,
@@ -348,6 +348,11 @@ enum PollingCommand {
 enum ButtonsCommand {
     /// Show all 11 runtime button mappings.
     List,
+    /// Set the coupled physical left/right layout; does not save onboard.
+    PrimaryLayout {
+        #[arg(value_enum)]
+        layout: PrimaryButtonLayoutArg,
+    },
     /// Change one target-specific, capture-backed runtime mapping.
     Set {
         /// Physical control to update.
@@ -356,6 +361,21 @@ enum ButtonsCommand {
         #[command(subcommand)]
         assignment: ButtonAssignmentCommand,
     },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum PrimaryButtonLayoutArg {
+    Standard,
+    Swapped,
+}
+
+impl From<PrimaryButtonLayoutArg> for PrimaryButtonLayout {
+    fn from(value: PrimaryButtonLayoutArg) -> Self {
+        match value {
+            PrimaryButtonLayoutArg::Standard => Self::Standard,
+            PrimaryButtonLayoutArg::Swapped => Self::Swapped,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -1621,6 +1641,19 @@ fn buttons(command: ButtonsCommand) -> Result<()> {
             println!("Button mappings:");
             print_button_profile(&profile, "  ");
         }
+        ButtonsCommand::PrimaryLayout { layout } => {
+            let layout = PrimaryButtonLayout::from(layout);
+            let mut device = open_pulsefire_raid()?;
+            device.set_runtime_primary_button_layout(layout).context(
+                "failed to update the coupled primary-button layout; the setting may be unchanged",
+            )?;
+            let description = match layout {
+                PrimaryButtonLayout::Standard => "standard (left/right)",
+                PrimaryButtonLayout::Swapped => "swapped (right/left)",
+            };
+            println!("Updated runtime primary-button layout to {description}.");
+            println!("The onboard profile was not written.");
+        }
         ButtonsCommand::Set {
             control,
             assignment,
@@ -2309,6 +2342,13 @@ mod tests {
     #[test]
     fn cli_exposes_only_capture_backed_button_targets_and_assignments() {
         assert!(Cli::try_parse_from(["hyperx-cli", "buttons", "list"]).is_ok());
+        assert!(
+            Cli::try_parse_from(["hyperx-cli", "buttons", "primary-layout", "standard"]).is_ok()
+        );
+        assert!(
+            Cli::try_parse_from(["hyperx-cli", "buttons", "primary-layout", "swapped"]).is_ok()
+        );
+        assert!(Cli::try_parse_from(["hyperx-cli", "buttons", "primary-layout", "left"]).is_err());
         for control in [
             "wheel-click",
             "button4",

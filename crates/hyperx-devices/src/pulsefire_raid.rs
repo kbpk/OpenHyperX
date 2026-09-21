@@ -3,8 +3,8 @@ use std::time::Duration;
 use hyperx_core::{
     ButtonBinding, Capability, CapabilitySet, DeviceDescriptor, DpiCapabilities, DpiProfile,
     DpiValidationError, InterfaceSelector, KeyboardUsage, LightingZone, MacroDefinition,
-    MacroEvent, MacroPlayback, MouseFunction, MultimediaFunction, PollingRate, RgbColor, UsbId,
-    WindowsShortcut,
+    MacroEvent, MacroPlayback, MouseFunction, MultimediaFunction, PollingRate, PrimaryButtonLayout,
+    RgbColor, UsbId, WindowsShortcut,
 };
 use hyperx_hid::{HidError, HidTransport};
 use hyperx_protocol::pulsefire_raid::{
@@ -739,6 +739,28 @@ impl<T: HidTransport> PulsefireRaid<T> {
         Ok(assignment)
     }
 
+    /// Switch the physical left/right buttons as one runtime-only update.
+    ///
+    /// NGENUITY Legacy exposes these records as a coupled pair. This method
+    /// preserves that invariant and never writes onboard memory.
+    pub fn set_runtime_primary_button_layout(
+        &mut self,
+        layout: PrimaryButtonLayout,
+    ) -> Result<PrimaryButtonLayout, PulsefireRaidError> {
+        self.set_runtime_primary_button_layout_with_wait(layout, std::thread::sleep)
+    }
+
+    fn set_runtime_primary_button_layout_with_wait(
+        &mut self,
+        layout: PrimaryButtonLayout,
+        wait: impl FnMut(Duration),
+    ) -> Result<PrimaryButtonLayout, PulsefireRaidError> {
+        let mut profile = self.runtime_profile_with_wait(wait)?;
+        profile.set_primary_button_layout(layout);
+        self.write_runtime_profile(&profile)?;
+        Ok(layout)
+    }
+
     /// Change the polling rate in the runtime profile only.
     pub fn set_runtime_polling_rate(
         &mut self,
@@ -1429,6 +1451,36 @@ mod tests {
                 .set_runtime_button_assignment_with_wait(assignment.clone(), |_| {})
                 .unwrap(),
             assignment
+        );
+        device.into_transport().assert_drained();
+    }
+
+    #[test]
+    fn driver_swaps_primary_buttons_as_one_runtime_profile_write() {
+        let mut response = performance_profile_response();
+        response[0x7C..0x84].copy_from_slice(&[
+            0x02, 0xF0, 0x00, 0x00, // physical left: Left Click
+            0x02, 0xF2, 0x00, 0x02, // physical right: Right Click
+        ]);
+        let mut expected_write = response;
+        expected_write[1] = 0x01;
+        expected_write[0x7C..0x84].copy_from_slice(&[
+            0x02, 0xF2, 0x00, 0x02, // physical left: Right Click
+            0x02, 0xF0, 0x00, 0x00, // physical right: Left Click
+        ]);
+
+        let mut transport = MockHidTransport::new(1);
+        transport.expect_feature_report(encode_runtime_profile_read_prelude());
+        transport.expect_feature_report(encode_profile_read_request());
+        transport.queue_feature_response(response);
+        transport.expect_feature_report(expected_write);
+
+        let mut device = PulsefireRaid::new(transport).unwrap();
+        assert_eq!(
+            device
+                .set_runtime_primary_button_layout_with_wait(PrimaryButtonLayout::Swapped, |_| {})
+                .unwrap(),
+            PrimaryButtonLayout::Swapped
         );
         device.into_transport().assert_drained();
     }

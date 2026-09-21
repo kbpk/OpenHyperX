@@ -66,6 +66,13 @@ final restoration step. Do not replace isolated files with one long ambiguous
 capture, and do not ask for separate UAC approvals when the series runner can
 perform the same experiment safely.
 
+Before encoding the matrix, confirm whether the vendor UI enforces coupled
+settings or automatically changes more than the selected field. Model each
+legal atomic transition and diff every affected record; never invent an
+intermediate state that the UI forbids. If this constraint is discovered only
+during a series, stop it, analyze all completed files, and replace the plan
+instead of improvising further clicks.
+
 Keep raw captures outside Git and treat them as potentially sensitive.
 
 Mutable hardware testing must state what will change and whether it is volatile

@@ -30,6 +30,8 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
 - capture-backed runtime assignments on all nine non-primary controls for all
   ten Mouse Functions, all seven Multimedia functions, all six Windows
   Shortcuts, Disabled and named keyboard keys
+- capture-backed atomic standard/swapped layout for the two primary buttons,
+  hardware-validated in both directions
 - additional capture-backed Button 5 TOML Play Once macros with keyboard
   chords, per-event timings and left/right/middle clicks
 - raw hex capture parser/diff for protocol research
@@ -39,7 +41,7 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
 - capture-backed, acknowledged onboard save for current DPI, polling, all 11
   button records, an optional Button 5 Play Once macro and independent
   wheel/logo Solid colors, hardware-verified across a physical power-cycle
-- no primary-click remapping or non-Solid persistent firmware-lighting effects yet
+- no non-Solid persistent firmware-lighting effects yet
 
 The implementation stops wherever protocol evidence stops. Known facts and
 their confidence level are recorded in [docs/research.md](docs/research.md).
@@ -137,6 +139,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
   run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
+  buttons primary-layout swapped
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
+  run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
   buttons set button4 mouse back
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
@@ -188,10 +195,11 @@ HID keyboard keys (`a-z`, digits, navigation, F1-F24, keypad and modifiers);
 and Cycle Apps, Switch Apps, Cut, Copy, Paste and Undo. An isolated DPI-button
 A-to-B capture proved that the key is the standard one-byte Keyboard/Keypad
 usage. Button 5 additionally accepts capture-backed macro timelines.
-Left/right primary controls remain read-only, and raw numeric usage values are
-not accepted by the CLI. Macro files model playback plus an ordered timeline
-of individual key/button down/up events and per-event delays, including
-chords.
+The physical primary controls are changed only as the captured atomic pair:
+`buttons primary-layout standard` or `buttons primary-layout swapped`.
+Independent primary writes and raw numeric usage values are not accepted by
+the CLI. Macro files model playback plus an ordered timeline of individual
+key/button down/up events and per-event delays, including chords.
 The current Raid encoder accepts Play Once macros of up to 14 balanced
 transitions, common keyboard usages and the three captured primary mouse
 buttons. Unsupported keys, playback modes and malformed timelines are rejected
@@ -330,8 +338,8 @@ publishing them.
 4. **Protocol exploration:** DPI stages/colors, polling runtime control,
    all Mouse/Multimedia functions and Windows Shortcuts on the nine general
    controls, bounded Play Once Button 5 macros and the confirmed onboard-save
-   path are implemented; primary-click swaps, repeat modes, longer macros and
-   non-Solid firmware lighting remain capture-gated.
+   path plus atomic primary-click swaps are implemented; repeat modes, longer
+   macros and non-Solid firmware lighting remain capture-gated.
 5. **GUI:** Tauri client using only the public core API.
 
 See [docs/reverse-engineering.md](docs/reverse-engineering.md) for the capture

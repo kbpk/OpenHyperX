@@ -1,0 +1,25 @@
+{
+  "name": "pulsefire-raid-primary-click-pair-20260920",
+  "steps": [
+    {
+      "slug": "baseline-standard-no-op",
+      "instruction": "Do not change anything; keep the primary buttons in the standard Left Click / Right Click layout."
+    },
+    {
+      "slug": "standard-to-swapped",
+      "instruction": "Set the physical Right Click control to Left Click. NGENUITY will atomically swap both primary assignments."
+    },
+    {
+      "slug": "swapped-to-standard",
+      "instruction": "Use the physical RIGHT button for UI clicks and set its control back to Right Click. NGENUITY will restore both assignments."
+    },
+    {
+      "slug": "standard-to-swapped-repeat",
+      "instruction": "Repeat: set the physical Right Click control to Left Click and let NGENUITY atomically swap the pair."
+    },
+    {
+      "slug": "swapped-to-standard-final-restore",
+      "instruction": "Use the physical RIGHT button for UI clicks and restore its control to Right Click. Finish in the standard layout."
+    }
+  ]
+}

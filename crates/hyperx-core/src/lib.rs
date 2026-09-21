@@ -11,7 +11,7 @@ mod profile;
 pub use button::{
     ButtonBinding, KeyState, KeyboardMacroEvent, KeyboardUsage, KeyboardUsageParseError,
     MacroBinding, MacroDefinition, MacroEvent, MacroPlayback, MouseFunction, MultimediaFunction,
-    WindowsShortcut,
+    PrimaryButtonLayout, WindowsShortcut,
 };
 pub use capability::{
     Capability, CapabilitySet, DpiCapabilities, DpiValidationError, LightingZone, PollingRate,
