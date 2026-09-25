@@ -41,7 +41,7 @@ Recognized playback names are `once`, `toggle-repeat` and
 Parsing and device support are deliberately separate. The Pulsefire Raid
 runtime encoder currently supports:
 
-- `once` playback on Button 5;
+- `once` playback on Button 4 or Button 5 at runtime;
 - between 1 and 14 transitions, matching the largest isolated capture;
 - an individual `delay_ms` from 0 through 9999 on every transition;
 - balanced keyboard down/up transitions for letters, digits, F1–F24, common
@@ -58,8 +58,9 @@ four `arrow-*` names, `keypad-0`–`keypad-9`, and modifiers such as
 Every pressed input must be released, and a held input cannot be pressed a
 second time. Invalid files are rejected before device discovery. Playback
 `toggle-repeat` and `repeat-while-held`, more than 14 transitions, other mouse
-buttons and onboard persistence remain blocked until their packet fields are
-captured independently.
+buttons and runtime targets beyond Button 4/5 remain blocked until their packet
+fields are captured independently. Onboard save is confirmed only for a Button 5
+macro and refuses a runtime profile containing a Button 4 macro.
 
 Examples:
 

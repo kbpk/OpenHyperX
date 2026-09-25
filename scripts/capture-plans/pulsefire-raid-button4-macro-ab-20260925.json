@@ -1,0 +1,25 @@
+{
+  "name": "pulsefire-raid-button4-macro-ab-20260925",
+  "steps": [
+    {
+      "slug": "baseline-back-no-op",
+      "instruction": "Do not change anything. Button 4 must still be Mouse Function > Back; leave the existing AB macro and Button 5 untouched."
+    },
+    {
+      "slug": "back-to-existing-ab-macro",
+      "instruction": "Assign the existing AB, Play Once, 20 ms macro to Button 4 once. Do not edit or rerecord the macro. If NGENUITY changes another button automatically, stop the series after this capture and report it."
+    },
+    {
+      "slug": "ab-macro-to-back",
+      "instruction": "Restore Button 4 to Mouse Function > Back once. Do not change another control."
+    },
+    {
+      "slug": "back-to-existing-ab-macro-repeat",
+      "instruction": "Repeat: assign the same existing AB, Play Once, 20 ms macro to Button 4 once, without editing the macro."
+    },
+    {
+      "slug": "ab-macro-to-back-final-restore",
+      "instruction": "Restore Button 4 to Mouse Function > Back once. Finish with Button 4 on Back."
+    }
+  ]
+}

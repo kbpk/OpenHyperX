@@ -30,7 +30,7 @@ const DPI_STAGE_COLOR_OFFSETS: [usize; 5] = [0x69, 0x6C, 0x6F, 0x72, 0x75];
 const BUTTON_RECORD_LENGTH: usize = 4;
 const CONFIRMED_MACRO_HEADER: [u8; 10] =
     [0x07, 0x05, 0x04, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
-const CONFIRMED_MACRO_BINDING: [u8; BUTTON_RECORD_LENGTH] = [0x53, 0x00, 0x00, 0x04];
+const MACRO_TARGET_OFFSET: usize = 3;
 pub const MAX_CAPTURE_BACKED_MACRO_EVENTS: usize = 14;
 pub const MAX_MACRO_DELAY_MS: u16 = 9_999;
 const DPI_UNIT: u32 = 50;
@@ -119,6 +119,14 @@ impl PulsefireRaidControl {
     const fn is_primary_click(self) -> bool {
         matches!(self, Self::LeftClick | Self::RightClick)
     }
+
+    const fn confirmed_macro_target(self) -> Option<u8> {
+        match self {
+            Self::Button4 => Some(0x03),
+            Self::Button5 => Some(0x04),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -172,7 +180,7 @@ impl PulsefireRaidMacroEvent {
     }
 }
 
-/// A validated Button 5, Play Once macro definition.
+/// A validated Button 4 or Button 5, Play Once runtime macro definition.
 ///
 /// Its header, three-byte event framing, per-event timing, keyboard usages,
 /// modifier chords and three mouse buttons are established by local captures.
@@ -180,12 +188,19 @@ impl PulsefireRaidMacroEvent {
 pub struct PulsefireRaidMacro {
     report: [u8; DIRECT_REPORT_LENGTH],
     events: Vec<PulsefireRaidMacroEvent>,
+    control: PulsefireRaidControl,
 }
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum PulsefireRaidMacroError {
     #[error("expected a 264-byte Pulsefire Raid macro report, got {0} bytes")]
     WrongLength(usize),
+    #[error("runtime macro target {0:?} has no confirmed Pulsefire Raid encoding")]
+    UnsupportedControl(PulsefireRaidControl),
+    #[error("unknown Pulsefire Raid macro target code 0x{0:02X}")]
+    UnknownControlCode(u8),
+    #[error("onboard macro encoding is not confirmed for {0:?}")]
+    UnconfirmedOnboardControl(PulsefireRaidControl),
     #[error(
         "invalid Pulsefire Raid macro byte at 0x{offset:02X}: expected 0x{expected:02X}, got 0x{actual:02X}"
     )]
@@ -265,6 +280,8 @@ pub enum PerformanceProfileError {
         control: PulsefireRaidControl,
         record: [u8; BUTTON_RECORD_LENGTH],
     },
+    #[error("onboard save of a macro assigned to {0:?} is not capture-backed")]
+    UnconfirmedOnboardMacroControl(PulsefireRaidControl),
     #[error("keyboard usage 0x{0:04X} is outside the captured one-byte binding range 0x01..=0xFF")]
     KeyboardUsageOutOfRange(u16),
     #[error("binding {binding:?} is not legal for Pulsefire Raid control {control:?}")]
@@ -463,16 +480,16 @@ impl PerformanceProfile {
         decode_button_binding(control, record)
     }
 
-    /// Identify the exact captured Button 5 macro reference.
+    /// Identify a captured Button 4 or Button 5 macro reference.
     ///
     /// The runtime profile contains only this reference, not the macro event
     /// report, so callers must not infer its keys or timing from this result.
     pub fn has_confirmed_macro_reference(&self, control: PulsefireRaidControl) -> bool {
-        if control != PulsefireRaidControl::Button5 {
+        let Some(target) = control.confirmed_macro_target() else {
             return false;
-        }
+        };
         let offset = control.profile_offset();
-        self.report[offset..offset + BUTTON_RECORD_LENGTH] == CONFIRMED_MACRO_BINDING
+        self.report[offset..offset + BUTTON_RECORD_LENGTH] == [0x53, 0x00, 0x00, target]
     }
 
     /// Patch one confirmed four-byte button record in an existing profile.
@@ -578,6 +595,11 @@ impl PerformanceProfile {
         self.polling_rate()?;
         self.dpi_profile()?;
         self.primary_button_layout()?;
+        if self.has_confirmed_macro_reference(PulsefireRaidControl::Button4) {
+            return Err(PerformanceProfileError::UnconfirmedOnboardMacroControl(
+                PulsefireRaidControl::Button4,
+            ));
+        }
         for control in PulsefireRaidControl::ALL {
             if control.is_primary_click() {
                 continue;
@@ -603,14 +625,19 @@ impl PerformanceProfile {
 }
 
 impl PulsefireRaidMacro {
-    /// Encode a Button 5, Play Once macro without performing I/O.
-    pub fn button5_play_once(
+    /// Encode a Play Once runtime macro for a capture-confirmed control.
+    pub fn play_once_for(
+        control: PulsefireRaidControl,
         events: &[PulsefireRaidMacroEvent],
     ) -> Result<Self, PulsefireRaidMacroError> {
+        let target = control
+            .confirmed_macro_target()
+            .ok_or(PulsefireRaidMacroError::UnsupportedControl(control))?;
         validate_macro_events(events)?;
 
         let mut report = [0_u8; DIRECT_REPORT_LENGTH];
         report[..CONFIRMED_MACRO_HEADER.len()].copy_from_slice(&CONFIRMED_MACRO_HEADER);
+        report[MACRO_TARGET_OFFSET] = target;
         let mut offset = CONFIRMED_MACRO_HEADER.len();
 
         for event in events {
@@ -630,18 +657,35 @@ impl PulsefireRaidMacro {
         Ok(Self {
             report,
             events: events.to_vec(),
+            control,
         })
     }
 
-    /// Decode the capture-backed Button 5, Play Once event framing.
+    /// Encode the previously confirmed Button 5 variant.
+    pub fn button5_play_once(
+        events: &[PulsefireRaidMacroEvent],
+    ) -> Result<Self, PulsefireRaidMacroError> {
+        Self::play_once_for(PulsefireRaidControl::Button5, events)
+    }
+
+    /// Decode capture-backed Button 4/5 Play Once event framing.
     pub fn parse(report: &[u8]) -> Result<Self, PulsefireRaidMacroError> {
         let report: [u8; DIRECT_REPORT_LENGTH] = report
             .try_into()
             .map_err(|_| PulsefireRaidMacroError::WrongLength(report.len()))?;
 
+        let control = match report[MACRO_TARGET_OFFSET] {
+            0x03 => PulsefireRaidControl::Button4,
+            0x04 => PulsefireRaidControl::Button5,
+            code => return Err(PulsefireRaidMacroError::UnknownControlCode(code)),
+        };
+
         for (offset, (&actual, &expected)) in
             report.iter().zip(CONFIRMED_MACRO_HEADER.iter()).enumerate()
         {
+            if offset == MACRO_TARGET_OFFSET {
+                continue;
+            }
             if actual != expected {
                 return Err(PulsefireRaidMacroError::InvalidByte {
                     offset,
@@ -685,11 +729,15 @@ impl PulsefireRaidMacro {
         }
 
         validate_macro_events(&events)?;
-        Ok(Self { report, events })
+        Ok(Self {
+            report,
+            events,
+            control,
+        })
     }
 
     pub const fn control(&self) -> PulsefireRaidControl {
-        PulsefireRaidControl::Button5
+        self.control
     }
 
     pub fn events(&self) -> &[PulsefireRaidMacroEvent] {
@@ -700,7 +748,7 @@ impl PulsefireRaidMacro {
         MacroPlayback::Once
     }
 
-    /// Patch the exact captured macro reference into a runtime profile image.
+    /// Patch the target's exact captured macro reference into a runtime profile.
     ///
     /// This operation itself performs no I/O. The device driver exposes only
     /// the exact locally captured runtime macro presets, and onboard use is
@@ -714,8 +762,12 @@ impl PulsefireRaidMacro {
         }
 
         let offset = self.control().profile_offset();
-        profile.report[offset..offset + BUTTON_RECORD_LENGTH]
-            .copy_from_slice(&CONFIRMED_MACRO_BINDING);
+        profile.report[offset..offset + BUTTON_RECORD_LENGTH].copy_from_slice(&[
+            0x53,
+            0x00,
+            0x00,
+            self.report[MACRO_TARGET_OFFSET],
+        ]);
         Ok(())
     }
 
@@ -731,10 +783,15 @@ impl PulsefireRaidMacro {
     ///
     /// A Save-to-mouse capture containing the same 14-event macro changed only
     /// the profile-section byte from runtime `0x04` to onboard `0x01`.
-    pub fn to_onboard_report(&self) -> [u8; DIRECT_REPORT_LENGTH] {
+    pub fn to_onboard_report(&self) -> Result<[u8; DIRECT_REPORT_LENGTH], PulsefireRaidMacroError> {
+        if self.control != PulsefireRaidControl::Button5 {
+            return Err(PulsefireRaidMacroError::UnconfirmedOnboardControl(
+                self.control,
+            ));
+        }
         let mut report = self.report;
         report[2] = ONBOARD_PROFILE_SECTION;
-        report
+        Ok(report)
     }
 }
 
@@ -1269,7 +1326,58 @@ mod tests {
 
         let mut expected_onboard = expected_coverage;
         expected_onboard[2] = 0x01;
-        assert_eq!(coverage.to_onboard_report(), expected_onboard);
+        assert_eq!(coverage.to_onboard_report().unwrap(), expected_onboard);
+    }
+
+    #[test]
+    fn golden_button4_macro_matches_repeated_runtime_captures() {
+        let events = [key_tap(0x04, 20), key_tap(0x05, 20)].concat();
+        let macro_definition =
+            PulsefireRaidMacro::play_once_for(PulsefireRaidControl::Button4, &events).unwrap();
+        let mut expected = [0_u8; DIRECT_REPORT_LENGTH];
+        expected[..22].copy_from_slice(&[
+            0x07, 0x05, 0x04, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x80, 0x14, 0x04, 0x00,
+            0x14, 0x04, 0x80, 0x14, 0x05, 0x00, 0x14, 0x05,
+        ]);
+        assert_eq!(macro_definition.as_bytes(), &expected);
+        assert_eq!(
+            PulsefireRaidMacro::parse(&expected).unwrap(),
+            macro_definition
+        );
+        assert_eq!(macro_definition.control(), PulsefireRaidControl::Button4);
+
+        let mut starting_report = captured_button_profile();
+        starting_report[0x88..0x8C].copy_from_slice(&[0x02, 0xF8, 0x00, 0x03]);
+        let mut profile = PerformanceProfile::parse(&starting_report).unwrap();
+        let original = *profile.as_bytes();
+        macro_definition.apply_to_profile(&mut profile).unwrap();
+        assert_eq!(
+            changed_offsets(&original, profile.as_bytes()),
+            vec![0x88, 0x89]
+        );
+        assert_eq!(&profile.as_bytes()[0x88..0x8C], &[0x53, 0x00, 0x00, 0x03]);
+        assert!(profile.has_confirmed_macro_reference(PulsefireRaidControl::Button4));
+        assert_eq!(&profile.as_bytes()[0x8C..0x90], &original[0x8C..0x90]);
+        assert_eq!(
+            profile.validate_confirmed_runtime_settings(),
+            Err(PerformanceProfileError::UnconfirmedOnboardMacroControl(
+                PulsefireRaidControl::Button4,
+            ))
+        );
+        assert_eq!(
+            macro_definition.to_onboard_report(),
+            Err(PulsefireRaidMacroError::UnconfirmedOnboardControl(
+                PulsefireRaidControl::Button4,
+            ))
+        );
+
+        profile
+            .set_button_binding(
+                PulsefireRaidControl::Button4,
+                &ButtonBinding::Mouse(MouseFunction::Back),
+            )
+            .unwrap();
+        assert_eq!(profile.as_bytes(), &original);
     }
 
     #[test]
@@ -1374,6 +1482,22 @@ mod tests {
         assert_eq!(
             PulsefireRaidMacro::parse(&[0_u8; 16]),
             Err(PulsefireRaidMacroError::WrongLength(16))
+        );
+
+        assert_eq!(
+            PulsefireRaidMacro::play_once_for(PulsefireRaidControl::Dpi, &key_tap(0x04, 20)),
+            Err(PulsefireRaidMacroError::UnsupportedControl(
+                PulsefireRaidControl::Dpi,
+            ))
+        );
+
+        let mut unknown_target = *PulsefireRaidMacro::button5_play_once(&key_tap(0x04, 20))
+            .unwrap()
+            .as_bytes();
+        unknown_target[MACRO_TARGET_OFFSET] = 0x05;
+        assert_eq!(
+            PulsefireRaidMacro::parse(&unknown_target),
+            Err(PulsefireRaidMacroError::UnknownControlCode(0x05))
         );
 
         assert_eq!(

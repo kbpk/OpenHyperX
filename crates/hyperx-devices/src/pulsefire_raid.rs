@@ -183,7 +183,10 @@ impl PulsefireRaidRuntimeAssignment {
         control: PulsefireRaidControl,
         definition: MacroDefinition,
     ) -> Result<Self, PulsefireRaidError> {
-        if control != PulsefireRaidControl::Button5 {
+        if !matches!(
+            control,
+            PulsefireRaidControl::Button4 | PulsefireRaidControl::Button5
+        ) {
             return Err(PulsefireRaidError::UnconfirmedMacroControl(control));
         }
         let assignment = Self {
@@ -216,11 +219,12 @@ impl PulsefireRaidRuntimeAssignment {
         let PulsefireRaidRuntimeAction::Macro(definition) = &self.action else {
             return Ok(None);
         };
-        Ok(Some(encode_macro_definition(definition)?))
+        Ok(Some(encode_macro_definition(self.control, definition)?))
     }
 }
 
 fn encode_macro_definition(
+    control: PulsefireRaidControl,
     definition: &MacroDefinition,
 ) -> Result<PulsefireRaidMacro, PulsefireRaidError> {
     if definition.playback != MacroPlayback::Once {
@@ -233,7 +237,7 @@ fn encode_macro_definition(
         .iter()
         .map(encode_macro_event)
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(PulsefireRaidMacro::button5_play_once(&events)?)
+    Ok(PulsefireRaidMacro::play_once_for(control, &events)?)
 }
 
 const fn is_supported_runtime_keyboard_usage(usage: KeyboardUsage) -> bool {
@@ -331,7 +335,9 @@ pub enum PulsefireRaidError {
         control: PulsefireRaidControl,
         binding: ButtonBinding,
     },
-    #[error("runtime macros are not capture-backed for {0:?}; only Button 5 is supported")]
+    #[error(
+        "runtime macros are not capture-backed for {0:?}; only Button 4 and Button 5 are supported"
+    )]
     UnconfirmedMacroControl(PulsefireRaidControl),
     #[error("Pulsefire Raid macro playback {0:?} is not capture-backed; only once is supported")]
     UnsupportedMacroPlayback(MacroPlayback),
@@ -470,7 +476,9 @@ impl<T: HidTransport> PulsefireRaid<T> {
         // Validate the optional macro before opening the persistent part of
         // the transaction. Runtime fields are validated immediately after the
         // read and before selecting the onboard section.
-        let macro_report = macro_definition.map(encode_macro_definition).transpose()?;
+        let macro_report = macro_definition
+            .map(|definition| encode_macro_definition(PulsefireRaidControl::Button5, definition))
+            .transpose()?;
         let runtime = self.read_runtime_profile_for_save(acknowledgements, &mut wait)?;
         runtime.validate_confirmed_runtime_settings()?;
 
@@ -501,7 +509,7 @@ impl<T: HidTransport> PulsefireRaid<T> {
         if let Some(macro_report) = &macro_report {
             self.send_feature_report_with_save_ack(
                 acknowledgements,
-                &macro_report.to_onboard_report(),
+                &macro_report.to_onboard_report()?,
             )?;
         }
         self.send_feature_report_with_save_ack(acknowledgements, &onboard.to_write_report())?;
@@ -705,7 +713,7 @@ impl<T: HidTransport> PulsefireRaid<T> {
 
     /// Assign one target-specific, capture-backed action in runtime memory.
     ///
-    /// Button 5 macros transmit their validated definition immediately before
+    /// Button 4/5 macros transmit their validated definition immediately before
     /// the profile reference, matching the captured NGENUITY Legacy transaction.
     /// No variant writes the onboard profile.
     pub fn set_runtime_button_assignment(
@@ -849,6 +857,27 @@ fn save_acknowledgement(opcode: u8) -> [u8; SAVE_ACK_LENGTH] {
 mod tests {
     use super::*;
     use hyperx_hid::testing::MockHidTransport;
+
+    fn captured_ab_macro() -> MacroDefinition {
+        MacroDefinition {
+            playback: MacroPlayback::Once,
+            events: ["a", "b"]
+                .into_iter()
+                .flat_map(|key| {
+                    [
+                        MacroEvent::KeyDown {
+                            key: key.to_owned(),
+                            delay_ms: 20,
+                        },
+                        MacroEvent::KeyUp {
+                            key: key.to_owned(),
+                            delay_ms: 20,
+                        },
+                    ]
+                })
+                .collect(),
+        }
+    }
 
     fn captured_coverage_macro() -> MacroDefinition {
         MacroDefinition {
@@ -1055,11 +1084,12 @@ mod tests {
             .copy_confirmed_runtime_settings_from(&runtime_profile)
             .unwrap();
         if let Some(definition) = macro_definition {
-            let macro_report = encode_macro_definition(definition).unwrap();
+            let macro_report =
+                encode_macro_definition(PulsefireRaidControl::Button5, definition).unwrap();
             expect_acked_feature(
                 configuration,
                 acknowledgements,
-                macro_report.to_onboard_report(),
+                macro_report.to_onboard_report().unwrap(),
             );
         }
         expect_acked_feature(
@@ -1199,6 +1229,44 @@ mod tests {
                 |_| {}
             ),
             Err(PulsefireRaidError::MissingOnboardMacroDefinition)
+        ));
+        device.into_transport().assert_drained();
+        acknowledgements.assert_drained();
+    }
+
+    #[test]
+    fn driver_refuses_button4_macro_before_selecting_onboard_memory() {
+        let mut runtime = save_profile_response(ProfileSection::Runtime, true);
+        runtime[0x88..0x8C].copy_from_slice(&[0x53, 0x00, 0x00, 0x03]);
+        let mut configuration = MockHidTransport::new(1);
+        let mut acknowledgements = MockHidTransport::new(2);
+        expect_acked_feature(
+            &mut configuration,
+            &mut acknowledgements,
+            encode_runtime_profile_read_prelude(),
+        );
+        expect_acked_feature(
+            &mut configuration,
+            &mut acknowledgements,
+            encode_profile_read_request(),
+        );
+        configuration.queue_feature_response(runtime);
+
+        let macro_definition = captured_coverage_macro();
+        let mut device = PulsefireRaid::new(configuration).unwrap();
+        assert!(matches!(
+            device.save_runtime_to_onboard_with_wait(
+                &mut acknowledgements,
+                RgbColor::BLACK,
+                RgbColor::BLACK,
+                Some(&macro_definition),
+                |_| {}
+            ),
+            Err(PulsefireRaidError::InvalidProfile(
+                PerformanceProfileError::UnconfirmedOnboardMacroControl(
+                    PulsefireRaidControl::Button4
+                )
+            ))
         ));
         device.into_transport().assert_drained();
         acknowledgements.assert_drained();
@@ -1699,6 +1767,41 @@ mod tests {
     }
 
     #[test]
+    fn driver_sends_captured_button4_ab_macro_without_changing_button5() {
+        let response = save_profile_response(ProfileSection::Runtime, true);
+        let mut expected_macro = [0_u8; DIRECT_REPORT_LENGTH];
+        expected_macro[..22].copy_from_slice(&[
+            0x07, 0x05, 0x04, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x80, 0x14, 0x04, 0x00,
+            0x14, 0x04, 0x80, 0x14, 0x05, 0x00, 0x14, 0x05,
+        ]);
+        let mut expected_write = response;
+        expected_write[1] = 0x01;
+        expected_write[0x88..0x8C].copy_from_slice(&[0x53, 0x00, 0x00, 0x03]);
+        assert_eq!(&expected_write[0x8C..0x90], &[0x53, 0x00, 0x00, 0x04]);
+
+        let mut transport = MockHidTransport::new(1);
+        transport.expect_feature_report(encode_runtime_profile_read_prelude());
+        transport.expect_feature_report(encode_profile_read_request());
+        transport.queue_feature_response(response);
+        transport.expect_feature_report(expected_macro);
+        transport.expect_feature_report(expected_write);
+
+        let assignment = PulsefireRaidRuntimeAssignment::macro_timeline(
+            PulsefireRaidControl::Button4,
+            captured_ab_macro(),
+        )
+        .unwrap();
+        let mut device = PulsefireRaid::new(transport).unwrap();
+        assert_eq!(
+            device
+                .set_runtime_button_assignment_with_wait(assignment.clone(), |_| {})
+                .unwrap(),
+            assignment
+        );
+        device.into_transport().assert_drained();
+    }
+
+    #[test]
     fn runtime_assignment_gate_separates_portable_and_target_specific_evidence() {
         let general_controls = [
             PulsefireRaidControl::MiddleClick,
@@ -1766,6 +1869,11 @@ mod tests {
         .unwrap();
         assert!(macro_assignment.ordinary_binding().is_none());
         assert!(macro_assignment.encoded_macro().unwrap().is_some());
+        assert!(PulsefireRaidRuntimeAssignment::macro_timeline(
+            PulsefireRaidControl::Button4,
+            captured_ab_macro(),
+        )
+        .is_ok());
         assert!(matches!(
             PulsefireRaidRuntimeAssignment::macro_timeline(
                 PulsefireRaidControl::Dpi,

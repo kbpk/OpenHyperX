@@ -32,8 +32,9 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
   Shortcuts, Disabled and named keyboard keys
 - capture-backed atomic standard/swapped layout for the two primary buttons,
   hardware-validated in both directions
-- additional capture-backed Button 5 TOML Play Once macros with keyboard
-  chords, per-event timings and left/right/middle clicks
+- additional capture-backed Button 4 and Button 5 runtime TOML Play Once macros
+  with keyboard chords, per-event timings and left/right/middle clicks;
+  Button 4 `ab` and Button 5 examples were physically verified
 - raw hex capture parser/diff for protocol research
 - offline NGENUITY Legacy version-40 `.hxp` inspection and partial import to a
   portable OpenHyperX TOML profile
@@ -184,6 +185,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
   run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
+  buttons set button4 macro examples/macros/ab-20ms.toml
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
+  run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
   buttons set button5 macro examples/macros/ab-20ms.toml
 ```
 
@@ -194,7 +200,8 @@ Play/Pause, Stop, Next, Previous, Mute Volume and Volume Up/Down; and named USB
 HID keyboard keys (`a-z`, digits, navigation, F1-F24, keypad and modifiers);
 and Cycle Apps, Switch Apps, Cut, Copy, Paste and Undo. An isolated DPI-button
 A-to-B capture proved that the key is the standard one-byte Keyboard/Keypad
-usage. Button 5 additionally accepts capture-backed macro timelines.
+usage. Button 4 and Button 5 additionally accept capture-backed runtime macro
+timelines.
 The physical primary controls are changed only as the captured atomic pair:
 `buttons primary-layout standard` or `buttons primary-layout swapped`.
 Independent primary writes and raw numeric usage values are not accepted by
@@ -225,7 +232,8 @@ acknowledgement through the mouse's separate acknowledgement collection, and
 restores the runtime section after the commit delay. If
 Button 5 contains the known macro reference, `--macro-definition FILE` is
 required because its event timeline cannot be read from the profile image. Do
-not supply it when Button 5 is not a macro.
+not supply it when Button 5 is not a macro. Onboard save rejects a runtime
+Button 4 macro until that target's persistent transaction is captured.
 
 Both `--wheel` and `--logo` are mandatory (`off` means black). They describe
 the two-zone static snapshot carried by NGENUITY Legacy's save transaction.
@@ -337,7 +345,7 @@ publishing them.
    explicit foreground keepalive.
 4. **Protocol exploration:** DPI stages/colors, polling runtime control,
    all Mouse/Multimedia functions and Windows Shortcuts on the nine general
-   controls, bounded Play Once Button 5 macros and the confirmed onboard-save
+   controls, bounded Play Once Button 4/5 runtime macros and the confirmed onboard-save
    path plus atomic primary-click swaps are implemented; repeat modes, longer
    macros and non-Solid firmware lighting remain capture-gated.
 5. **GUI:** Tauri client using only the public core API.
