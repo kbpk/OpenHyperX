@@ -1017,54 +1017,105 @@ fn write_dpi(report: &mut [u8; DIRECT_REPORT_LENGTH], offset: usize, dpi: u32) {
     report[offset..offset + 2].copy_from_slice(&encoded);
 }
 
+/// Decode a semantic view of an ordinary binding without rewriting its bytes.
+/// Family tags and constant zero bytes below come from complete captured
+/// records, not a universal HID record layout. Keyboard/Consumer usage values
+/// identify actions inside those vendor-specific records. See the Button 5
+/// remapping and Button 4 Mouse/Multimedia/Shortcut matrices in docs/research.md.
+/// For trailer aliases, see #mouse-binding-record-trailer-variants there:
+/// every nonzero trailer was captured in the same physical Button 4 slot, so
+/// it is not a physical-button index. The firmware meaning of the zero form
+/// remains unknown; unedited records stay intact and writes use explicit forms.
 fn decode_button_binding(
     control: PulsefireRaidControl,
     record: [u8; BUTTON_RECORD_LENGTH],
 ) -> Result<ButtonBinding, PerformanceProfileError> {
     let binding = match record {
+        // Button 5 Forward -> Disabled -> Forward capture: all four bytes zero.
+        // Must precede Keyboard's pattern, which would otherwise call it key 0.
         [0x00, 0x00, 0x00, 0x00] => ButtonBinding::Disabled,
+        // Keyboard uses byte 1 as a Keyboard/Keypad usage, not an ASCII code:
+        // isolated A -> B changed 00 04 00 00 -> 00 05 00 00 on the DPI control.
+        // Read any nonzero one-byte usage; the driver separately gates writes.
         [0x00, usage, 0x00, 0x00] => ButtonBinding::Keyboard(KeyboardUsage(u16::from(usage))),
+        // Left Click: native profile and explicit Button 4 assignment agree.
+        // Only trailer 00 is observed; F0 alone cannot distinguish DPI Toggle.
         [0x02, 0xF0, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::LeftClick),
-        // Two observed forms; do not treat the trailer as padding. The initial
-        // read profile had trailer 00 for Middle/Right/Back/Forward; explicit Legacy
-        // assignments emitted 01/02/03/04 respectively (Button 4 mouse-function
-        // captures, 2026-09-20). All four trailers occurred in the SAME physical
-        // slot, so they are not physical-button indexes. Why firmware accepts
-        // the zero form is unknown; do not infer a "default" flag or accept
-        // arbitrary trailers. Decode only these exact pairs, preserve the raw
-        // profile, and encode the captured explicit-assignment form below.
-        // See docs/research.md#mouse-binding-record-trailer-variants.
+        // Middle: initial wheel-click record ended in 00; explicit Button 4
+        // assignment ended in 01. Accept both; zero-form semantics are unknown.
         [0x02, 0xF1, 0x00, 0x00] | [0x02, 0xF1, 0x00, 0x01] => {
             ButtonBinding::Mouse(MouseFunction::MiddleClick)
         }
+        // Right: initial physical-right record ended in 00; explicit Button 4
+        // and primary-swap captures used 02. Zero-form semantics are unknown.
         [0x02, 0xF2, 0x00, 0x00] | [0x02, 0xF2, 0x00, 0x02] => {
             ButtonBinding::Mouse(MouseFunction::RightClick)
         }
+        // F3 = Down, not Up: repeated Button 4 Scroll Up/Down captures corrected
+        // the earlier reversed hypothesis. Trailer 00 is the only known form.
         [0x02, 0xF3, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::ScrollDown),
+        // F4 = Up in that same repeated matrix; physical scrolling was also
+        // verified after OpenHyperX wrote this exact record to Button 4.
         [0x02, 0xF4, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::ScrollUp),
+        // Tilt Left: F5 with trailer 00 in the native record and Button 4 matrix.
+        // No nonzero-trailer alias has been captured for this action.
         [0x02, 0xF5, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::TiltLeft),
+        // Tilt Right: F6 with trailer 00 in the native record and Button 4 matrix.
+        // Do not extend the click-action trailer pattern to tilt by analogy.
         [0x02, 0xF6, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::TiltRight),
+        // Back: initial functional Button 4 record ended in 00; explicit Button
+        // 5/4 assignments used 03. Accept both; zero-form semantics are unknown.
         [0x02, 0xF8, 0x00, 0x00] | [0x02, 0xF8, 0x00, 0x03] => {
             ButtonBinding::Mouse(MouseFunction::Back)
         }
+        // Forward: initial functional Button 5 record ended in 00; explicit
+        // Button 5/4 assignments used 04. Zero-form semantics are unknown.
         [0x02, 0xF9, 0x00, 0x00] | [0x02, 0xF9, 0x00, 0x04] => {
             ButtonBinding::Mouse(MouseFunction::Forward)
         }
+        // DPI Toggle: identical 71 F0 00 00 captured on DPI and Button 5, then
+        // in the Button 4 matrix. Family 71 makes it distinct from Left Click's
+        // 02 F0 00 00; it is not a toggle flag applied to arbitrary mouse codes.
         [0x71, 0xF0, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::DpiToggle),
+
+        // Multimedia: the seven captured 04 00 00 UU records place a Consumer
+        // usage in byte 3, unlike Keyboard's byte 1. Constant zeros stay exact;
+        // matching an arbitrary Consumer usage is not established vendor support.
+        // CD = Consumer Play/Pause; captured twice and physically verified.
         [0x04, 0x00, 0x00, 0xCD] => ButtonBinding::Multimedia(MultimediaFunction::PlayPause),
+        // B7 = Consumer Stop, not the mouse input B7 used inside macro events.
         [0x04, 0x00, 0x00, 0xB7] => ButtonBinding::Multimedia(MultimediaFunction::Stop),
+        // B5 = Consumer Scan Next Track (Legacy labels this "Next").
         [0x04, 0x00, 0x00, 0xB5] => ButtonBinding::Multimedia(MultimediaFunction::NextTrack),
+        // B6 = Consumer Scan Previous Track (Legacy labels this "Previous").
         [0x04, 0x00, 0x00, 0xB6] => ButtonBinding::Multimedia(MultimediaFunction::PreviousTrack),
+        // E2 = Consumer Mute; its meaning is not Keyboard Left Alt in this family.
         [0x04, 0x00, 0x00, 0xE2] => ButtonBinding::Multimedia(MultimediaFunction::MuteVolume),
+        // E9 = Consumer Volume Increment; initial profile + Button 5/4 captures.
         [0x04, 0x00, 0x00, 0xE9] => ButtonBinding::Multimedia(MultimediaFunction::VolumeUp),
+        // EA = Consumer Volume Decrement; initial profile + Button 4 matrix.
         [0x04, 0x00, 0x00, 0xEA] => ButtonBinding::Multimedia(MultimediaFunction::VolumeDown),
+
+        // Shortcuts: captured family 23, modifier KEY usage in byte 1, ordinary
+        // Keyboard/Keypad usage in byte 2, constant trailer 00. E0/E2/E3 are
+        // individual key usages, not HID modifier bitmasks. Only these six
+        // repeated Legacy records are known, not a general chord encoder.
+        // Cycle Apps = Left GUI/Windows (E3) + Tab (2B); Task View verified.
         [0x23, 0xE3, 0x2B, 0x00] => ButtonBinding::WindowsShortcut(WindowsShortcut::CycleApps),
+        // Switch Apps = Left Alt (E2) + Tab (2B), distinct from GUI+Tab above.
         [0x23, 0xE2, 0x2B, 0x00] => ButtonBinding::WindowsShortcut(WindowsShortcut::SwitchApps),
+        // Cut = Left Control (E0) + X (1B).
         [0x23, 0xE0, 0x1B, 0x00] => ButtonBinding::WindowsShortcut(WindowsShortcut::Cut),
+        // Copy = Left Control (E0) + C (06); captured on Button 5 and Button 4.
         [0x23, 0xE0, 0x06, 0x00] => ButtonBinding::WindowsShortcut(WindowsShortcut::Copy),
+        // Paste = Left Control (E0) + V (19).
         [0x23, 0xE0, 0x19, 0x00] => ButtonBinding::WindowsShortcut(WindowsShortcut::Paste),
+        // Undo = Left Control (E0) + Z (1D).
         [0x23, 0xE0, 0x1D, 0x00] => ButtonBinding::WindowsShortcut(WindowsShortcut::Undo),
         _ => {
+            // Never guess from a prefix or silently interpret unknown bytes as
+            // Disabled. Macro references are handled by the separate target-aware
+            // macro path; this ordinary decoder cannot recover their timelines.
             return Err(PerformanceProfileError::UnknownButtonBinding { control, record });
         }
     };
