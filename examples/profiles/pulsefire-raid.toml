@@ -1,0 +1,69 @@
+name = "Raid example"
+device = "pulsefire-raid"
+primary_buttons = "standard"
+
+[polling]
+hz = 1000
+
+[dpi]
+# OpenHyperX stage indexes are zero-based.
+active_stage = 0
+
+[[dpi.stages]]
+x = 800
+y = 800
+color = "#2B00FF"
+
+[[dpi.stages]]
+x = 1600
+y = 1600
+color = "#FFFF00"
+
+[[dpi.stages]]
+x = 3200
+y = 3200
+color = "#00FF00"
+
+[buttons.button4]
+type = "mouse"
+action = "back"
+
+[buttons.button5]
+type = "macro"
+id = "ab"
+
+[buttons.dpi]
+type = "mouse"
+action = "dpi-toggle"
+
+[lighting]
+mode = "solid"
+
+[lighting.zones]
+wheel = "#000000"
+logo = "#0000FF"
+
+[[macros]]
+id = "ab"
+name = "AB, 20 ms"
+playback = "once"
+
+[[macros.events]]
+type = "key-down"
+key = "a"
+delay_ms = 20
+
+[[macros.events]]
+type = "key-up"
+key = "a"
+delay_ms = 20
+
+[[macros.events]]
+type = "key-down"
+key = "b"
+delay_ms = 20
+
+[[macros.events]]
+type = "key-up"
+key = "b"
+delay_ms = 20

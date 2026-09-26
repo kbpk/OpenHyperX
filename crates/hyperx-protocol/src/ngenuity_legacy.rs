@@ -340,6 +340,7 @@ impl NgenuityPreset {
             dpi: Some(dpi),
             macros,
             unresolved_button_assignments,
+            ..SoftwareProfile::default()
         })
     }
 }

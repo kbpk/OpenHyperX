@@ -12,12 +12,12 @@ use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use hyperx_core::{
     ButtonBinding, DeviceDescriptor, DpiProfile, HidInterfaceInfo, KeyboardUsage, MacroDefinition,
     MouseFunction, MultimediaFunction, PollingRate, PrimaryButtonLayout, RgbColor,
-    SoftwareLightingEffect, SoftwareLightingProgram, UsbId, WindowsShortcut,
+    SoftwareLightingEffect, SoftwareLightingProgram, SoftwareProfile, UsbId, WindowsShortcut,
 };
 use hyperx_devices::{
-    find_supported_device, PulsefireRaid, PulsefireRaidOnboardMacros,
-    PulsefireRaidRuntimeAssignment, PULSEFIRE_RAID, PULSEFIRE_RAID_ACKNOWLEDGEMENT_INTERFACE,
-    PULSEFIRE_RAID_DPI,
+    find_supported_device, PulsefireRaid, PulsefireRaidOnboardMacros, PulsefireRaidProfilePreview,
+    PulsefireRaidRuntimeAssignment, PulsefireRaidSoftwareProfile, PULSEFIRE_RAID,
+    PULSEFIRE_RAID_ACKNOWLEDGEMENT_INTERFACE, PULSEFIRE_RAID_DPI,
 };
 use hyperx_hid::{HidApiDiscovery, HidApiTransport, HidDiscovery, HidTransport};
 use hyperx_protocol::{
@@ -102,6 +102,20 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum ProfileCommand {
+    /// Validate a software TOML profile without discovering or opening HID.
+    Validate { file: PathBuf },
+    /// Experimental composed runtime apply; hardware validation is pending.
+    /// Close NGENUITY/OpenRGB first. Never saves onboard.
+    Apply {
+        file: PathBuf,
+        /// Read current state and preview; send no configuration writes.
+        #[arg(long, conflicts_with = "lighting_duration")]
+        dry_run: bool,
+        /// Keep Solid RGB alive in the foreground for this many seconds.
+        /// Without this flag, RGB is sent once and may revert after ~1 second.
+        #[arg(long, value_name = "SECONDS", value_parser = clap::value_parser!(u64).range(0..=86400))]
+        lighting_duration: Option<u64>,
+    },
     /// Display confirmed fields from an NGENUITY Legacy version-40 .hxp preset.
     #[command(name = "inspect-ngenuity-legacy")]
     Inspect {
@@ -693,6 +707,60 @@ const MAX_NGENUITY_LEGACY_PRESET_BYTES: u64 = 16 * 1024 * 1024;
 
 fn profile(command: ProfileCommand) -> Result<()> {
     match command {
+        ProfileCommand::Validate { file } => {
+            let (profile, settings) = load_software_profile(&file)?;
+            println!(
+                "Validated software profile {:?} for {}.",
+                profile.name, profile.device
+            );
+            for warning in settings.warnings() {
+                println!("Warning: {warning}");
+            }
+            println!("Current-state checks are deferred to apply/dry-run (for example, preserving an omitted active stage).");
+            println!("Validation was offline; no HID device was discovered or opened.");
+            Ok(())
+        }
+        ProfileCommand::Apply {
+            file,
+            dry_run,
+            lighting_duration,
+        } => {
+            // Parse and check every supplied field before even enumerating HID.
+            let (_, settings) = load_software_profile(&file)?;
+            if lighting_duration.is_some() && settings.direct_colors().is_none() {
+                return Err(anyhow!("--lighting-duration requires a [lighting] section"));
+            }
+            if !dry_run {
+                eprintln!("Warning: composed profile apply is not yet hardware-validated; the first native test stopped on an empty readback. See docs/profile-format.md. Close NGENUITY/OpenRGB; no onboard save will be attempted.");
+            }
+            let mut device = open_pulsefire_raid()?;
+            if dry_run {
+                let preview = device.preview_software_profile(&settings)?;
+                print_software_profile_preview(&preview);
+                println!("Dry run: runtime state was read; no settings, RGB or onboard memory were written.");
+            } else {
+                let applied = device.apply_software_profile(&settings)?;
+                print_software_profile_preview(&applied);
+                println!("Runtime settings applied; written profile fields were read back and matched. Macro events/modes cannot be read back.");
+                if let Some((wheel, logo)) = settings.direct_colors() {
+                    let duration = lighting_duration.unwrap_or(0);
+                    let deadline = Instant::now() + Duration::from_secs(duration);
+                    while Instant::now() < deadline {
+                        thread::sleep(
+                            Duration::from_millis(750)
+                                .min(deadline.saturating_duration_since(Instant::now())),
+                        );
+                        if Instant::now() < deadline {
+                            device.set_volatile_direct_rgb(wheel, logo)
+                                .context("RGB keepalive failed after runtime apply; earlier changes may remain; no retry or rollback was attempted")?;
+                        }
+                    }
+                    println!("RGB foreground keepalive ended; the stored lighting effect may return after about one second.");
+                }
+                println!("No onboard memory or firmware was written. Use the separate save-to-mouse --confirm command to persist supported settings.");
+            }
+            Ok(())
+        }
         ProfileCommand::Inspect { file } => {
             let preset = load_ngenuity_legacy_preset(&file)?;
             print_ngenuity_legacy_preset(&preset);
@@ -813,6 +881,39 @@ fn profile(command: ProfileCommand) -> Result<()> {
             );
             Ok(())
         }
+    }
+}
+
+fn load_software_profile(path: &Path) -> Result<(SoftwareProfile, PulsefireRaidSoftwareProfile)> {
+    // Read through a bounded handle rather than an unchecked metadata/read pair.
+    // Profiles may contain macro timelines; avoid unbounded allocations even
+    // when a file grows between opening and reading it.
+    use std::io::Read;
+    const MAX_PROFILE_BYTES: u64 = 1024 * 1024;
+    let file = fs::File::open(path)
+        .with_context(|| format!("failed to open software profile {}", path.display()))?;
+    let mut source = String::new();
+    file.take(MAX_PROFILE_BYTES + 1)
+        .read_to_string(&mut source)
+        .with_context(|| format!("failed to read software profile {}", path.display()))?;
+    if source.len() as u64 > MAX_PROFILE_BYTES {
+        return Err(anyhow!("software profile exceeds the 1 MiB limit"));
+    }
+    let profile: SoftwareProfile = toml::from_str(&source)
+        .with_context(|| format!("failed to parse software profile {}", path.display()))?;
+    let validated = PulsefireRaidSoftwareProfile::new(&profile)?;
+    Ok((profile, validated))
+}
+
+fn print_software_profile_preview(preview: &PulsefireRaidProfilePreview) {
+    if preview.changes.is_empty() {
+        println!("No changes: supplied settings already match runtime state.");
+    }
+    for change in &preview.changes {
+        println!("{}: {} -> {}", change.setting, change.before, change.after);
+    }
+    for warning in &preview.warnings {
+        println!("Warning: {warning}");
     }
 }
 

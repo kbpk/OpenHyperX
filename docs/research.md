@@ -1630,6 +1630,66 @@ versions require isolated export comparisons before being decoded. Current
 NGENUITY requires separate discovery and must not be passed to this parser by
 assumption.
 
+## Software-profile runtime composition (2026-09-26)
+
+`profile validate`, `profile apply --dry-run` and `profile apply` compose the
+existing confirmed Raid APIs; they add no new opcodes, selectors or wire formats.
+Typed offline validation rejects unknown fields, unresolved Legacy assignments,
+invalid DPI/polling, unsupported targets/modes and macro references. Independent
+X/Y writes remain blocked. Missing active-stage selection preserves the current
+index and fails preflight if the supplied stage list would remove it.
+
+The driver precomputes every state-dependent patch before mutation and preserves
+unknown bytes at each existing runtime write. Matching ordinary aliases are not
+reencoded. Macro references are recognized separately from ordinary bindings;
+events/playback cannot be decoded from a runtime profile, so a requested macro
+always uploads its validated definition. All profile writes require final full
+image readback before RGB. Direct lighting needs both zones because existing
+colors cannot be read, and remains volatile. No onboard selector, save, startup,
+firmware operation, retry or blind rollback is introduced by apply.
+
+Golden/mock tests cover complete ordered reports, preservation, preview/no-op,
+late preflight rejection, macro upload failure and readback mismatch. Executable
+tests validate authored TOML profiles and reject invalid apply input before HID
+discovery. A separate opt-in native Windows script tests only polling and verifies
+the whole baseline image after restoration. This composition does not extend evidence for unreadable
+macro timelines, physical repeat/stop or persistent lighting effects.
+
+### First native verification: failed and stopped
+
+All 156 then-current unit/executable tests and both builds passed on Linux and
+native Windows. Hardware logs remain outside Git under Windows Temp:
+`openhyperx-profile-verify-38c11e2f553d481595c64987ac497550`.
+The release-1124 baseline and dry-run matched the complete image. The intended
+1000→500 Hz write matched that baseline except opcode 81→01 and polling offset
+18 from 01→02. Its immediate runtime read returned a 264-byte image containing
+only `07 81 04` and zeroes. Full-image comparison stopped before restoration,
+RGB or any further settings. No onboard selector or persistent write was sent.
+
+A later independent read also returned that empty body. With explicit operator
+approval, the existing fixed non-persistent vendor startup and runtime ACK probe
+both acknowledged successfully, but another read remained empty. Therefore ACK
+success does NOT establish usable profile data. Hardware operations stopped;
+the operator is remote and cannot physically reconnect or check the mouse now.
+The actual runtime polling outcome and physical behavior remain unverified;
+do not claim that the original setting was restored.
+
+An empty-baseline regression now blocks every preview/apply path, including
+RGB-only, before mutations. A conservative one-second host wait was added
+between successful runtime steps to avoid tight back-to-back writes/reads, but
+it has NOT been hardware-tested and is not a proven fix or decoded timing bound.
+Do not auto-retry writes or relax readback comparison to accept an empty image.
+TODO: physical USB reconnect, compare a fresh usable runtime image against the
+saved baseline, then investigate one isolated acknowledged write/read sequence
+with capture and verified pacing. If the baseline is still empty, stop without
+further mutable commands.
+
+Final offline verification after the safety regressions: 158 unit/executable
+tests pass on both Linux and native Windows; Linux fmt/Clippy (`-D warnings`)
+and both workspace builds pass. The last Windows check used
+`-SkipDeviceDiscovery` with no hardware-test switch: no HID device was opened
+and no additional vendor reports were sent.
+
 ## Unknowns and required evidence
 
 | Area | Current state | Required next experiment |

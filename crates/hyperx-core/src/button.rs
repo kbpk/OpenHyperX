@@ -13,7 +13,8 @@ pub enum ButtonBinding {
 }
 
 /// Mouse actions exposed by NGENUITY Legacy for Pulsefire Raid buttons.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum MouseFunction {
     LeftClick,
     RightClick,
@@ -31,14 +32,16 @@ pub enum MouseFunction {
 ///
 /// Devices may require both records to be changed in one transaction, so this
 /// is deliberately not represented as two independent button assignments.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum PrimaryButtonLayout {
     Standard,
     Swapped,
 }
 
 /// Consumer-control actions exposed by NGENUITY Legacy.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum MultimediaFunction {
     PlayPause,
     Stop,
@@ -50,7 +53,8 @@ pub enum MultimediaFunction {
 }
 
 /// Named Windows actions exposed by NGENUITY Legacy.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum WindowsShortcut {
     CycleApps,
     SwitchApps,
@@ -251,7 +255,7 @@ pub struct MacroDefinition {
 /// press another key, then release both explicitly. Mouse-button variants are
 /// modeled for future capture-backed device encoders.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(tag = "type", rename_all = "kebab-case")]
+#[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum MacroEvent {
     KeyDown { key: String, delay_ms: u16 },
     KeyUp { key: String, delay_ms: u16 },

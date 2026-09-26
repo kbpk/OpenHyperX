@@ -1,3 +1,5 @@
+param([switch]$VerifySoftwareProfilePolling, [switch]$SkipDeviceDiscovery)
+
 $ErrorActionPreference = "Stop"
 $env:CARGO_INCREMENTAL = "0"
 $cargo = Join-Path $env:USERPROFILE ".cargo\bin\cargo.exe"
@@ -25,5 +27,16 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $binary buttons validate-macro button4 examples/macros/ab-toggle-20ms.toml
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-& $binary devices
-exit $LASTEXITCODE
+& $binary profile validate examples/profiles/pulsefire-raid.toml
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+if (-not $SkipDeviceDiscovery) {
+    & $binary devices
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+
+# Explicitly opt in: normal CI/build checks never mutate a physical device.
+if ($VerifySoftwareProfilePolling) {
+    & (Join-Path $PSScriptRoot 'verify-software-profile-windows.ps1') -ConfirmRuntimeWrites
+}
+exit 0

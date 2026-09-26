@@ -17,6 +17,12 @@ use hyperx_protocol::pulsefire_raid::{
 };
 use thiserror::Error;
 
+mod software_profile;
+pub use software_profile::{
+    PulsefireRaidProfileChange, PulsefireRaidProfileError, PulsefireRaidProfilePreview,
+    PulsefireRaidSoftwareProfile,
+};
+
 const PROFILE_PRELUDE_DELAY: Duration = Duration::from_millis(65);
 // Captured selector/request/GET pacing, not values decoded from the selector's
 // fixed 64 trailer. The one-second wait is the observed onboard commit interval;
@@ -1032,7 +1038,7 @@ mod tests {
     use hyperx_hid::testing::MockHidTransport;
     use hyperx_protocol::pulsefire_raid::DpiAxis;
 
-    fn captured_ab_macro() -> MacroDefinition {
+    pub(super) fn captured_ab_macro() -> MacroDefinition {
         MacroDefinition {
             playback: MacroPlayback::Once,
             events: ["a", "b"]
@@ -1220,7 +1226,7 @@ mod tests {
         response
     }
 
-    fn save_profile_response(
+    pub(super) fn save_profile_response(
         section: ProfileSection,
         with_macro: bool,
     ) -> [u8; DIRECT_REPORT_LENGTH] {

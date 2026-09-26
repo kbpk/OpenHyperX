@@ -91,6 +91,33 @@ single-Button-5 driver entry point delegates to the multi-slot save API.
 No arbitrary phase/mode values
 or unrelated Legacy startup profile writes are replayed.
 
+## Software-profile application
+
+Portable profiles in `hyperx-core` contain optional performance, named binding,
+coupled primary-layout, macro-library and lighting sections. No field contains
+USB reports. Omitted sections mean preserve, not reset. Source provenance and
+unresolved Legacy assignment IDs are never treated as configuration commands.
+
+`PulsefireRaidSoftwareProfile::new` in the model driver validates all supplied
+values/references offline. Its private fields preserve the evidence gate for
+all clients. Preview reads a runtime snapshot and returns semantic changes and
+warnings, without setting writes. Apply rebuilds its plan from a fresh snapshot
+and validates every state-dependent patch before sending any mutation.
+All paths require a usable baseline layout, valid enabled DPI and confirmed
+binding records; a valid header with an empty body is not a usable snapshot.
+Conservative one-second host pacing separates writes, but its hardware behavior
+and the minimum necessary interval remain unverified after a failed native run.
+
+The plan composes existing captured operations, one profile write per changed
+setting family/assignment. Unknown bytes and omitted fields remain intact. A
+macro definition precedes its reference, even if the reference matches already:
+the timeline cannot be read from the image. Complete final image readback is
+required before direct RGB. This is not an atomic transaction; an error stops
+without retries or guessed rollback and earlier changes may remain. It never
+selects onboard memory. The CLI handles optional bounded foreground keepalive;
+RGB's stored effect may return afterward. Persistence remains a separate,
+explicit, acknowledged save API.
+
 ## Crate responsibilities
 
 ### `hyperx-core`

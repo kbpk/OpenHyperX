@@ -25,6 +25,7 @@ pub use lighting::{
 };
 pub use performance::{DpiProfile, DpiStage};
 pub use profile::{
-    NamedMacro, SoftwareDpiProfile, SoftwareProfile, SoftwareProfileSource,
+    NamedMacro, SoftwareButtonBinding, SoftwareDpiProfile, SoftwareLightingMode,
+    SoftwareLightingProfile, SoftwarePollingProfile, SoftwareProfile, SoftwareProfileSource,
     UnresolvedButtonAssignment,
 };

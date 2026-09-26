@@ -42,6 +42,9 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
 - offline NGENUITY Legacy version-40 `.hxp` inspection and partial import to a
   portable OpenHyperX TOML profile
 - offline DPI-stage, polling and button-profile parser/patcher with golden tests
+- software TOML profiles: offline validation, read-only change preview and
+  preservation-first runtime apply, with final full-image readback
+  (whole-profile apply hardware validation is blocked; see profile docs)
 - capture-backed, acknowledged onboard save for current DPI, polling, all 11
   button records, complete referenced Button 4/5 Play Once macros and independent
   wheel/logo Solid colors, hardware-verified across a physical power-cycle
@@ -228,6 +231,27 @@ hyperx-cli buttons validate-macro button5 examples/macros/coverage-recorded-timi
 These checks do not open HID or change the mouse. `--onboard` checks encoding
 support only; it does not perform a save or read the currently assigned macro.
 
+Validate and preview an OpenHyperX software profile before applying it.
+Whole-profile apply is not yet hardware-validated: its first polling-only test
+stopped on an empty runtime readback, and subsequent reads remain unusable.
+Do not continue mutable tests until physical reconnect and a valid baseline
+read. The older individual-operation evidence does not establish this new flow.
+
+```text
+hyperx-cli profile validate examples/profiles/pulsefire-raid.toml
+hyperx-cli profile apply examples/profiles/pulsefire-raid.toml --dry-run
+hyperx-cli profile apply examples/profiles/pulsefire-raid.toml --lighting-duration 30
+```
+
+The example changes DPI, bindings and lighting: edit it to your preferences
+first. Close NGENUITY/OpenRGB before accessing the mouse. Validation is offline;
+dry-run reads current state but sends no setting writes. Apply uses confirmed
+runtime operations only, preserving omissions and unknown bytes. It stops on
+error without retries/rollback; earlier changes may remain. Solid RGB needs
+foreground keepalive and reverts afterward. **Apply never saves onboard.** See
+[docs/profile-format.md](docs/profile-format.md) for fields, macro references,
+partial-import restrictions and an opt-in Windows polling-only hardware test.
+
 Check the acknowledgement path before saving to the mouse:
 
 ```bash
@@ -403,7 +427,10 @@ publishing them.
    controls, bounded Play Once Button 4/5 runtime macros and the confirmed onboard-save
    path plus atomic primary-click swaps are implemented; repeat modes, longer
    macros and non-Solid firmware lighting remain capture-gated.
-5. **GUI:** Tauri client using only the public core API.
+5. **Software profiles (first iteration implemented):** offline validation,
+   current-state preview and confirmed runtime apply; onboard persistence stays
+   separate and explicit.
+6. **GUI:** Tauri client using only the public core API.
 
 See [docs/reverse-engineering.md](docs/reverse-engineering.md) for the capture
 workflow and [docs/adding-device.md](docs/adding-device.md) for registry rules.

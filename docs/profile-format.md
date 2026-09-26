@@ -90,7 +90,121 @@ delay_ms = 300
 values are opaque provenance identifiers and must not be interpreted as
 physical controls without evidence.
 
-There is currently no whole-profile apply command. Applying a profile and
-persisting it onboard are separate operations: each device driver must validate
-capabilities and every mutable field, and onboard persistence remains blocked
-until its transaction and failure behavior are understood.
+## Validate, preview and apply
+
+```text
+hyperx-cli profile validate examples/profiles/pulsefire-raid.toml
+hyperx-cli profile apply examples/profiles/pulsefire-raid.toml --dry-run
+hyperx-cli profile apply examples/profiles/pulsefire-raid.toml
+hyperx-cli profile apply examples/profiles/pulsefire-raid.toml --lighting-duration 30
+```
+
+The example changes DPI, bindings and lighting: review or copy/edit it before
+applying. `validate` is entirely offline. `apply --dry-run` opens only the
+configuration collection and uses the confirmed runtime read sequence. Its
+selector/request reports do not modify settings, send RGB, initialize a session
+or select onboard memory. Close NGENUITY (also Legacy's tray process), OpenRGB
+and other writers before preview/apply; do not change settings concurrently.
+
+`name` and `device` are required; `partial` defaults to false. There is no
+OpenHyperX `format_version`. Omitted settings remain untouched, regardless of
+`partial`; this flag never implies resetting missing values. Unknown fields
+and variants are rejected rather than silently ignored.
+
+A minimal polling-only profile:
+
+```toml
+name = "Polling only"
+device = "pulsefire-raid"
+
+[polling]
+hz = 500
+```
+
+The Raid driver supports these optional sections:
+
+- `[polling] hz = 125 | 250 | 500 | 1000`.
+- `[dpi]` with 1–5 `[[dpi.stages]]` containing `x`, `y`, `color`. Axes must
+  be equal: independent X/Y writes are not hardware-confirmed. Values must be
+  200–16000 in steps of 50. Optional `active_stage` is zero-based; omitting it
+  preserves the current index. Removing that index without supplying a new one
+  is rejected before any setting writes. `source_active_stage` is provenance
+  only and is never used to select a stage.
+- `primary_buttons = "standard" | "swapped"`, one coupled operation. Individual
+  primary-button assignments are rejected.
+- `[buttons.CONTROL]`, where controls are `wheel-click`, `button4`, `button5`,
+  `button6`, `button7`, `button8`, `dpi`, `wheel-tilt-left`, `wheel-tilt-right`.
+  Example bindings: `{ type = "mouse", action = "back" }`,
+  `{ type = "keyboard", key = "left-shift" }`,
+  `{ type = "multimedia", action = "volume-up" }`,
+  `{ type = "windows-shortcut", action = "copy" }`, `{ type = "disabled" }`,
+  `{ type = "macro", id = "ab" }`. Existing target-specific gates still apply.
+- `[[macros]]` with `id`, `name`, `playback` and `[[macros.events]]` using
+  [the macro timeline model](macro-format.md). Legacy's `source_id` is accepted
+  instead of `id` and retained when serialized. IDs must be nonempty and unique;
+  references resolve within this file. All definitions are validated, including
+  unassigned macros (warned about, not uploaded). Current evidence limits remain:
+  Once on Button 4/5, Toggle/Hold only on runtime Button 4, 14 balanced events
+  maximum, and 9999 ms maximum per delay.
+- `[lighting] mode = "solid"` with `[lighting.zones] wheel = "#RRGGBB"` and
+  `logo = "#RRGGBB"`. Both zones are required: current direct colors cannot be
+  read, so an omitted zone cannot safely be preserved. Black means off. Other
+  effects and partial one-zone lighting are rejected in this profile path.
+
+Unresolved Legacy assignments block validation/application. Explicitly resolve
+them into named controls or remove the entries to request only known fields;
+opaque IDs are never interpreted as physical buttons. Partial profiles without
+unresolved assignments can apply their explicitly supplied settings.
+
+## Runtime safety and persistence
+
+Every path requires a usable baseline layout, enabled DPI in range and confirmed
+binding records; a valid header with an empty body blocks even RGB-only apply.
+The driver plans and validates **all** steps against a fresh snapshot before
+the first mutation. Existing capture-backed operations run in deterministic
+order: polling, DPI, primary layout, individual assignments, then direct RGB.
+Unknown bytes and omitted fields survive every intermediate profile write.
+Matching ordinary settings are skipped, preserving raw binding aliases.
+Steps have a conservative one-second host wait. This is not a decoded firmware
+requirement; the minimum safe interval is unknown.
+
+An unchanged macro reference does not prove unchanged events/playback: every
+requested macro uploads its definition immediately before its profile reference.
+After profile writes, a complete runtime-image readback must match the planned
+image before RGB is sent. This verifies profile bytes, **not** unreadable macro
+timelines, physical playback, LED output or power-cycle persistence.
+
+Multi-setting apply is not atomic. It stops on the first error; earlier changes
+may remain. There is no automatic retry or blind rollback. Inspect trace/state
+before deciding how to recover.
+
+Without `--lighting-duration`, direct Solid RGB is sent once and may revert
+after about one second. The option keeps it alive in the foreground for 0–86400
+seconds, never a service. It requires lighting and conflicts with `--dry-run`.
+
+No apply variant saves onboard or writes firmware. Persist supported settings
+separately using `profile save-to-mouse --confirm`, explicit wheel/logo colors,
+and definitions for all referenced supported macros. Runtime repeat support
+does not grant onboard repeat support.
+
+Opt-in native Windows polling-only verification, after closing other writers:
+
+```powershell
+.\scripts\check-windows.ps1 -VerifySoftwareProfilePolling
+```
+
+It validates/previews, changes only polling, verifies the full image, restores
+the original rate and checks a no-op. Logs and test profiles remain in a unique
+Windows temporary directory. No DPI, binding, macro, RGB or onboard command is
+sent. An ambiguous failure stops rather than restoring blindly. Normal build
+and CI checks do not enable hardware writes.
+
+**Hardware verification currently blocked:** the first native polling-only
+apply test sent the expected image but its immediate readback had a valid
+`07 81 04` header and an empty body. An independent read and the already
+confirmed non-persistent session initialization did not restore usable reads.
+No further setting writes or onboard save were attempted, and restoration
+could not be verified. Physical USB reconnect and a valid baseline read are
+required before continuing mutable tests. The new one-second pacing is an
+untested precaution, not a demonstrated fix. Do not treat whole-profile apply
+as hardware-validated yet.

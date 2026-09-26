@@ -1,24 +1,70 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
-use crate::{DpiStage, MacroDefinition};
+use crate::{
+    DpiStage, MacroDefinition, MouseFunction, MultimediaFunction, PrimaryButtonLayout, RgbColor,
+    WindowsShortcut,
+};
 
 /// A portable application profile.
 ///
 /// A profile may be partial when it was imported from a format whose fields
 /// are not completely understood. Loading a profile never implies permission
 /// to write it to a device or to onboard memory.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SoftwareProfile {
     pub name: String,
     pub device: String,
+    #[serde(default)]
     pub partial: bool,
     pub source: Option<SoftwareProfileSource>,
     pub dpi: Option<SoftwareDpiProfile>,
+    pub polling: Option<SoftwarePollingProfile>,
+    pub primary_buttons: Option<PrimaryButtonLayout>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub buttons: BTreeMap<String, SoftwareButtonBinding>,
+    pub lighting: Option<SoftwareLightingProfile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub macros: Vec<NamedMacro>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unresolved_button_assignments: Vec<UnresolvedButtonAssignment>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SoftwarePollingProfile {
+    pub hz: u16,
+}
+
+/// Portable actions use semantic names; no usage IDs or vendor records appear
+/// in a software profile. Macro references resolve within this same file.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum SoftwareButtonBinding {
+    Mouse { action: MouseFunction },
+    Keyboard { key: String },
+    Multimedia { action: MultimediaFunction },
+    WindowsShortcut { action: WindowsShortcut },
+    // Empty struct, not a unit variant: serde's internally tagged unit variant
+    // can ignore extra fields despite deny_unknown_fields. Reject typos here.
+    Disabled {},
+    Macro { id: String },
+}
+
+/// Zone IDs belong to the device's public capabilities, not USB offsets.
+/// Drivers must reject partial zone updates when current colors cannot be read.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SoftwareLightingProfile {
+    pub mode: SoftwareLightingMode,
+    pub zones: BTreeMap<String, RgbColor>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SoftwareLightingMode {
+    Solid,
 }
 
 /// DPI data in a portable software profile.
@@ -44,7 +90,11 @@ pub struct SoftwareProfileSource {
 
 /// A named macro stored in a software profile.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct NamedMacro {
+    /// `id` is convenient for authored profiles; Legacy imports retain their
+    /// opaque source identifier. Neither spelling implies a physical button.
+    #[serde(alias = "id")]
     pub source_id: String,
     pub name: String,
     #[serde(flatten)]
@@ -94,10 +144,33 @@ mod tests {
                 source_id: "44556677".to_owned(),
                 macro_source_id: Some("00112233".to_owned()),
             }],
+            ..SoftwareProfile::default()
         };
 
         let encoded = toml::to_string_pretty(&profile).unwrap();
         let decoded: SoftwareProfile = toml::from_str(&encoded).unwrap();
         assert_eq!(decoded, profile);
+    }
+
+    #[test]
+    fn authored_profile_sections_round_trip_and_defaults_do_not_reset_omissions() {
+        let profile: SoftwareProfile = toml::from_str(include_str!(
+            "../../../examples/profiles/pulsefire-raid.toml"
+        ))
+        .unwrap();
+        assert!(!profile.partial);
+        assert_eq!(profile.macros[0].source_id, "ab");
+        let encoded = toml::to_string_pretty(&profile).unwrap();
+        assert_eq!(
+            toml::from_str::<SoftwareProfile>(&encoded).unwrap(),
+            profile
+        );
+        let minimal: SoftwareProfile =
+            toml::from_str("name = 'Minimal'\ndevice = 'pulsefire-raid'\n[polling]\nhz = 1000\n")
+                .unwrap();
+        assert!(minimal.dpi.is_none());
+        assert!(minimal.buttons.is_empty());
+        assert!(minimal.primary_buttons.is_none());
+        assert!(minimal.lighting.is_none());
     }
 }
