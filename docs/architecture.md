@@ -98,6 +98,9 @@ from unresolved source values.
 Hardware capabilities and implemented protocol operations are separate facts.
 For example, Pulsefire Raid advertises onboard memory, while its write API is
 limited to the fields and transaction variants established by captures.
+`MacroCapabilities` describes implemented support for one physical control:
+runtime and onboard modes are independent, with event and timing limits.
+It is deliberately separate from hardware-level `CapabilitySet`.
 
 ### `hyperx-hid`
 
@@ -120,6 +123,9 @@ vendor-format parsers such as NGENUITY Legacy `.hxp`, and typed report
 encoders/decoders.
 Encoders must validate ranges, use fixed packet sizes and have golden tests.
 Raw TX/RX logging is emitted only at `trace` level.
+The Raid codec has one target-encoding table containing each confirmed macro
+target's wire code and `MacroCapabilities`. Encoding, parsing and onboard
+conversion all use this table; target gates are not duplicated in the driver.
 
 ### `hyperx-devices`
 
@@ -132,6 +138,10 @@ indexes internally; user-facing clients translate those to one-based numbers.
 Device-specific, target-aware assignment evidence gates and persistent-write
 validation live in the driver so a future GUI cannot bypass the CLI's
 restricted writable set.
+For macros, the driver exposes the codec's support through
+`PulsefireRaidRuntimeAssignment::macro_capabilities(control)` and delegates
+encoding validation to the codec. Adding a confirmed target must not require
+another conditional in the CLI or driver.
 
 ### `hyperx-cli`
 

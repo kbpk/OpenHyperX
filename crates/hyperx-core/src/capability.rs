@@ -2,6 +2,29 @@ use std::{fmt, str::FromStr};
 
 use thiserror::Error;
 
+use crate::MacroPlayback;
+
+/// Implemented macro encoding support for one physical control, not a claim
+/// about all hardware features or verified physical playback behavior.
+/// Runtime and persistent support are intentionally independent.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MacroCapabilities {
+    pub runtime_playback: &'static [MacroPlayback],
+    pub onboard_playback: &'static [MacroPlayback],
+    pub max_events: usize,
+    pub max_delay_ms: u16,
+}
+
+impl MacroCapabilities {
+    pub fn supports_runtime(self, playback: MacroPlayback) -> bool {
+        self.runtime_playback.contains(&playback)
+    }
+
+    pub fn supports_onboard(self, playback: MacroPlayback) -> bool {
+        self.onboard_playback.contains(&playback)
+    }
+}
+
 /// A high-level feature exposed by a device.
 ///
 /// This says what the hardware is expected to support. It does not imply that
@@ -125,6 +148,27 @@ mod tests {
         step: 50,
         max_stages: 5,
     };
+
+    #[test]
+    fn macro_runtime_and_onboard_support_are_independent() {
+        let capabilities = MacroCapabilities {
+            runtime_playback: &[MacroPlayback::Once, MacroPlayback::ToggleRepeat],
+            onboard_playback: &[MacroPlayback::Once],
+            max_events: 14,
+            max_delay_ms: 9_999,
+        };
+        assert!(capabilities.supports_runtime(MacroPlayback::ToggleRepeat));
+        assert!(!capabilities.supports_onboard(MacroPlayback::ToggleRepeat));
+        assert!(capabilities.supports_onboard(MacroPlayback::Once));
+        assert!(!capabilities.supports_runtime(MacroPlayback::RepeatWhileHeld));
+        for (playback, name) in [
+            (MacroPlayback::Once, "once"),
+            (MacroPlayback::ToggleRepeat, "toggle-repeat"),
+            (MacroPlayback::RepeatWhileHeld, "repeat-while-held"),
+        ] {
+            assert_eq!(playback.to_string(), name);
+        }
+    }
 
     #[test]
     fn validates_dpi_range_and_step() {

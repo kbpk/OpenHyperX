@@ -224,6 +224,16 @@ pub enum MacroPlayback {
     RepeatWhileHeld,
 }
 
+impl fmt::Display for MacroPlayback {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Once => "once",
+            Self::ToggleRepeat => "toggle-repeat",
+            Self::RepeatWhileHeld => "repeat-while-held",
+        })
+    }
+}
+
 /// Platform-independent software macro definition.
 ///
 /// Device drivers validate which event shapes, keys, timings and playback

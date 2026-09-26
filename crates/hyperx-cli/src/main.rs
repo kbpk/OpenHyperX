@@ -383,6 +383,16 @@ enum PollingCommand {
 enum ButtonsCommand {
     /// Show all 11 runtime button mappings.
     List,
+    /// Show implemented macro targets, modes and limits without opening HID.
+    Capabilities,
+    /// Validate a TOML macro for a target without discovering or opening HID.
+    ValidateMacro {
+        control: ButtonControlArg,
+        file: PathBuf,
+        /// Also require a confirmed onboard encoding; does not save anything.
+        #[arg(long)]
+        onboard: bool,
+    },
     /// Set the coupled physical left/right layout; does not save onboard.
     PrimaryLayout {
         #[arg(value_enum)]
@@ -631,7 +641,7 @@ fn load_button_macro(
         .with_context(|| format!("unsupported Pulsefire Raid macro in {}", path.display()))?;
     Ok((
         assignment,
-        format!("macro ({playback:?}) from {}", path.display()),
+        format!("macro ({playback}) from {}", path.display()),
     ))
 }
 
@@ -1698,6 +1708,54 @@ fn polling(command: PollingCommand) -> Result<()> {
 
 fn buttons(command: ButtonsCommand) -> Result<()> {
     match command {
+        ButtonsCommand::Capabilities => {
+            println!("HyperX Pulsefire Raid: implemented macro encodings (offline)");
+            for control in PulsefireRaidControl::ALL {
+                match PulsefireRaidRuntimeAssignment::macro_capabilities(control) {
+                    Some(capabilities) => {
+                        let modes = |playback: &[hyperx_core::MacroPlayback]| {
+                            playback
+                                .iter()
+                                .map(ToString::to_string)
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        };
+                        println!(
+                            "  {}: runtime [{}]; onboard [{}]; max {} events, delay 0..{} ms",
+                            control.name(),
+                            modes(capabilities.runtime_playback),
+                            modes(capabilities.onboard_playback),
+                            capabilities.max_events,
+                            capabilities.max_delay_ms
+                        );
+                    }
+                    None => println!("  {}: macro encoding not implemented", control.name()),
+                }
+            }
+            println!("Encoding support does not imply verified physical repeat/stop behavior.");
+        }
+        ButtonsCommand::ValidateMacro {
+            control,
+            file,
+            onboard,
+        } => {
+            let control = control.protocol_control();
+            let (assignment, _) = load_button_macro(control, &file)?;
+            let definition = assignment
+                .macro_definition()
+                .expect("validated macro assignment");
+            if onboard {
+                PulsefireRaidOnboardMacros::new(&[(control, definition)])?;
+            }
+            let destination = if onboard { "onboard" } else { "runtime" };
+            println!(
+                "Valid {destination} macro for {}: {} events, playback {}.",
+                control.name(),
+                definition.events.len(),
+                definition.playback
+            );
+            println!("Offline validation only; no HID device was discovered or opened.");
+        }
         ButtonsCommand::List => {
             let mut device = open_pulsefire_raid()?;
             let profile = device.runtime_profile().context(

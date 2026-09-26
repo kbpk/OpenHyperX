@@ -14,8 +14,8 @@ pub use button::{
     PrimaryButtonLayout, WindowsShortcut,
 };
 pub use capability::{
-    Capability, CapabilitySet, DpiCapabilities, DpiValidationError, LightingZone, PollingRate,
-    PollingRateParseError,
+    Capability, CapabilitySet, DpiCapabilities, DpiValidationError, LightingZone,
+    MacroCapabilities, PollingRate, PollingRateParseError,
 };
 pub use color::{ColorParseError, RgbColor};
 pub use device::{DeviceDescriptor, HidInterfaceInfo, InterfaceSelector, UsbId};

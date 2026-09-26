@@ -2,9 +2,9 @@ use std::time::Duration;
 
 use hyperx_core::{
     ButtonBinding, Capability, CapabilitySet, DeviceDescriptor, DpiCapabilities, DpiProfile,
-    DpiValidationError, InterfaceSelector, KeyboardUsage, LightingZone, MacroDefinition,
-    MacroEvent, MacroPlayback, MouseFunction, MultimediaFunction, PollingRate, PrimaryButtonLayout,
-    RgbColor, UsbId, WindowsShortcut,
+    DpiValidationError, InterfaceSelector, KeyboardUsage, LightingZone, MacroCapabilities,
+    MacroDefinition, MacroEvent, MouseFunction, MultimediaFunction, PollingRate,
+    PrimaryButtonLayout, RgbColor, UsbId, WindowsShortcut,
 };
 use hyperx_hid::{HidError, HidTransport};
 use hyperx_protocol::pulsefire_raid::{
@@ -113,6 +113,11 @@ enum PulsefireRaidRuntimeAction {
 }
 
 impl PulsefireRaidRuntimeAssignment {
+    /// Implemented macro support for a target, available without HID I/O.
+    pub fn macro_capabilities(control: PulsefireRaidControl) -> Option<MacroCapabilities> {
+        control.macro_capabilities()
+    }
+
     /// Validate an ordinary binding against captured record evidence and the
     /// target control's observed NGENUITY Legacy capabilities.
     ///
@@ -186,12 +191,6 @@ impl PulsefireRaidRuntimeAssignment {
         control: PulsefireRaidControl,
         definition: MacroDefinition,
     ) -> Result<Self, PulsefireRaidError> {
-        if !matches!(
-            control,
-            PulsefireRaidControl::Button4 | PulsefireRaidControl::Button5
-        ) {
-            return Err(PulsefireRaidError::UnconfirmedMacroControl(control));
-        }
         let assignment = Self {
             control,
             action: PulsefireRaidRuntimeAction::Macro(definition),
@@ -230,11 +229,6 @@ fn encode_macro_definition(
     control: PulsefireRaidControl,
     definition: &MacroDefinition,
 ) -> Result<PulsefireRaidMacro, PulsefireRaidError> {
-    if definition.playback != MacroPlayback::Once && control != PulsefireRaidControl::Button4 {
-        return Err(PulsefireRaidError::UnsupportedMacroPlayback(
-            definition.playback,
-        ));
-    }
     let events = definition
         .events
         .iter()
@@ -352,12 +346,6 @@ pub enum PulsefireRaidError {
         control: PulsefireRaidControl,
         binding: ButtonBinding,
     },
-    #[error(
-        "runtime macros are not capture-backed for {0:?}; only Button 4 and Button 5 are supported"
-    )]
-    UnconfirmedMacroControl(PulsefireRaidControl),
-    #[error("Pulsefire Raid repeat playback {0:?} is captured only for runtime Button 4")]
-    UnsupportedMacroPlayback(MacroPlayback),
     #[error("unknown macro keyboard key {0:?}")]
     UnknownMacroKey(String),
     #[error("unknown or unconfirmed macro mouse button {0:?}; use left, right or middle")]
@@ -399,12 +387,6 @@ impl PulsefireRaidOnboardMacros {
                 .any(|report: &PulsefireRaidMacro| report.control() == control)
             {
                 return Err(PulsefireRaidError::DuplicateOnboardMacroDefinition(control));
-            }
-            if !matches!(
-                control,
-                PulsefireRaidControl::Button4 | PulsefireRaidControl::Button5
-            ) {
-                return Err(PulsefireRaidError::UnconfirmedMacroControl(control));
             }
             let report = encode_macro_definition(control, definition)?;
             report.to_onboard_report()?;
@@ -1019,6 +1001,7 @@ fn save_acknowledgement(opcode: u8) -> [u8; SAVE_ACK_LENGTH] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hyperx_core::MacroPlayback;
     use hyperx_hid::testing::MockHidTransport;
 
     fn captured_ab_macro() -> MacroDefinition {
@@ -1039,6 +1022,48 @@ mod tests {
                     ]
                 })
                 .collect(),
+        }
+    }
+
+    #[test]
+    fn advertised_macro_support_matches_runtime_and_onboard_validation_for_every_control() {
+        let once = captured_ab_macro();
+        for control in PulsefireRaidControl::ALL {
+            let capabilities = PulsefireRaidRuntimeAssignment::macro_capabilities(control);
+            assert_eq!(
+                capabilities.is_some(),
+                matches!(
+                    control,
+                    PulsefireRaidControl::Button4 | PulsefireRaidControl::Button5
+                )
+            );
+            if let Some(capabilities) = capabilities {
+                assert_eq!(capabilities.max_events, 14);
+                assert_eq!(capabilities.max_delay_ms, 9_999);
+            }
+            for playback in [
+                MacroPlayback::Once,
+                MacroPlayback::ToggleRepeat,
+                MacroPlayback::RepeatWhileHeld,
+            ] {
+                let definition = MacroDefinition {
+                    playback,
+                    ..once.clone()
+                };
+                let runtime =
+                    PulsefireRaidRuntimeAssignment::macro_timeline(control, definition.clone());
+                assert_eq!(
+                    runtime.is_ok(),
+                    capabilities.is_some_and(|caps| caps.supports_runtime(playback)),
+                    "runtime {control:?} {playback:?}"
+                );
+                let onboard = PulsefireRaidOnboardMacros::new(&[(control, &definition)]);
+                assert_eq!(
+                    onboard.is_ok(),
+                    capabilities.is_some_and(|caps| caps.supports_onboard(playback)),
+                    "onboard {control:?} {playback:?}"
+                );
+            }
         }
     }
 
@@ -1472,8 +1497,8 @@ mod tests {
         ));
         assert!(matches!(
             PulsefireRaidOnboardMacros::new(&[(PulsefireRaidControl::Dpi, &ab)]),
-            Err(PulsefireRaidError::UnconfirmedMacroControl(
-                PulsefireRaidControl::Dpi
+            Err(PulsefireRaidError::InvalidMacro(
+                PulsefireRaidMacroError::UnsupportedControl(PulsefireRaidControl::Dpi)
             ))
         ));
         let mut invalid = ab;
@@ -2436,8 +2461,8 @@ mod tests {
                 PulsefireRaidControl::Dpi,
                 captured_coverage_macro(),
             ),
-            Err(PulsefireRaidError::UnconfirmedMacroControl(
-                PulsefireRaidControl::Dpi
+            Err(PulsefireRaidError::InvalidMacro(
+                PulsefireRaidMacroError::UnsupportedControl(PulsefireRaidControl::Dpi)
             ))
         ));
 
@@ -2448,8 +2473,11 @@ mod tests {
                 PulsefireRaidControl::Button5,
                 unsupported_playback,
             ),
-            Err(PulsefireRaidError::UnsupportedMacroPlayback(
-                MacroPlayback::ToggleRepeat
+            Err(PulsefireRaidError::InvalidMacro(
+                PulsefireRaidMacroError::UnsupportedPlayback {
+                    control: PulsefireRaidControl::Button5,
+                    playback: MacroPlayback::ToggleRepeat,
+                }
             ))
         ));
     }
@@ -2507,7 +2535,9 @@ mod tests {
             )) if actual == playback));
             assert!(matches!(PulsefireRaidRuntimeAssignment::macro_timeline(
                 PulsefireRaidControl::Button5, definition.clone(),
-            ), Err(PulsefireRaidError::UnsupportedMacroPlayback(actual)) if actual == playback));
+            ), Err(PulsefireRaidError::InvalidMacro(PulsefireRaidMacroError::UnsupportedPlayback {
+                control: PulsefireRaidControl::Button5, playback: actual,
+            })) if actual == playback));
             definition.events.clear();
             assert!(PulsefireRaidRuntimeAssignment::macro_timeline(
                 PulsefireRaidControl::Button4,

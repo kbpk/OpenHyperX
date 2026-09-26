@@ -19,5 +19,11 @@ $binary = Join-Path (Get-Location) "target\$target\debug\hyperx-cli.exe"
 & $binary --version
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+& $binary buttons capabilities
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+& $binary buttons validate-macro button4 examples/macros/ab-toggle-20ms.toml
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 & $binary devices
 exit $LASTEXITCODE

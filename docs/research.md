@@ -1461,6 +1461,28 @@ restoration, not repeated key output, stop-on-second-press, stop-on-release or
 persistence. Those physical checks remain separate; no operator clicking was
 required for this first implementation.
 
+### Centralized macro support and offline validation
+
+The original Button-4-only repeat condition represented available evidence,
+not a discovered hardware restriction. The driver and codec previously
+duplicated that condition. A single target-encoding table now supplies wire
+codes, runtime/onboard playback support and event/timing limits to the encoder,
+parser, driver and offline CLI commands. No additional target or mode has been
+promoted from hypothesis to supported encoding by this refactor.
+
+`buttons capabilities` reports this implemented matrix without HID discovery.
+`buttons validate-macro CONTROL FILE [--onboard]` validates an arbitrary TOML
+timeline against the same driver/codec gates without connecting to a device.
+An exhaustive capability test covers all 11 controls and all three playback
+modes for runtime and onboard. Executable smoke tests cover successful offline
+validation and rejected targets/persistence on Linux and Windows. Existing
+complete golden packets and exact mock transactions remain the wire regression
+checks. No new USB writes or physical playback claims are involved.
+Verification on 2026-09-26 passed Linux format/Clippy, all 135 tests on Linux
+and native Windows, and both builds. The native executable ran the offline
+commands successfully and discovery still listed all seven Raid HID collections
+with release `1124`. The support matrix and device state remain unchanged.
+
 ## NGENUITY Legacy `.hxp` preset format
 
 On 2026-09-18, an exported `Base Settings.hxp` from NGENUITY Legacy `5.38.0.0`

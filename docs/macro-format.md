@@ -4,6 +4,21 @@ Software macros are TOML files with a playback policy and an ordered event
 timeline. The model is platform-independent; a device driver must separately
 confirm that it can encode every requested event.
 
+Check implemented support and validate files without connecting a mouse or
+closing NGENUITY:
+
+```text
+hyperx-cli buttons capabilities
+hyperx-cli buttons validate-macro button4 examples/macros/ab-toggle-20ms.toml
+hyperx-cli buttons validate-macro button5 examples/macros/coverage-recorded-timing.toml --onboard
+```
+
+Both commands are completely offline. `--onboard` also checks the confirmed
+persistent encoding; it does not save a profile or verify that this definition
+matches the currently assigned macro. Invalid target/mode combinations fail
+before any discovery. `capabilities` describes implemented macro encodings,
+not the entire button-remapping API or verified physical playback behavior.
+
 ```toml
 playback = "once"
 

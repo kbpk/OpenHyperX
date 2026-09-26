@@ -1,6 +1,6 @@
 use hyperx_core::{
-    ButtonBinding, DpiProfile, DpiStage, KeyboardUsage, MacroPlayback, MouseFunction,
-    MultimediaFunction, PollingRate, PrimaryButtonLayout, RgbColor, WindowsShortcut,
+    ButtonBinding, DpiProfile, DpiStage, KeyboardUsage, MacroCapabilities, MacroPlayback,
+    MouseFunction, MultimediaFunction, PollingRate, PrimaryButtonLayout, RgbColor, WindowsShortcut,
 };
 use thiserror::Error;
 
@@ -34,6 +34,42 @@ const MACRO_TARGET_OFFSET: usize = 3;
 const MACRO_PLAYBACK_OFFSET: usize = 8;
 pub const MAX_CAPTURE_BACKED_MACRO_EVENTS: usize = 14;
 pub const MAX_MACRO_DELAY_MS: u16 = 9_999;
+
+struct MacroTargetEncoding {
+    control: PulsefireRaidControl,
+    code: u8,
+    capabilities: MacroCapabilities,
+}
+
+// One source of truth for encoding, parsing, driver validation and clients.
+// Add a target/mode only after its own evidence; a shared packet shape alone
+// does not establish support. See docs/research.md, runtime repeat captures.
+const MACRO_TARGETS: &[MacroTargetEncoding] = &[
+    MacroTargetEncoding {
+        control: PulsefireRaidControl::Button4,
+        code: 0x03,
+        capabilities: MacroCapabilities {
+            runtime_playback: &[
+                MacroPlayback::Once,
+                MacroPlayback::ToggleRepeat,
+                MacroPlayback::RepeatWhileHeld,
+            ],
+            onboard_playback: &[MacroPlayback::Once],
+            max_events: MAX_CAPTURE_BACKED_MACRO_EVENTS,
+            max_delay_ms: MAX_MACRO_DELAY_MS,
+        },
+    },
+    MacroTargetEncoding {
+        control: PulsefireRaidControl::Button5,
+        code: 0x04,
+        capabilities: MacroCapabilities {
+            runtime_playback: &[MacroPlayback::Once],
+            onboard_playback: &[MacroPlayback::Once],
+            max_events: MAX_CAPTURE_BACKED_MACRO_EVENTS,
+            max_delay_ms: MAX_MACRO_DELAY_MS,
+        },
+    },
+];
 const DPI_UNIT: u32 = 50;
 const MIN_DPI: u32 = 200;
 const MAX_DPI: u32 = 16_000;
@@ -121,12 +157,16 @@ impl PulsefireRaidControl {
         matches!(self, Self::LeftClick | Self::RightClick)
     }
 
-    const fn confirmed_macro_target(self) -> Option<u8> {
-        match self {
-            Self::Button4 => Some(0x03),
-            Self::Button5 => Some(0x04),
-            _ => None,
-        }
+    fn macro_encoding(self) -> Option<&'static MacroTargetEncoding> {
+        MACRO_TARGETS.iter().find(|target| target.control == self)
+    }
+
+    pub fn macro_capabilities(self) -> Option<MacroCapabilities> {
+        self.macro_encoding().map(|target| target.capabilities)
+    }
+
+    fn confirmed_macro_target(self) -> Option<u8> {
+        self.macro_encoding().map(|target| target.code)
     }
 }
 
@@ -648,14 +688,14 @@ impl PulsefireRaidMacro {
         events: &[PulsefireRaidMacroEvent],
     ) -> Result<Self, PulsefireRaidMacroError> {
         let target = control
-            .confirmed_macro_target()
+            .macro_encoding()
             .ok_or(PulsefireRaidMacroError::UnsupportedControl(control))?;
         validate_macro_playback(control, playback)?;
-        validate_macro_events(events)?;
+        validate_macro_events(events, target.capabilities)?;
 
         let mut report = [0_u8; DIRECT_REPORT_LENGTH];
         report[..CONFIRMED_MACRO_HEADER.len()].copy_from_slice(&CONFIRMED_MACRO_HEADER);
-        report[MACRO_TARGET_OFFSET] = target;
+        report[MACRO_TARGET_OFFSET] = target.code;
         report[MACRO_PLAYBACK_OFFSET..MACRO_PLAYBACK_OFFSET + 2]
             .copy_from_slice(&macro_playback_bytes(playback));
         let mut offset = CONFIRMED_MACRO_HEADER.len();
@@ -695,11 +735,13 @@ impl PulsefireRaidMacro {
             .try_into()
             .map_err(|_| PulsefireRaidMacroError::WrongLength(report.len()))?;
 
-        let control = match report[MACRO_TARGET_OFFSET] {
-            0x03 => PulsefireRaidControl::Button4,
-            0x04 => PulsefireRaidControl::Button5,
-            code => return Err(PulsefireRaidMacroError::UnknownControlCode(code)),
-        };
+        let target = MACRO_TARGETS
+            .iter()
+            .find(|target| target.code == report[MACRO_TARGET_OFFSET])
+            .ok_or(PulsefireRaidMacroError::UnknownControlCode(
+                report[MACRO_TARGET_OFFSET],
+            ))?;
+        let control = target.control;
 
         for (offset, (&actual, &expected)) in
             report.iter().zip(CONFIRMED_MACRO_HEADER.iter()).enumerate()
@@ -763,7 +805,7 @@ impl PulsefireRaidMacro {
             offset += 3;
         }
 
-        validate_macro_events(&events)?;
+        validate_macro_events(&events, target.capabilities)?;
         Ok(Self {
             report,
             events,
@@ -820,17 +862,12 @@ impl PulsefireRaidMacro {
     /// Repeated Button 4 AB and Button 5 14-event save captures changed only
     /// the profile-section byte from runtime `0x04` to onboard `0x01`.
     pub fn to_onboard_report(&self) -> Result<[u8; DIRECT_REPORT_LENGTH], PulsefireRaidMacroError> {
-        if self.playback != MacroPlayback::Once {
+        let capabilities = self.control.macro_capabilities().ok_or(
+            PulsefireRaidMacroError::UnconfirmedOnboardControl(self.control),
+        )?;
+        if !capabilities.supports_onboard(self.playback) {
             return Err(PulsefireRaidMacroError::UnconfirmedOnboardPlayback(
                 self.playback,
-            ));
-        }
-        if !matches!(
-            self.control,
-            PulsefireRaidControl::Button4 | PulsefireRaidControl::Button5
-        ) {
-            return Err(PulsefireRaidMacroError::UnconfirmedOnboardControl(
-                self.control,
             ));
         }
         let mut report = self.report;
@@ -843,7 +880,10 @@ fn validate_macro_playback(
     control: PulsefireRaidControl,
     playback: MacroPlayback,
 ) -> Result<(), PulsefireRaidMacroError> {
-    if playback != MacroPlayback::Once && control != PulsefireRaidControl::Button4 {
+    let capabilities = control
+        .macro_capabilities()
+        .ok_or(PulsefireRaidMacroError::UnsupportedControl(control))?;
+    if !capabilities.supports_runtime(playback) {
         return Err(PulsefireRaidMacroError::UnsupportedPlayback { control, playback });
     }
     Ok(())
@@ -859,24 +899,25 @@ const fn macro_playback_bytes(playback: MacroPlayback) -> [u8; 2] {
 
 fn validate_macro_events(
     events: &[PulsefireRaidMacroEvent],
+    capabilities: MacroCapabilities,
 ) -> Result<(), PulsefireRaidMacroError> {
     if events.is_empty() {
         return Err(PulsefireRaidMacroError::EmptyEvents);
     }
-    if events.len() > MAX_CAPTURE_BACKED_MACRO_EVENTS {
+    if events.len() > capabilities.max_events {
         return Err(PulsefireRaidMacroError::TooManyEvents {
             actual: events.len(),
-            maximum: MAX_CAPTURE_BACKED_MACRO_EVENTS,
+            maximum: capabilities.max_events,
         });
     }
 
     let mut held = Vec::new();
     for (index, event) in events.iter().enumerate() {
-        if event.delay_ms > MAX_MACRO_DELAY_MS {
+        if event.delay_ms > capabilities.max_delay_ms {
             return Err(PulsefireRaidMacroError::DelayOutOfRange {
                 event: index + 1,
                 delay_ms: event.delay_ms,
-                maximum: MAX_MACRO_DELAY_MS,
+                maximum: capabilities.max_delay_ms,
             });
         }
         macro_input_code(event.input)?;

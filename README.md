@@ -217,6 +217,17 @@ buttons. Unsupported targets/modes, keys and malformed timelines are rejected
 before the mouse is opened. See [docs/macro-format.md](docs/macro-format.md).
 These commands do not save onboard.
 
+Inspect implemented macro support or validate a macro file entirely offline:
+
+```text
+hyperx-cli buttons capabilities
+hyperx-cli buttons validate-macro button4 examples/macros/ab-toggle-20ms.toml
+hyperx-cli buttons validate-macro button5 examples/macros/coverage-recorded-timing.toml --onboard
+```
+
+These checks do not open HID or change the mouse. `--onboard` checks encoding
+support only; it does not perform a save or read the currently assigned macro.
+
 Check the acknowledgement path before saving to the mouse:
 
 ```bash
