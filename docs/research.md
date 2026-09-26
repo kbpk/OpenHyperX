@@ -915,6 +915,50 @@ Task View exactly like Win+Tab. OpenHyperX restored Button 4 to Back and a
 final read confirmed that the other mappings were unchanged. Both writes were
 volatile; no onboard save was sent.
 
+### Mouse binding record trailer variants
+
+The final byte of some `02 Fx 00 TT` records has two observed forms. The initial
+locally read profile contained the zero-trailer records below; explicit
+NGENUITY Legacy assignments emitted the other form:
+
+| Function | Initially read record | Explicit Legacy assignment |
+| --- | --- | --- |
+| Middle Click | `02 F1 00 00` | `02 F1 00 01` |
+| Right Click | `02 F2 00 00` | `02 F2 00 02` |
+| Back | `02 F8 00 00` | `02 F8 00 03` |
+| Forward | `02 F9 00 00` | `02 F9 00 04` |
+
+Evidence: the correlated initial profile records above, the isolated Button 5
+series on 2026-09-13, the Button 4 Mouse Function matrix on 2026-09-20, and the
+coupled primary-click series described next. The fixture
+`captured_button_profile()` retains the original zero variants;
+`golden_button4_mouse_function_matrix_matches_local_capture_series` checks
+the explicit assignment records.
+
+The nonzero values track the selected function, not the physical control:
+Middle `01`, Right `02`, Back `03` and Forward `04` were all emitted at the
+same Button 4 offset `0x88`. The coupled primary series also moved the entire
+Right record, including `02`, between physical left and right slots. Left
+Click has trailer `00` in both observed contexts, so it cannot distinguish
+the two forms.
+
+**Unknown:** the firmware meaning of `TT=00` versus the function-specific
+value. A redundant action ordinal is a hypothesis, not an established field
+definition. We have not established a default/factory flag, padding, a firmware
+version distinction, or that arbitrary values are ignored. The initial profile
+was not obtained after a factory reset, so its zero values must not be labeled
+as confirmed factory defaults. The decoder therefore accepts only the exact
+observed alternatives. The encoder uses Legacy's explicit-assignment form;
+unrelated edits and write-report conversion preserve unedited raw records.
+
+TODO: if investigating the origin of zero trailers, retain complete GET images
+before and after reassigning the *native wheel-click control* from Middle to a
+known ordinary action and back to Middle, including an initial no-op read.
+Compare the existing onboard/runtime images and startup captures offline first;
+do not send guessed trailer values or reset the mouse to manufacture a baseline.
+That can establish when Legacy replaces the zero form, but cannot alone prove
+how firmware interprets the extra byte.
+
 ### Coupled primary-button layout
 
 On 2026-09-20, the first attempted primary-button matrix exposed an important

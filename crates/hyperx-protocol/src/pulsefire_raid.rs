@@ -1025,6 +1025,15 @@ fn decode_button_binding(
         [0x00, 0x00, 0x00, 0x00] => ButtonBinding::Disabled,
         [0x00, usage, 0x00, 0x00] => ButtonBinding::Keyboard(KeyboardUsage(u16::from(usage))),
         [0x02, 0xF0, 0x00, 0x00] => ButtonBinding::Mouse(MouseFunction::LeftClick),
+        // Two observed forms; do not treat the trailer as padding. The initial
+        // read profile had trailer 00 for Middle/Right/Back/Forward; explicit Legacy
+        // assignments emitted 01/02/03/04 respectively (Button 4 mouse-function
+        // captures, 2026-09-20). All four trailers occurred in the SAME physical
+        // slot, so they are not physical-button indexes. Why firmware accepts
+        // the zero form is unknown; do not infer a "default" flag or accept
+        // arbitrary trailers. Decode only these exact pairs, preserve the raw
+        // profile, and encode the captured explicit-assignment form below.
+        // See docs/research.md#mouse-binding-record-trailer-variants.
         [0x02, 0xF1, 0x00, 0x00] | [0x02, 0xF1, 0x00, 0x01] => {
             ButtonBinding::Mouse(MouseFunction::MiddleClick)
         }
@@ -1075,6 +1084,8 @@ fn encode_button_binding(
                 .ok_or(PerformanceProfileError::KeyboardUsageOutOfRange(*usage))?;
             [0x00, usage, 0x00, 0x00]
         }
+        // Use Legacy's captured explicit-assignment form, not the zero-trailer
+        // aliases accepted on read. Unedited records are never normalized.
         ButtonBinding::Mouse(function) => match function {
             MouseFunction::LeftClick => [0x02, 0xF0, 0x00, 0x00],
             MouseFunction::MiddleClick => [0x02, 0xF1, 0x00, 0x01],
@@ -2056,6 +2067,83 @@ mod tests {
             assert!(changed_offsets(&original, profile.as_bytes())
                 .iter()
                 .all(|offset| (0x88..0x8C).contains(offset)));
+        }
+    }
+
+    #[test]
+    fn mouse_binding_trailer_aliases_decode_without_normalizing_unedited_records() {
+        for (control, offset, function, opcode, explicit_trailer) in [
+            (
+                PulsefireRaidControl::MiddleClick,
+                0x84,
+                MouseFunction::MiddleClick,
+                0xF1,
+                1,
+            ),
+            (
+                PulsefireRaidControl::RightClick,
+                0x80,
+                MouseFunction::RightClick,
+                0xF2,
+                2,
+            ),
+            (
+                PulsefireRaidControl::Button4,
+                0x88,
+                MouseFunction::Back,
+                0xF8,
+                3,
+            ),
+            (
+                PulsefireRaidControl::Button5,
+                0x8C,
+                MouseFunction::Forward,
+                0xF9,
+                4,
+            ),
+        ] {
+            for trailer in [0, explicit_trailer] {
+                let record = [0x02, opcode, 0, trailer];
+                let mut original = captured_button_profile();
+                original[offset..offset + 4].copy_from_slice(&record);
+                let mut profile = PerformanceProfile::parse(&original).unwrap();
+                assert_eq!(
+                    profile.button_binding(control).unwrap(),
+                    ButtonBinding::Mouse(function)
+                );
+                assert_eq!(profile.as_bytes(), &original);
+                assert_eq!(&profile.to_write_report()[offset..offset + 4], &record);
+
+                // An unrelated edit must not rewrite either captured alias.
+                profile
+                    .set_button_binding(PulsefireRaidControl::Dpi, &ButtonBinding::Disabled)
+                    .unwrap();
+                assert_eq!(&profile.to_write_report()[offset..offset + 4], &record);
+                assert!(changed_offsets(&original, profile.as_bytes())
+                    .iter()
+                    .all(|offset| (0x9C..0xA0).contains(offset)));
+            }
+        }
+    }
+
+    #[test]
+    fn mouse_binding_trailers_are_exact_aliases_not_a_wildcard() {
+        for (opcode, allowed) in [(0xF1, 1), (0xF2, 2), (0xF8, 3), (0xF9, 4)] {
+            for trailer in 0..=u8::MAX {
+                let record = [0x02, opcode, 0, trailer];
+                let result = decode_button_binding(PulsefireRaidControl::Button4, record);
+                if trailer == 0 || trailer == allowed {
+                    assert!(result.is_ok(), "{record:02X?}");
+                } else {
+                    assert_eq!(
+                        result,
+                        Err(PerformanceProfileError::UnknownButtonBinding {
+                            control: PulsefireRaidControl::Button4,
+                            record,
+                        })
+                    );
+                }
+            }
         }
     }
 
