@@ -69,8 +69,16 @@ until the acknowledgement path is revalidated.
 Feature reports use the interface-1 configuration collection, while the
 eight-byte acknowledgements are read through a separate interface-2 HID
 handle. The complete path was hardware-validated across a physical power-cycle,
-but a later session lacked ACKs and aborted before onboard selection. Unknown
-Legacy startup reports remain research-only pending lifecycle evidence.
+but a later session lacked ACKs and aborted before onboard selection.
+Repeated Legacy launches and power-cycle probes now establish the fixed
+two-report volatile vendor-session startup. It is exposed only through an
+explicit non-persistent diagnostic flag. Fresh-reconnect and already-active
+hardware checks verified its ACKs and an unchanged complete runtime image;
+the operator confirmed normal physical operation and unchanged lighting after
+the first check. Integration into saves is the next step; the save path does
+not initialize automatically yet.
+No arbitrary phase/mode values
+or unrelated Legacy startup profile writes are replayed.
 
 ## Crate responsibilities
 

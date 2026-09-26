@@ -126,9 +126,13 @@ enum ProfileCommand {
         /// New TOML file. Existing files are never overwritten.
         output: PathBuf,
     },
-    /// Check the save ACK path using only a known, non-persistent runtime selector.
+    /// Check the save ACK path without writing a profile image or onboard memory.
     #[command(name = "check-save-ack")]
-    CheckSaveAck,
+    CheckSaveAck {
+        /// Explicitly send the captured volatile Legacy session startup first.
+        #[arg(long)]
+        initialize_session: bool,
+    },
     /// Persist confirmed runtime settings to the mouse's onboard profile.
     #[command(name = "save-to-mouse")]
     SaveToMouse {
@@ -696,8 +700,13 @@ fn profile(command: ProfileCommand) -> Result<()> {
             println!("No HID device was opened and no onboard profile was written.");
             Ok(())
         }
-        ProfileCommand::CheckSaveAck => {
+        ProfileCommand::CheckSaveAck { initialize_session } => {
             let (mut device, mut acknowledgements) = open_pulsefire_raid_for_save()?;
+            if initialize_session {
+                device.initialize_vendor_session(&mut acknowledgements)
+                    .context("volatile vendor-session initialization failed; no profile image or onboard memory was written; do not retry blindly")?;
+                println!("Captured volatile vendor-session startup acknowledged.");
+            }
             device
                 .check_save_ack_path(&mut acknowledgements)
                 .context("the non-persistent save ACK check failed; no onboard profile was selected or written")?;
@@ -2251,6 +2260,21 @@ mod tests {
         .is_err());
 
         assert!(Cli::try_parse_from(["hyperx-cli", "profile", "check-save-ack"]).is_ok());
+        let parsed = Cli::try_parse_from([
+            "hyperx-cli",
+            "profile",
+            "check-save-ack",
+            "--initialize-session",
+        ])
+        .unwrap();
+        assert!(matches!(
+            parsed.command,
+            Command::Profile {
+                command: ProfileCommand::CheckSaveAck {
+                    initialize_session: true
+                },
+            }
+        ));
 
         assert!(Cli::try_parse_from([
             "hyperx-cli",

@@ -1157,9 +1157,10 @@ onboard-lighting report or onboard-profile write was observed. The later
 **Hypothesis only:** opcode `0x07` and byte 2 may switch vendor input/ACK
 delivery off/on. Startup ordering correlates with ACK availability, but a
 single startup does not establish lifecycle, persistence or all side effects.
-Neither report is encoded or transmitted by OpenHyperX. Required next
-evidence: isolated close-from-tray capture, repeated launch/close lifecycle,
-then a separate non-persistent known-selector ACK probe with Legacy closed.
+At this initial evidence stage neither report was encoded or transmitted by
+OpenHyperX. Required evidence was an isolated close-from-tray capture, a
+repeated launch/close lifecycle and a separate non-persistent known-selector
+ACK probe with Legacy closed.
 Do not infer firmware commands, bypass acknowledgements or retry a save from
 this observation.
 
@@ -1180,6 +1181,98 @@ onboard-memory write occurred. This establishes that the ACK path works after
 Legacy startup and remains available after its captured tray closure. It
 does not yet isolate the side effects of opcode `0x07`; a USB power-cycle and
 repeated startup are needed before introducing a typed initialization codec.
+
+The operator then unplugged the mouse for five seconds, reconnected it with
+Legacy still closed, and confirmed normal cursor movement and primary clicks.
+The one-shot probe again timed out without retrying. Its eight-second capture
+`openhyperx-save-ack-after-power-cycle-20260926.pcapng` (6,616 bytes)
+confirmed `0951:16E4`, release `1124`, now at temporary address 20. Frame 99
+at 2.457478 s contained the same complete runtime selector; there were no
+endpoint-`0x83` responses. Thus ACK availability after Legacy startup survives
+app closure but does **not** survive this physical power-cycle. The startup
+reports still required a repeated isolated capture before implementation.
+
+### Repeated volatile session startup
+
+The reviewed `pulsefire-raid-legacy-ack-lifecycle-repeat-20260926` capture plan
+then recorded three separate eight-second files: closed no-op (414 bytes),
+launch (181,578 bytes), and close-from-tray (90,968 bytes). The completed
+manifest and all descriptors confirmed the target `0951:16E4`, release
+`1124`, at temporary address 20. The no-op contained only injected descriptors,
+with no vendor reports.
+
+Launch frames 3083 and 3089, at 4.354297 s and 4.460965 s, contained exactly
+the same complete 264-byte `07 07 00` and `07 07 01` reports as the first
+startup. Every byte after offset 2 was zero. The phase interval was
+106.668 ms, compared with 107.960 ms in the first capture. Again there was
+no ACK for phase 0; phase 1 received `00 00 07 07 00 00 00 00` at frame
+3091, 4.461965 s. The next runtime selector was at 4.773274 s, 311.309 ms
+after that ACK (311.253 ms in the first startup). All subsequent known
+runtime-profile and Button 5 macro reports were acknowledged. No onboard
+write was present. Closing again sent only the known onboard selector at
+frame 703, 2.769138 s, with ACK at frame 705, 2.833380 s; there was no
+opcode-`0x07` report or persistent write.
+
+These independent launches establish a fixed normal **volatile vendor-session
+startup** sequence, after which interrupt acknowledgements become available.
+The individual phase bytes are not exposed as arbitrary enable/disable modes;
+their internal semantics and other possible values remain unknown. OpenHyperX
+now encodes only these two complete constant reports. An explicit diagnostic
+`profile check-save-ack --initialize-session` sends phase 0, waits 110 ms,
+sends phase 1 and checks its exact ACK, waits 315 ms, then probes the known
+runtime selector. Any queued input, missing ACK or wrong ACK aborts without
+retry. It sends no profile image, macro or lighting snapshot and does not
+select/write onboard memory. The save path does not initialize automatically.
+Golden and mock tests cover the reports, ordering, waits and failure gates;
+hardware validation of the OpenHyperX initializer after a fresh USB
+power-cycle was the next step.
+
+### OpenHyperX session initializer hardware check
+
+With Legacy closed, the operator unplugged/reconnected the mouse again and
+confirmed normal cursor and primary-button operation. Native Windows
+`--trace info` read the runtime image before and after
+`profile check-save-ack --initialize-session`; the complete two 264-byte
+read responses were byte-for-byte identical. They retained 1000 Hz, the
+four DPI stages/colors (800 `#2B00FF`, 1600 `#CD00FF`, 3200 `#32FF00`,
+6400 `#FF0000`), active stage 1, all eleven mappings, Button 4 Back and
+the existing Button 5 macro reference. This comparison does not read the
+macro event stream or prove every physical button's behavior.
+
+The eight-second `openhyperx-session-init-probe-20260926.pcapng` was
+7,524 bytes; descriptors confirmed `0951:16E4`, release `1124`, at
+temporary address 21. Its complete feature-report sequence was:
+
+| Frame | Time (s) | Interface-1 feature prefix | Interface-2 ACK |
+| --- | --- | --- | --- |
+| 99 | 1.891228 | `07 07 00` | none, matching both Legacy captures |
+| 101 | 2.002314 | `07 07 01` | frame 103 at 2.003891: `00 00 07 07 00 00 00 00` |
+| 105 | 2.320162 | `07 03 04 64` | frame 107 at 2.383892: `00 00 07 03 00 00 00 00` |
+
+All three reports were exactly 264 bytes with the captured constant bytes
+and zero-fill. There were no profile, macro, indexed-lighting or onboard
+writes. The diagnostic and subsequent independent `info` exited successfully.
+This independently verifies the fixed startup's ACK effect without replaying
+Legacy's automatic runtime configuration. Linux format, Clippy and 118 unit
+tests passed; native Windows passed the same 118 tests, build and discovery
+smoke. The operator subsequently confirmed normal cursor movement, primary
+clicks, physical Button 4 Back, and unchanged lighting.
+
+With no USB reconnect and Legacy still closed, an explicitly approved second
+OpenHyperX initialization tested an already-active session. The capture
+`openhyperx-session-init-active-repeat-20260926.pcapng` was again 7,524 bytes,
+with the same identity/release at address 21. Frames 99 and 101 sent the same
+complete startup reports at 2.454422 s and 2.567027 s. Again phase 0 had no
+ACK and phase 1 received the expected opcode-`0x07` ACK at frame 103,
+2.567788 s. The runtime-selector probe at frame 105, 2.885823 s, received
+its expected ACK at frame 107, 2.949750 s. No other feature report or
+persistent write was present. The diagnostic and independent native `info`
+both exited successfully; its full runtime image and all decoded fields
+remained unchanged. This verifies repeatable startup on this already-active
+release-`1124` unit, not arbitrary phase values or other firmware revisions.
+Next: integrate the verified fixed startup before the existing save sequence,
+retain fail-closed ACK checks, then implement and power-cycle-test Button 4's
+already captured onboard macro format.
 
 ## NGENUITY Legacy `.hxp` preset format
 
@@ -1243,7 +1336,7 @@ assumption.
 | polling | all four interval codes captured; runtime 1000→500→1000 set/readback validated; 1000 Hz persisted through a separate NGENUITY Legacy save and power-cycle | verify effective USB report rate with an external rate tester |
 | NGENUITY Legacy `.hxp` | version-40 container, DPI records, Play Once keyboard/primary-click macros and macro references are parsed offline; imports are explicitly partial | compare Legacy exports differing only in active stage, polling, lighting, one physical assignment and each repeat mode |
 | button bindings | all 11 mappings are readable; all ten Mouse Functions, all seven Multimedia functions, all six Windows Shortcuts, Disabled and named keyboard usages are writable on the nine general controls; the physical primary pair has a repeated capture-backed Standard/Swapped encoding and OpenHyperX's atomic swap/restore was read back and functionally verified; Button 4 and Button 5 have separate captured Play Once runtime macro slots, with OpenHyperX's Button 4 AB assignment independently read back and functionally verified; the full Button 4 Mouse, Multimedia and Shortcut matrices are capture-backed, and OpenHyperX's Scroll Up, Play/Pause and Cycle Apps writes were read back and functionally verified on Button 4; portable writes are also hardware-tested on Button 6 and DPI; bounded Play Once macros support chords, nonuniform timing and primary clicks on confirmed targets | capture additional macro targets, repeat modes, longer timelines and remaining macro mouse events |
-| onboard save | preservation-first driver/CLI transaction is covered by golden/mock tests and previously hardware-validated across a power-cycle for DPI, polling, all ordinary mappings, the complete Button 5 macro and independent wheel/logo Solid colors; Button 4's persistent macro report and power-cycle behavior are confirmed through NGENUITY Legacy but OpenHyperX still rejects it; a later save stopped on a missing first ACK before onboard selection, and the pre-armed probe still received no ACK | capture and establish the Legacy startup/closure ACK lifecycle before enabling Button 4 onboard save; investigate non-Solid persistent lighting separately |
+| onboard save | preservation-first driver/CLI transaction is covered by golden/mock tests and previously hardware-validated across a power-cycle for DPI, polling, all ordinary mappings, the complete Button 5 macro and independent wheel/logo Solid colors; Button 4's persistent macro report and power-cycle behavior are confirmed through NGENUITY Legacy but OpenHyperX still rejects it; a later save stopped on a missing first ACK; repeated Legacy lifecycle captures and OpenHyperX's independently hardware-validated volatile initializer restore ACKs on fresh and already-active sessions without changing the profile | integrate the verified fixed startup into saves, then enable/validate Button 4 onboard save; investigate non-Solid persistent lighting separately |
 | NGENUITY Legacy locking | unknown | run `devices`, then future read-only `info`, with NGENUITY Legacy open and closed; record open errors |
 | admin requirement | configuration collection opens without elevation | retest on a second Windows machine/account |
 

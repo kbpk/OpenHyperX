@@ -92,6 +92,14 @@ profile when opened; inspect all feature reports, not just the new opcode.
 Unknown startup/closure reports remain non-replayable until repeated captures
 establish their fields and effects.
 
+The fixed Raid session startup has since been captured twice; see
+`docs/research.md` for complete bytes, ACKs, pacing and power-cycle observations.
+To validate this narrow initializer independently, close all writers, unplug
+and reconnect the mouse, then use the same wrapper with `-InitializeSession`
+and a new output path. It sends only the two constant startup reports and the
+known runtime-selector probe. Do not use it as an automatic retry after an
+ambiguous save. No profile, macro, lighting snapshot or onboard data is written.
+
 ## Minimal text fixture format
 
 Until a capture parser is justified, normalize reports into a small reviewable

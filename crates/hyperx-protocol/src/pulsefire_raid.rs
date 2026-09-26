@@ -1031,6 +1031,20 @@ pub fn encode_direct_rgb(wheel: RgbColor, logo: RgbColor) -> [u8; DIRECT_REPORT_
     report
 }
 
+/// Encode only the fixed two-report vendor-session startup observed in two
+/// isolated NGENUITY Legacy launches on release 1124.
+///
+/// Both reports are 264-byte interface-1 feature reports. The first phase has
+/// no observed ACK; the second receives `00 00 07 07 00 00 00 00`. Subsequent
+/// vendor acknowledgements remain available until a USB power-cycle. The
+/// individual phase bytes are not generalized into arbitrary mode values.
+pub fn encode_vendor_session_start_reports() -> [[u8; DIRECT_REPORT_LENGTH]; 2] {
+    let mut reports = [[0_u8; DIRECT_REPORT_LENGTH]; 2];
+    reports[0][..3].copy_from_slice(&[DIRECT_REPORT_ID, 0x07, 0x00]);
+    reports[1][..3].copy_from_slice(&[DIRECT_REPORT_ID, 0x07, 0x01]);
+    reports
+}
+
 /// Encode the fixed runtime-profile access prelude observed before reads.
 ///
 /// Its individual fields are not generalized: only the exact locally
@@ -1241,6 +1255,15 @@ mod tests {
         let request = encode_profile_read_request();
         assert_eq!(&request[..2], &[0x07, 0x81]);
         assert!(request[2..].iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn golden_vendor_session_start_matches_two_isolated_legacy_launches() {
+        let actual = encode_vendor_session_start_reports();
+        let mut expected = [[0_u8; 264]; 2];
+        expected[0][..3].copy_from_slice(&[0x07, 0x07, 0x00]);
+        expected[1][..3].copy_from_slice(&[0x07, 0x07, 0x01]);
+        assert_eq!(actual, expected);
     }
 
     #[test]

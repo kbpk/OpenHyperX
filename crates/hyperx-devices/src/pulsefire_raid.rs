@@ -9,9 +9,10 @@ use hyperx_core::{
 use hyperx_hid::{HidError, HidTransport};
 use hyperx_protocol::pulsefire_raid::{
     encode_direct_rgb, encode_onboard_profile_read_prelude, encode_onboard_static_lighting_reports,
-    encode_profile_read_request, encode_runtime_profile_read_prelude, PerformanceProfile,
-    PerformanceProfileError, ProfileImageKind, ProfileSection, PulsefireRaidControl,
-    PulsefireRaidMacro, PulsefireRaidMacroError, PulsefireRaidMacroEvent, PulsefireRaidMacroInput,
+    encode_profile_read_request, encode_runtime_profile_read_prelude,
+    encode_vendor_session_start_reports, PerformanceProfile, PerformanceProfileError,
+    ProfileImageKind, ProfileSection, PulsefireRaidControl, PulsefireRaidMacro,
+    PulsefireRaidMacroError, PulsefireRaidMacroEvent, PulsefireRaidMacroInput,
     PulsefireRaidMacroMouseButton, PulsefireRaidMacroState, DIRECT_REPORT_ID, DIRECT_REPORT_LENGTH,
 };
 use thiserror::Error;
@@ -21,6 +22,8 @@ const PROFILE_READ_DELAY: Duration = Duration::from_millis(110);
 const ONBOARD_COMMIT_DELAY: Duration = Duration::from_secs(1);
 const SAVE_ACK_LENGTH: usize = 8;
 const SAVE_ACK_TIMEOUT_MS: i32 = 500;
+const SESSION_PHASE_DELAY: Duration = Duration::from_millis(110);
+const SESSION_READY_DELAY: Duration = Duration::from_millis(315);
 
 pub const PULSEFIRE_RAID_DPI: DpiCapabilities = DpiCapabilities {
     minimum: 200,
@@ -466,6 +469,42 @@ impl<T: HidTransport> PulsefireRaid<T> {
         )
     }
 
+    /// Start a volatile vendor session using only the repeated Legacy startup
+    /// sequence. No profile image, lighting snapshot or macro is written.
+    ///
+    /// This is an explicit diagnostic operation, not an automatic save retry.
+    /// Hardware validation must start after a fresh USB power-cycle with all
+    /// competing device writers closed.
+    pub fn initialize_vendor_session<A: HidTransport>(
+        &mut self,
+        acknowledgements: &mut A,
+    ) -> Result<(), PulsefireRaidError> {
+        self.initialize_vendor_session_with_wait(acknowledgements, std::thread::sleep)
+    }
+
+    fn initialize_vendor_session_with_wait<A: HidTransport>(
+        &mut self,
+        acknowledgements: &mut A,
+        mut wait: impl FnMut(Duration),
+    ) -> Result<(), PulsefireRaidError> {
+        if acknowledgements.interface_number()
+            != PULSEFIRE_RAID_ACKNOWLEDGEMENT_INTERFACE.interface_number
+        {
+            return Err(PulsefireRaidError::WrongAcknowledgementInterface(
+                acknowledgements.interface_number(),
+            ));
+        }
+        let [first, second] = encode_vendor_session_start_reports();
+        self.arm_save_ack_read(acknowledgements, first[1])?;
+        // The first phase had no ACK in either capture; only the second phase
+        // is acknowledged. Do not infer ACKs or send unrelated startup writes.
+        self.send_feature_report(&first)?;
+        wait(SESSION_PHASE_DELAY);
+        self.send_feature_report_with_save_ack(acknowledgements, &second)?;
+        wait(SESSION_READY_DELAY);
+        Ok(())
+    }
+
     /// Test only the known runtime-section selection and its acknowledgement.
     ///
     /// This does not select or write the onboard section. It is useful for
@@ -848,6 +887,28 @@ impl<T: HidTransport> PulsefireRaid<T> {
         report: &[u8],
     ) -> Result<(), PulsefireRaidError> {
         let opcode = report[1];
+        self.arm_save_ack_read(acknowledgements, opcode)?;
+        self.send_feature_report(report)?;
+        let mut actual = [0_u8; SAVE_ACK_LENGTH];
+        let length = acknowledgements.read_timeout(&mut actual, SAVE_ACK_TIMEOUT_MS)?;
+        if length != SAVE_ACK_LENGTH {
+            return Err(PulsefireRaidError::WrongSaveAcknowledgementLength {
+                opcode,
+                actual: length,
+            });
+        }
+        let expected = save_acknowledgement(opcode);
+        if actual != expected {
+            return Err(PulsefireRaidError::UnexpectedSaveAcknowledgement { opcode, actual });
+        }
+        Ok(())
+    }
+
+    fn arm_save_ack_read<A: HidTransport>(
+        &mut self,
+        acknowledgements: &mut A,
+        opcode: u8,
+    ) -> Result<(), PulsefireRaidError> {
         let mut actual = [0_u8; SAVE_ACK_LENGTH];
         // hidapi's Windows-native backend starts its overlapped ReadFile only
         // when read_timeout is called. Arm it before the SET_REPORT so a fast
@@ -860,18 +921,6 @@ impl<T: HidTransport> PulsefireRaid<T> {
                 length: pending_length,
                 actual,
             });
-        }
-        self.send_feature_report(report)?;
-        let length = acknowledgements.read_timeout(&mut actual, SAVE_ACK_TIMEOUT_MS)?;
-        if length != SAVE_ACK_LENGTH {
-            return Err(PulsefireRaidError::WrongSaveAcknowledgementLength {
-                opcode,
-                actual: length,
-            });
-        }
-        let expected = save_acknowledgement(opcode);
-        if actual != expected {
-            return Err(PulsefireRaidError::UnexpectedSaveAcknowledgement { opcode, actual });
         }
         Ok(())
     }
@@ -1349,6 +1398,105 @@ mod tests {
 
         let mut device = PulsefireRaid::new(configuration).unwrap();
         device.check_save_ack_path(&mut acknowledgements).unwrap();
+        device.into_transport().assert_drained();
+        acknowledgements.assert_drained();
+    }
+
+    #[test]
+    fn session_start_sends_only_the_two_captured_reports_with_captured_delays() {
+        let mut configuration = MockHidTransport::new(1);
+        let mut acknowledgements = MockHidTransport::new(2);
+        let [first, second] = encode_vendor_session_start_reports();
+        configuration.expect_feature_report(first);
+        acknowledgements.queue_input_report(Vec::new());
+        expect_acked_feature(&mut configuration, &mut acknowledgements, second);
+        let mut delays = Vec::new();
+
+        let mut device = PulsefireRaid::new(configuration).unwrap();
+        device
+            .initialize_vendor_session_with_wait(&mut acknowledgements, |delay| {
+                delays.push(delay);
+            })
+            .unwrap();
+        assert_eq!(
+            delays,
+            [Duration::from_millis(110), Duration::from_millis(315)]
+        );
+        device.into_transport().assert_drained();
+        acknowledgements.assert_drained();
+    }
+
+    #[test]
+    fn session_start_rejects_wrong_interface_without_any_io() {
+        let configuration = MockHidTransport::new(1);
+        let mut acknowledgements = MockHidTransport::new(1);
+        let mut device = PulsefireRaid::new(configuration).unwrap();
+        assert!(matches!(
+            device.initialize_vendor_session_with_wait(&mut acknowledgements, |_| panic!(
+                "unexpected wait"
+            )),
+            Err(PulsefireRaidError::WrongAcknowledgementInterface(1))
+        ));
+        device.into_transport().assert_drained();
+        acknowledgements.assert_drained();
+    }
+
+    #[test]
+    fn session_start_rejects_queued_input_before_the_first_report() {
+        let configuration = MockHidTransport::new(1);
+        let mut acknowledgements = MockHidTransport::new(2);
+        acknowledgements.queue_input_report([0x00, 0x00, 0x07, 0x03, 0, 0, 0, 0]);
+        let mut device = PulsefireRaid::new(configuration).unwrap();
+        assert!(matches!(
+            device.initialize_vendor_session_with_wait(&mut acknowledgements, |_| panic!(
+                "unexpected wait"
+            )),
+            Err(PulsefireRaidError::PreexistingSaveInput { opcode: 0x07, .. })
+        ));
+        device.into_transport().assert_drained();
+        acknowledgements.assert_drained();
+    }
+
+    #[test]
+    fn session_start_stops_after_a_missing_second_phase_ack_without_retry() {
+        let mut configuration = MockHidTransport::new(1);
+        for report in encode_vendor_session_start_reports() {
+            configuration.expect_feature_report(report);
+        }
+        let mut acknowledgements = MockHidTransport::new(2);
+        for _ in 0..3 {
+            acknowledgements.queue_input_report(Vec::new());
+        }
+        let mut delays = Vec::new();
+        let mut device = PulsefireRaid::new(configuration).unwrap();
+        assert!(matches!(
+            device.initialize_vendor_session_with_wait(&mut acknowledgements, |delay| delays
+                .push(delay)),
+            Err(PulsefireRaidError::WrongSaveAcknowledgementLength {
+                opcode: 0x07,
+                actual: 0
+            })
+        ));
+        assert_eq!(delays, [SESSION_PHASE_DELAY]);
+        device.into_transport().assert_drained();
+        acknowledgements.assert_drained();
+    }
+
+    #[test]
+    fn session_start_rejects_an_ack_for_a_different_opcode_without_retry() {
+        let mut configuration = MockHidTransport::new(1);
+        for report in encode_vendor_session_start_reports() {
+            configuration.expect_feature_report(report);
+        }
+        let mut acknowledgements = MockHidTransport::new(2);
+        acknowledgements.queue_input_report(Vec::new());
+        acknowledgements.queue_input_report(Vec::new());
+        acknowledgements.queue_input_report([0x00, 0x00, 0x07, 0x03, 0, 0, 0, 0]);
+        let mut device = PulsefireRaid::new(configuration).unwrap();
+        assert!(matches!(
+            device.initialize_vendor_session_with_wait(&mut acknowledgements, |_| {}),
+            Err(PulsefireRaidError::UnexpectedSaveAcknowledgement { opcode: 0x07, .. })
+        ));
         device.into_transport().assert_drained();
         acknowledgements.assert_drained();
     }

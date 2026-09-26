@@ -227,6 +227,14 @@ selector and verifies its interrupt-IN acknowledgement. It does not select or
 write onboard memory. Close NGENUITY and other device writers before running
 it; if it fails, do not blindly retry a save.
 
+The optional `profile check-save-ack --initialize-session` explicitly tests the
+fixed, capture-backed volatile Legacy startup sequence before that probe. It
+does not replay Legacy's automatic profile writes or save onboard settings.
+Hardware checks after a fresh USB reconnect and in an already-active session
+passed and preserved the complete runtime profile. Close Legacy and other
+writers first. Session
+initialization is not yet automatic in `save-to-mouse`.
+
 To perform the persistent save after the acknowledgement path works:
 
 ```bash

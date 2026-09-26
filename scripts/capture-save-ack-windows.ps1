@@ -4,7 +4,9 @@ param(
     [string]$Interface,
 
     [Parameter(Mandatory = $true)]
-    [string]$OutputPath
+    [string]$OutputPath,
+
+    [switch]$InitializeSession
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,6 +19,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
         '-Interface', "`"$Interface`"",
         '-OutputPath', "`"$OutputPath`""
     )
+    if ($InitializeSession) { $arguments += '-InitializeSession' }
     $elevated = Start-Process powershell.exe -Verb RunAs -ArgumentList $arguments `
         -Wait -PassThru
     exit $elevated.ExitCode
@@ -39,8 +42,9 @@ $captureJob = Start-Job -ScriptBlock {
 } -ArgumentList $captureScript, $Interface, $OutputPath
 
 # Wait for the identity-resolving helper to start USBPcap; no vendor report is
-# sent before recording is active. The only CLI command here is a known,
-# non-persistent runtime selector, never an onboard save or raw replay.
+# sent before recording is active. The only CLI command is the non-persistent
+# ACK diagnostic, optionally with the fixed capture-backed session startup.
+# This never performs an onboard save or raw replay.
 $ready = $false
 $deadline = [DateTime]::UtcNow.AddSeconds(20)
 while ($captureJob.State -eq 'Running' -and [DateTime]::UtcNow -lt $deadline) {
@@ -58,7 +62,9 @@ if (-not $ready) {
 }
 Start-Sleep -Milliseconds 300
 Write-Host 'Recording one non-persistent save ACK probe.' -ForegroundColor Cyan
-& $binary --trace profile check-save-ack
+$probeArguments = @('--trace', 'profile', 'check-save-ack')
+if ($InitializeSession) { $probeArguments += '--initialize-session' }
+& $binary @probeArguments
 $probeExitCode = $LASTEXITCODE
 Wait-Job -Job $captureJob -Timeout 15 | Out-Null
 Receive-Job -Job $captureJob

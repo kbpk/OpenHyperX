@@ -1,0 +1,17 @@
+{
+  "name": "pulsefire-raid-legacy-ack-lifecycle-repeat-20260926",
+  "steps": [
+    {
+      "slug": "closed-no-op",
+      "instruction": "Leave NGENUITY Legacy closed, including its tray icon. Do not launch it, change settings, save or reconnect the mouse. This is the no-op baseline."
+    },
+    {
+      "slug": "launch-legacy",
+      "instruction": "When Capturing appears, launch NGENUITY Legacy once and leave it open. Do not change settings, click Save to mouse, or accept any firmware update."
+    },
+    {
+      "slug": "close-legacy-restore",
+      "instruction": "When Capturing appears, close NGENUITY Legacy from its tray icon. Do not change settings, click Save to mouse, or reconnect the mouse. Leave the app closed after this capture."
+    }
+  ]
+}
