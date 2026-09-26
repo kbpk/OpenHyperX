@@ -1,0 +1,25 @@
+{
+  "name": "pulsefire-raid-button4-macro-playback-assigned-20260926",
+  "steps": [
+    {
+      "slug": "assigned-once-no-op",
+      "instruction": "Baseline: before the series, explicitly assign the existing AB macro, Play Once, 20 ms, to the on-screen Button 4 control. During this capture do nothing. Do not click Save to mouse or press the physical Button 4. Leave Button 5 unchanged."
+    },
+    {
+      "slug": "assign-toggle",
+      "instruction": "AB must already be assigned to Button 4 from the baseline. Prepare its editor before ENTER. After Capturing starts: change only Play Once to Toggle Repeat and click Done. Do not manually reassign, edit any event or timing, save onboard, or execute the macro."
+    },
+    {
+      "slug": "assign-hold",
+      "instruction": "Keep AB assigned to Button 4. Prepare the same AB editor before ENTER. After Capturing starts: change only Toggle Repeat to Hold Repeat and click Done. Do not manually reassign or change events, timing, name, Button 5 or any other setting."
+    },
+    {
+      "slug": "assign-once-restore",
+      "instruction": "Keep AB assigned to Button 4. Prepare the same AB editor before ENTER. After Capturing starts: change only Hold Repeat to Play Once and click Done. Do not manually reassign. AB must keep its original 20 ms timeline. Do not click Save to mouse."
+    },
+    {
+      "slug": "back-final-restore",
+      "instruction": "Prepare the on-screen Button 4 assignment view before ENTER. After Capturing starts, change only Button 4 from AB to Mouse Function > Back. Leave the AB macro as Play Once and leave Button 5 unchanged. No Save to mouse and no physical macro execution."
+    }
+  ]
+}

@@ -230,7 +230,7 @@ fn encode_macro_definition(
     control: PulsefireRaidControl,
     definition: &MacroDefinition,
 ) -> Result<PulsefireRaidMacro, PulsefireRaidError> {
-    if definition.playback != MacroPlayback::Once {
+    if definition.playback != MacroPlayback::Once && control != PulsefireRaidControl::Button4 {
         return Err(PulsefireRaidError::UnsupportedMacroPlayback(
             definition.playback,
         ));
@@ -240,7 +240,11 @@ fn encode_macro_definition(
         .iter()
         .map(encode_macro_event)
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(PulsefireRaidMacro::play_once_for(control, &events)?)
+    Ok(PulsefireRaidMacro::runtime_for(
+        control,
+        definition.playback,
+        &events,
+    )?)
 }
 
 const fn is_supported_runtime_keyboard_usage(usage: KeyboardUsage) -> bool {
@@ -352,7 +356,7 @@ pub enum PulsefireRaidError {
         "runtime macros are not capture-backed for {0:?}; only Button 4 and Button 5 are supported"
     )]
     UnconfirmedMacroControl(PulsefireRaidControl),
-    #[error("Pulsefire Raid macro playback {0:?} is not capture-backed; only once is supported")]
+    #[error("Pulsefire Raid repeat playback {0:?} is captured only for runtime Button 4")]
     UnsupportedMacroPlayback(MacroPlayback),
     #[error("unknown macro keyboard key {0:?}")]
     UnknownMacroKey(String),
@@ -2448,6 +2452,69 @@ mod tests {
                 MacroPlayback::ToggleRepeat
             ))
         ));
+    }
+
+    #[test]
+    fn driver_changes_only_button4_macro_mode_and_preserves_the_runtime_profile() {
+        for (playback, mode) in [
+            (MacroPlayback::ToggleRepeat, [0, 0]),
+            (MacroPlayback::RepeatWhileHeld, [0xFF, 0xFF]),
+            (MacroPlayback::Once, [0, 1]),
+        ] {
+            let mut response = save_profile_response(ProfileSection::Runtime, true);
+            response[0x88..0x8C].copy_from_slice(&[0x53, 0, 0, 3]);
+            response[0x10] = 0xA5;
+            let mut expected_write = response;
+            expected_write[1] = 1;
+            let mut expected_macro = [0_u8; DIRECT_REPORT_LENGTH];
+            expected_macro[..22].copy_from_slice(&[
+                7, 5, 4, 3, 0, 0, 0, 0, mode[0], mode[1], 0x80, 20, 4, 0, 20, 4, 0x80, 20, 5, 0,
+                20, 5,
+            ]);
+            let mut transport = MockHidTransport::new(1);
+            transport.expect_feature_report(encode_runtime_profile_read_prelude());
+            transport.expect_feature_report(encode_profile_read_request());
+            transport.queue_feature_response(response);
+            transport.expect_feature_report(expected_macro);
+            transport.expect_feature_report(expected_write);
+            let mut definition = captured_ab_macro();
+            definition.playback = playback;
+            let assignment = PulsefireRaidRuntimeAssignment::macro_timeline(
+                PulsefireRaidControl::Button4,
+                definition,
+            )
+            .unwrap();
+            let mut device = PulsefireRaid::new(transport).unwrap();
+            assert_eq!(
+                device
+                    .set_runtime_button_assignment_with_wait(assignment.clone(), |_| {},)
+                    .unwrap(),
+                assignment
+            );
+            device.into_transport().assert_drained();
+        }
+    }
+
+    #[test]
+    fn repeat_definitions_are_rejected_before_any_onboard_io() {
+        for playback in [MacroPlayback::ToggleRepeat, MacroPlayback::RepeatWhileHeld] {
+            let mut definition = captured_ab_macro();
+            definition.playback = playback;
+            assert!(matches!(PulsefireRaidOnboardMacros::new(&[
+                (PulsefireRaidControl::Button4, &definition),
+            ]), Err(PulsefireRaidError::InvalidMacro(
+                PulsefireRaidMacroError::UnconfirmedOnboardPlayback(actual)
+            )) if actual == playback));
+            assert!(matches!(PulsefireRaidRuntimeAssignment::macro_timeline(
+                PulsefireRaidControl::Button5, definition.clone(),
+            ), Err(PulsefireRaidError::UnsupportedMacroPlayback(actual)) if actual == playback));
+            definition.events.clear();
+            assert!(PulsefireRaidRuntimeAssignment::macro_timeline(
+                PulsefireRaidControl::Button4,
+                definition,
+            )
+            .is_err());
+        }
     }
 
     #[test]

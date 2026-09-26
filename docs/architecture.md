@@ -43,8 +43,10 @@ platform-independent macro model stores an ordered key/button down/up timeline
 and a delay on every event. A capture-backed Raid encoder now supports Play
 Once Button 5 keyboard chords, nonuniform timings and left/right/middle mouse
 clicks, with a conservative 14-transition limit matching the largest local
-capture. The same runtime framing is independently captured for Button 4;
-other targets, playback modes, longer macros and unconfirmed mouse events
+capture. The same runtime framing is independently captured for Button 4,
+including the exact Toggle Repeat and Hold Repeat mode pairs. Repeat modes
+remain target-gated to runtime Button 4 and cannot be converted onboard. Other
+targets, longer macros and unconfirmed mouse events
 remain absent. A separate offline parser reads confirmed fields from
 NGENUITY Legacy version-40 `.hxp` presets and converts them to a partial
 software profile without opening a HID device. Current NGENUITY is a distinct,

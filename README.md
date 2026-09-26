@@ -35,12 +35,15 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
 - additional capture-backed Button 4 and Button 5 runtime TOML Play Once macros
   with keyboard chords, per-event timings and left/right/middle clicks;
   Button 4 `ab` and Button 5 examples were physically verified
+- captured Toggle Repeat / Hold Repeat mode packets for runtime Button 4;
+  automatic Windows packet/ACK/readback checks passed; physical repeat playback
+  is not yet verified and onboard repeat is blocked
 - raw hex capture parser/diff for protocol research
 - offline NGENUITY Legacy version-40 `.hxp` inspection and partial import to a
   portable OpenHyperX TOML profile
 - offline DPI-stage, polling and button-profile parser/patcher with golden tests
 - capture-backed, acknowledged onboard save for current DPI, polling, all 11
-  button records, an optional Button 5 Play Once macro and independent
+  button records, complete referenced Button 4/5 Play Once macros and independent
   wheel/logo Solid colors, hardware-verified across a physical power-cycle
 - no non-Solid persistent firmware-lighting effects yet
 
@@ -207,9 +210,10 @@ The physical primary controls are changed only as the captured atomic pair:
 Independent primary writes and raw numeric usage values are not accepted by
 the CLI. Macro files model playback plus an ordered timeline of individual
 key/button down/up events and per-event delays, including chords.
-The current Raid encoder accepts Play Once macros of up to 14 balanced
+The current Raid encoder accepts Play Once macros on Button 4/5, and captured
+Toggle/Hold Repeat modes only on runtime Button 4, with up to 14 balanced
 transitions, common keyboard usages and the three captured primary mouse
-buttons. Unsupported keys, playback modes and malformed timelines are rejected
+buttons. Unsupported targets/modes, keys and malformed timelines are rejected
 before the mouse is opened. See [docs/macro-format.md](docs/macro-format.md).
 These commands do not save onboard.
 

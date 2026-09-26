@@ -1,0 +1,37 @@
+{
+  "name": "pulsefire-raid-button4-macro-playback-20260926",
+  "steps": [
+    {
+      "slug": "once-no-op",
+      "instruction": "Baseline: Button 4 already has the existing AB macro, Play Once, Standard Timing 20 ms. Do nothing during this capture. Never click Save to mouse or the physical Button 4 during this series. Leave Button 5 and all macro events untouched."
+    },
+    {
+      "slug": "once-to-toggle",
+      "instruction": "Before ENTER, open the existing AB macro editor without changing anything. After Capturing starts, change only Play Once to Toggle Repeat and commit the edit if Done is required. Do not change keys, timing, name, target or any other setting. If Legacy changes another assigned macro or control, stop after this capture and report it."
+    },
+    {
+      "slug": "toggle-to-hold",
+      "instruction": "Before ENTER, open the same AB macro editor. After Capturing starts, change only Toggle Repeat to Hold Repeat and commit if required. Keep every event and its timing unchanged. Do not execute the macro or save onboard."
+    },
+    {
+      "slug": "hold-to-once",
+      "instruction": "Before ENTER, open the same AB macro editor. After Capturing starts, change only Hold Repeat to Play Once and commit if required. Do not change any event, timing, assignment or lighting."
+    },
+    {
+      "slug": "once-to-toggle-repeat",
+      "instruction": "Repeat the first transition independently: prepare the same AB macro editor before ENTER. After Capturing starts, change only Play Once to Toggle Repeat and commit if required. Keep Button 4 assigned to AB, and leave Button 5 untouched."
+    },
+    {
+      "slug": "toggle-to-hold-repeat",
+      "instruction": "Repeat: prepare the same AB macro editor before ENTER. After Capturing starts, change only Toggle Repeat to Hold Repeat and commit if required. Do not edit the event timeline or Standard Timing."
+    },
+    {
+      "slug": "hold-to-once-repeat",
+      "instruction": "Restore the macro playback: prepare the same AB macro editor before ENTER. After Capturing starts, change only Hold Repeat to Play Once and commit if required. AB must end with its original Play Once and 20 ms timeline."
+    },
+    {
+      "slug": "ab-to-back-final-restore",
+      "instruction": "Prepare the Button 4 assignment view before ENTER. After Capturing starts, change only Button 4 from the AB macro to Mouse Function > Back. Leave the AB macro itself as Play Once, leave Button 5 untouched, and do not click Save to mouse."
+    }
+  ]
+}

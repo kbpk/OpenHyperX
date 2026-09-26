@@ -115,6 +115,55 @@ On any failure, stop and review the entire capture; there is no retry or
 automatic restoration. After a successful capture review, physically reconnect
 USB with Legacy closed and test Button 4 in Notepad (AB) or navigation (Back).
 
+## Macro playback experiment
+
+The corrected plan
+`scripts/capture-plans/pulsefire-raid-button4-macro-playback-assigned-20260926.json`
+isolates the existing Button 4 AB macro's playback mode. Before the series,
+assign AB with Play Once and unchanged 20 ms timing in NGENUITY Legacy; do
+not record a new timeline and do not save onboard. Confirm whether changing
+playback needs Done before starting. **The initial macro must already be
+assigned to the device, not merely selected in the macro library.** Existing
+captures verify that editing an assigned macro and clicking Done can update
+its definition directly, without reassignment. Each mutable step changes only
+the mode and clicks Done. Button 5 must keep its separate existing
+macro; stop if the UI couples the edit to another assigned macro or control.
+
+Use the series runner with `-DurationSeconds 5`. Prepare the editor before
+pressing Enter at each prompt and perform the named change only after
+`Capturing` starts. The five files isolate a no-op baseline, explicit
+Once -> Toggle -> Hold -> Once edits, and a final Button 4 Back restoration.
+Never press physical Button 4 during recording: this series identifies the
+configuration packets, not macro execution. No Save to mouse action is allowed.
+
+The earlier five-second editor-only plan remains as a record of the first
+experiment: its first cycle emitted no macro write, while its second cycle
+emitted real Button 4 reports with its macro already assigned before each edit.
+The corrected plan makes that initial assignment explicit. See research notes
+for the evidence: the operator later confirmed that the first three edits
+completed before capture started. The corrected plan is retained for optional
+future verification, not a prerequisite for the requested first runtime implementation.
+
+## Automated runtime playback verification
+
+After the native Windows build, `scripts/verify-button4-playback-windows.ps1`
+can check Toggle -> Hold -> Once -> Back without manual settings changes.
+Close NGENUITY/OpenRGB, start with Button 4 Back, and pass `-Interface` plus
+an unused `-CapturePrefix '%TEMP%\openhyperx-button4-playback'`. It elevates once,
+uses the confirmed volatile session initializer, captures each transaction
+separately in identity mode, and verifies complete feature writes, exact ACKs
+and a separate runtime readback before advancing. Only Button 4 changes.
+On failure it stops without retry or automatic restoration; inspect the files
+and result JSON before any next write. No onboard save or physical macro
+execution occurs. Captures/logs/results remain outside Git. This verifies
+configuration communication, not actual repeated output or button-release behavior.
+
+Inspect every macro definition and full profile write, not just a suspected
+mode byte. Compare both copies of each transition, prove unchanged event
+timelines and Button 5 reports, and determine whether mode is carried in the
+macro report, binding record, or both. Capture evidence for runtime modes
+does not by itself authorize persistent conversion or define `.hxp` enum values.
+
 ## Minimal text fixture format
 
 Until a capture parser is justified, normalize reports into a small reviewable

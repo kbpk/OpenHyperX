@@ -1362,6 +1362,105 @@ profile byte-identical to the original pre-test Back baseline. Polling remained
 1000 Hz and active DPI remained stage 1 at 800; the four stage values/colors,
 Button 5 macro reference and all other bindings were unchanged.
 
+### Initial macro playback capture and UI/application distinction
+
+On 2026-09-26, the first playback plan asked the operator to edit AB's mode and
+click Done, but did not explain clearly that AB must already be assigned to
+Button 4, rather than merely selected in the macro library. All eight five-second
+files identified `0951:16E4`, release `1124`, address 23. Their sizes were
+37,188, 37,188, 37,188, 36,828, 122,836, 107,420, 107,514 and 58,086 bytes.
+The baseline and first three edit files contained only the same full 264-byte
+direct-RGB keepalive, not a macro or profile write. They are negative evidence,
+not a confirmed playback transition, and must not be silently discarded.
+
+The second cycle (files 05/06/07) did contain complete runtime transactions:
+selector, profile request/response, unchanged Button 5 macro, Button 4 AB
+macro, and full profile write, with the expected vendor ACKs. Compared with
+the known AB/20-ms/Play-Once report, file 05 changed only `0x09: 01 -> 00`;
+file 06 changed only `0x08/0x09: 00 01 -> FF FF`; file 07 matched the full
+known Once report. Every event byte and all trailing zero-fill were identical.
+All three profile writes changed only the read/write opcode, leaving Button 4
+referencing `53 00 00 03`. File 08 restored Back with only offsets `0x88/0x89`
+and the opcode changed, retaining the existing Button 5 macro.
+
+The operator reports using only the macro editor, not explicitly reassigning
+Button 4 in these steps. Before and after each of the three positive edits,
+the full profile contained Button 4's macro reference `53 00 00 03`; only its
+definition's mode changed. The complete opcode-05 ACK followed each definition.
+Together, the operator's actions and packet evidence verify that editing an
+already assigned macro can update the hardware without manual reassignment.
+The operator subsequently clarified that the first three edits and Done had
+already completed before those captures started. Their absent configuration
+writes are therefore a capture-timing issue, not evidence of a library-only
+edit or a coupled setting. Reassignment is therefore
+not a required step for every mode edit, but the assigned initial state must
+be explicit and observed traffic must be checked before declaring success.
+The operator requested a first implementation from the three complete existing
+variants without another manual capture cycle. Runtime support is implemented
+below; this does not establish persistent conversion or physical playback.
+No new `.hxp` playback-enum mapping follows from these HID observations.
+
+### First runtime repeat implementation
+
+The typed codec now accepts these exact pairs at report offsets `0x08..0x09`:
+
+| Playback | Bytes | Existing source |
+| --- | --- | --- |
+| Play Once | `00 01` | file 07, TX frame 111, ACK frame 161; earlier repeated AB captures |
+| Toggle Repeat | `00 00` | file 05, TX frame 1919, ACK frame 1933 |
+| Hold Repeat | `FF FF` | file 06, TX frame 1127, ACK frame 1209 |
+
+These are fixed patterns, not an exposed arbitrary repeat count. Their internal
+counter semantics and other values remain unknown. The complete reports and
+ACKs are normalized under `crates/hyperx-protocol/tests/fixtures/`; raw USB files
+remain outside Git. Golden tests compare all 264 bytes and round-trip each
+report. Unknown pairs, invalid constant bytes, wrong targets and nonzero
+padding are rejected. Existing timing, balanced-transition and size limits
+remain unchanged.
+
+`PulsefireRaidMacro::runtime_for` and the existing typed assignment API accept
+Toggle/Hold only for Button 4, the target actually captured. Button 5 remains
+Play Once only. The CLI uses the same `buttons set button4 macro FILE` syntax;
+playback is read from TOML, not encoded in a special command name. Mock tests
+verify the exact macro report followed by a preservation-only runtime-profile
+write, without resending or altering Button 5. The mode is absent from the
+four-byte profile reference; `buttons list` cannot infer it.
+
+Repeat definitions cannot be converted to onboard reports or supplied to
+`profile save-to-mouse`: validation fails before discovery or persistent I/O.
+The original definitions cannot be queried from profile references, so the
+caller still must supply the actual current definition for any save. No
+firmware command, new opcode, input injection or permanent service is added.
+Physical Toggle/Hold execution and repeat-mode persistence remain unverified.
+
+### Automated OpenHyperX runtime repeat communication check
+
+With Legacy/OpenRGB closed and explicit operator authorization, the new native
+Windows CLI configured Toggle, Hold, Once and then restored Back without any
+manual settings changes or physical macro execution. The fixed-purpose lab
+script initialized the already-confirmed volatile vendor session once and
+checked each capture's complete feature writes, exact ACK sequence and separate
+runtime readback before proceeding. No onboard selection/write occurred.
+
+The four eight-second `openhyperx-button4-playback-20260926-{toggle,hold,once,back}`
+captures resolved the same `0951:16E4` release `1124` identity. The first three
+were each 11,478 bytes; restoration was 11,024 bytes. In each macro capture,
+frame 77 contained the complete 264-byte Button 4 macro report and frame 81
+the exact `00 00 07 05 00 00 00 00` ACK. All three reports matched their
+corresponding Legacy fixtures byte-for-byte, including event bytes and zero-fill.
+Each had six vendor ACKs (configuration selector, request, macro, profile write,
+independent-read selector and request); restoration had five and no macro write.
+
+Independent full-profile reads after Toggle/Hold/Once changed only `0x88/0x89`
+relative to the initial Back image. Hold and Once preserved the entire macro
+profile image because playback lives in the definition, not the reference.
+The final Back read was byte-identical to the initial 264-byte runtime profile.
+Thus DPI, polling, colors, all other mappings, Button 5's reference and opaque
+profile fields were preserved. This validates configuration communication and
+restoration, not repeated key output, stop-on-second-press, stop-on-release or
+persistence. Those physical checks remain separate; no operator clicking was
+required for this first implementation.
+
 ## NGENUITY Legacy `.hxp` preset format
 
 On 2026-09-18, an exported `Base Settings.hxp` from NGENUITY Legacy `5.38.0.0`
@@ -1423,6 +1522,7 @@ assumption.
 | DPI and stages | runtime read/set, per-stage value/color edits, active-stage selection and final-stage add/remove are implemented and hardware-validated; five big-endian X/Y slots, 200-16000 range and 50-DPI units are confirmed; OpenHyperX onboard save was verified across a power-cycle | determine whether independent X/Y values are supported |
 | polling | all four interval codes captured; runtime 1000→500→1000 set/readback validated; 1000 Hz persisted through a separate NGENUITY Legacy save and power-cycle | verify effective USB report rate with an external rate tester |
 | NGENUITY Legacy `.hxp` | version-40 container, DPI records, Play Once keyboard/primary-click macros and macro references are parsed offline; imports are explicitly partial | compare Legacy exports differing only in active stage, polling, lighting, one physical assignment and each repeat mode |
+| macro runtime repeat | Button 4 Toggle/Hold codec, TOML examples, full golden fixtures and preservation mock tests implemented; automated native Windows writes exactly matched Legacy packets, received every expected ACK, and restored the original Back profile without manual clicking or onboard writes | physical repeat/stop behavior; repeat modes on other targets and onboard persistence |
 | button bindings | all 11 mappings are readable; all ten Mouse Functions, all seven Multimedia functions, all six Windows Shortcuts, Disabled and named keyboard usages are writable on the nine general controls; the physical primary pair has a repeated capture-backed Standard/Swapped encoding and OpenHyperX's atomic swap/restore was read back and functionally verified; Button 4 and Button 5 have separate captured Play Once runtime macro slots, with OpenHyperX's Button 4 AB assignment independently read back and functionally verified; the full Button 4 Mouse, Multimedia and Shortcut matrices are capture-backed, and OpenHyperX's Scroll Up, Play/Pause and Cycle Apps writes were read back and functionally verified on Button 4; portable writes are also hardware-tested on Button 6 and DPI; bounded Play Once macros support chords, nonuniform timing and primary clicks on confirmed targets | capture additional macro targets, repeat modes, longer timelines and remaining macro mouse events |
 | onboard save | preservation-first driver/CLI transaction is covered by golden/mock tests and hardware-validated across a power-cycle for DPI, polling, all ordinary mappings, complete Button 4/5 Play Once macros and independent wheel/logo Solid colors; saves now initialize the verified volatile session once and check every ACK without retrying; the two-slot OpenHyperX save matched repeated Legacy macro packets exactly and preserved every unrelated onboard byte; Button 4 AB survived physical USB reconnection with Legacy closed | capture other macro targets and repeat modes; investigate non-Solid persistent lighting separately |
 | NGENUITY Legacy locking | unknown | run `devices`, then future read-only `info`, with NGENUITY Legacy open and closed; record open errors |

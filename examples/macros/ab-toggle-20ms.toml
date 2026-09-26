@@ -1,0 +1,22 @@
+# Runtime Button 4 only. Press again to stop; never use for an onboard save.
+playback = "toggle-repeat"
+
+[[events]]
+type = "key-down"
+key = "a"
+delay_ms = 20
+
+[[events]]
+type = "key-up"
+key = "a"
+delay_ms = 20
+
+[[events]]
+type = "key-down"
+key = "b"
+delay_ms = 20
+
+[[events]]
+type = "key-up"
+key = "b"
+delay_ms = 20

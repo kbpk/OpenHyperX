@@ -626,9 +626,13 @@ fn load_button_macro(
     path: &Path,
 ) -> Result<(PulsefireRaidRuntimeAssignment, String)> {
     let definition = load_macro_definition(path)?;
+    let playback = definition.playback;
     let assignment = PulsefireRaidRuntimeAssignment::macro_timeline(control, definition)
         .with_context(|| format!("unsupported Pulsefire Raid macro in {}", path.display()))?;
-    Ok((assignment, format!("macro from {}", path.display())))
+    Ok((
+        assignment,
+        format!("macro ({playback:?}) from {}", path.display()),
+    ))
 }
 
 fn load_macro_definition(path: &Path) -> Result<MacroDefinition> {
@@ -2686,6 +2690,38 @@ mod tests {
         assert_eq!(macro_definition.len(), 2);
         assert_eq!(macro_definition[0].control, PulsefireRaidControl::Button4);
         assert_eq!(macro_definition[1].control, PulsefireRaidControl::Button5);
+    }
+
+    #[test]
+    fn repeat_examples_validate_for_button4_runtime_but_not_button5_or_onboard() {
+        for (source, playback) in [
+            (
+                include_str!("../../../examples/macros/ab-toggle-20ms.toml"),
+                MacroPlayback::ToggleRepeat,
+            ),
+            (
+                include_str!("../../../examples/macros/ab-hold-20ms.toml"),
+                MacroPlayback::RepeatWhileHeld,
+            ),
+        ] {
+            let definition: MacroDefinition = toml::from_str(source).unwrap();
+            assert_eq!(definition.playback, playback);
+            assert!(PulsefireRaidRuntimeAssignment::macro_timeline(
+                PulsefireRaidControl::Button4,
+                definition.clone(),
+            )
+            .is_ok());
+            assert!(PulsefireRaidRuntimeAssignment::macro_timeline(
+                PulsefireRaidControl::Button5,
+                definition.clone(),
+            )
+            .is_err());
+            assert!(PulsefireRaidOnboardMacros::new(&[(
+                PulsefireRaidControl::Button4,
+                &definition
+            ),])
+            .is_err());
+        }
     }
 
     #[test]

@@ -1,0 +1,22 @@
+# Runtime Button 4 only. Repeat while held; never use for an onboard save.
+playback = "repeat-while-held"
+
+[[events]]
+type = "key-down"
+key = "a"
+delay_ms = 20
+
+[[events]]
+type = "key-up"
+key = "a"
+delay_ms = 20
+
+[[events]]
+type = "key-down"
+key = "b"
+delay_ms = 20
+
+[[events]]
+type = "key-up"
+key = "b"
+delay_ms = 20
