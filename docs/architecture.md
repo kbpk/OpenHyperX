@@ -54,17 +54,18 @@ unsupported source format and must not share the Legacy parser without
 evidence.
 
 The driver also owns the acknowledged Pulsefire Raid onboard-save transaction.
-It validates runtime layout and binding records before selecting onboard memory, reads
-the existing onboard image, and patches only the confirmed DPI, polling and 11
+It validates runtime layout, all enabled X/Y DPI values and binding records
+before selecting onboard memory. It reads the existing onboard image and
+patches only the confirmed DPI, polling and 11
 button-record fields. Unknown onboard bytes are preserved. A referenced Button
 4 or Button 5 macro requires its caller-supplied typed definition because the
 event stream cannot be recovered from the profile image. Every save-stage interrupt
 acknowledgement is checked and an unexpected response aborts without retry.
-The comment audit identified a remaining validation gap: numeric DPI bounds are
-checked only while patching the onboard destination, after onboard selection
-and auxiliary lighting reports. This needs prevalidation before that selection;
-see the diagnostic finding in `docs/research.md`. It was not fixed as part of
-the comments-only audit.
+Numeric DPI bounds use the same validator as the offline setter. Invalid source
+values abort after the runtime read but before onboard selection, auxiliary
+lighting or any persistent write. The destination patch also validates before
+mutation; a rejected source leaves all destination bytes unchanged. Inspection
+still decodes unusual raw DPI values for research rather than clamping them.
 The acknowledgement read is now armed before each feature report on Windows
 to reduce a possible read-posting race; hardware probing showed that this
 alone does not restore missing ACKs. A

@@ -594,8 +594,9 @@ impl<T: HidTransport> PulsefireRaid<T> {
         // the captured volatile session once; this is not a retry after an ACK failure.
         self.initialize_vendor_session_with_wait(acknowledgements, &mut wait)?;
         let runtime = self.read_runtime_profile_for_save(acknowledgements, &mut wait)?;
-        // Structural/binding gate before onboard selection. Numeric DPI range
-        // prevalidation is still missing here; see the protocol method's TODO.
+        // Validate layout, every enabled X/Y DPI value and bindings before
+        // onboard selection or auxiliary lighting. Invalid source data can
+        // require a runtime read, but must never enter the persistent sequence.
         runtime.validate_confirmed_runtime_settings()?;
 
         // A reference contains no timeline. Supplying a definition for an
@@ -1029,6 +1030,7 @@ mod tests {
     use super::*;
     use hyperx_core::MacroPlayback;
     use hyperx_hid::testing::MockHidTransport;
+    use hyperx_protocol::pulsefire_raid::DpiAxis;
 
     fn captured_ab_macro() -> MacroDefinition {
         MacroDefinition {
@@ -1685,6 +1687,66 @@ mod tests {
         ));
         device.into_transport().assert_drained();
         acknowledgements.assert_drained();
+    }
+
+    #[test]
+    fn driver_rejects_invalid_source_dpi_before_any_onboard_io() {
+        let mut original = five_stage_profile_response();
+        original[0x7C..0xA8]
+            .copy_from_slice(&save_profile_response(ProfileSection::Runtime, false)[0x7C..0xA8]);
+        for stage in 0..5 {
+            for (axis, offset) in [
+                (DpiAxis::X, 0x19 + stage * 2),
+                (DpiAxis::Y, 0x25 + stage * 2),
+            ] {
+                for units in [0_u16, 3, 321, u16::MAX] {
+                    let mut runtime = original;
+                    runtime[offset..offset + 2].copy_from_slice(&units.to_be_bytes());
+                    let mut configuration = MockHidTransport::new(1);
+                    let mut acknowledgements = MockHidTransport::new(2);
+                    script_session_start(&mut configuration, &mut acknowledgements);
+                    expect_acked_feature(
+                        &mut configuration,
+                        &mut acknowledgements,
+                        encode_runtime_profile_read_prelude(),
+                    );
+                    expect_acked_feature(
+                        &mut configuration,
+                        &mut acknowledgements,
+                        encode_profile_read_request(),
+                    );
+                    configuration.queue_feature_response(runtime);
+                    // No expectations for onboard selection, auxiliary lighting,
+                    // macro definitions or writes: every such TX must fail.
+                    let mut device = PulsefireRaid::new(configuration).unwrap();
+                    let mut waits = Vec::new();
+                    let result = device.save_runtime_to_onboard_with_wait(
+                        &mut acknowledgements,
+                        RgbColor::new(0xFF, 0, 0),
+                        RgbColor::BLACK,
+                        &PulsefireRaidOnboardMacros::default(),
+                        |duration| waits.push(duration),
+                    );
+                    match result {
+                        Err(PulsefireRaidError::InvalidProfile(error)) => assert_eq!(
+                            error,
+                            PerformanceProfileError::DpiOutOfRange {
+                                stage: stage + 1,
+                                axis,
+                                dpi: u32::from(units) * 50,
+                            }
+                        ),
+                        other => panic!("stage {} {axis:?}, units {units}: {other:?}", stage + 1),
+                    }
+                    assert_eq!(
+                        waits,
+                        [SESSION_PHASE_DELAY, SESSION_READY_DELAY, PROFILE_READ_DELAY]
+                    );
+                    device.into_transport().assert_drained();
+                    acknowledgements.assert_drained();
+                }
+            }
+        }
     }
 
     #[test]

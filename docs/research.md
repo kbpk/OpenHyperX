@@ -1539,21 +1539,47 @@ capability or device write was introduced.
 The audit also found a real validation gap, reproduced with a temporary offline
 diagnostic test: set the first enabled stage's X field to zero in the existing
 button-profile fixture and polling to `08` (125 Hz).
-`validate_confirmed_runtime_settings()` accepts this source because
+At the time of the audit, `validate_confirmed_runtime_settings()` accepted this
+source because
 `dpi_profile()` validates flags/indexes but does not enforce numeric DPI bounds.
-Copying it into an onboard image then returns `DpiOutOfRange { dpi: 0, ... }`,
-but polling in that in-memory destination has already changed from 1000 to
+Copying it into an onboard image then returned `DpiOutOfRange { dpi: 0, ... }`,
+but polling in that in-memory destination had already changed from 1000 to
 125 Hz. The diagnostic passed and was removed rather than retaining a regression
 test that requires the bug to remain.
 
-In the driver, the source check precedes onboard selection, but the failing
-copy comes after selection, three auxiliary lighting reports and the onboard
-read. Those reports can therefore be sent before an invalid source DPI is
-rejected. No such transaction was run on the physical mouse during this audit;
-existing positive hardware captures used valid DPI values. TODO: validate each
-source X/Y value before selecting onboard and before mutating the destination,
-then add rejection-before-any-onboard-I/O and unchanged-destination regression
-tests. The comments-only change does not fix this gap.
+In the driver, the source check preceded onboard selection, but the failing
+copy came after selection, three auxiliary lighting reports and the onboard
+read. Before the fix, those reports could therefore be sent before an invalid
+source DPI was rejected. No such transaction was run on the physical mouse
+during this audit; existing positive hardware captures used valid DPI values.
+The comments-only change documented this gap; the subsequent fix is below.
+
+### Numeric DPI prevalidation fix
+
+`validate_confirmed_runtime_settings()` now checks both X and Y of every enabled
+stage with the existing `validate_dpi` used by the setter. The driver already
+calls this gate after reading runtime and before selecting onboard, so no
+selector, auxiliary lighting, onboard read, macro or profile write can follow
+an invalid value. Session initialization and the runtime read are still needed
+to obtain and validate the actual source. No wire format, timing or successful
+save transaction has changed.
+
+The offline destination copy uses the same gate before mutation, so an error
+also leaves its polling and all other bytes untouched. Read-only profile
+decoding remains permissive for unusual raw values; disabled slots are not
+validated as enabled settings.
+
+Regression tests first failed on the old implementation, then cover all five
+stages on both axes with 0, 150, 16050 and the maximum raw 16-bit value in
+50-DPI units. They assert the exact stage/axis/value error and unchanged entire
+destination image. Mock transport permits only startup plus the runtime read;
+any later onboard activity is a test failure. Positive tests retain support for
+200/16000 DPI and inactive slots with stale values. No invalid DPI or save was
+sent to the physical mouse for these tests.
+Verification on 2026-09-26 passed all 140 tests on Linux and native Windows,
+Linux format/Clippy, both builds and native CLI smoke checks. Discovery still
+listed all seven Raid collections at release `1124`. Valid-save golden/mock
+transactions remain unchanged; no physical save or invalid-DPI probe was run.
 
 ## NGENUITY Legacy `.hxp` preset format
 

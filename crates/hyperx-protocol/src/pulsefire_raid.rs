@@ -646,8 +646,8 @@ impl PerformanceProfile {
     /// and onboard profile sections.
     ///
     /// Unknown onboard bytes are deliberately retained from the destination
-    /// image. Source structure/bindings are checked first; numeric DPI checks
-    /// currently happen inside set_dpi_profile, after the polling patch.
+    /// image. Source layout, numeric DPI and bindings are validated before any
+    /// mutation, so invalid input leaves the entire destination unchanged.
     pub fn copy_confirmed_runtime_settings_from(
         &mut self,
         runtime: &Self,
@@ -662,9 +662,9 @@ impl PerformanceProfile {
         runtime.validate_confirmed_runtime_settings()?;
         let polling_rate = runtime.polling_rate()?;
         let dpi_profile = runtime.dpi_profile()?;
-        // TODO: prevalidate numeric DPI here/before the save transaction. An
-        // out-of-range source currently fails in set_dpi_profile after polling
-        // has changed, so this method is not fully atomic on invalid input.
+        // The shared save gate already checked every enabled X/Y value using
+        // the setter's numeric validator. No later stage can fail range checking
+        // after polling or earlier destination fields have been changed.
         self.set_polling_rate(polling_rate);
         self.set_dpi_profile(&dpi_profile)?;
         for control in PulsefireRaidControl::ALL {
@@ -677,11 +677,11 @@ impl PerformanceProfile {
         Ok(())
     }
 
-    /// Validate polling, DPI-stage layout and captured button records for save.
+    /// Validate polling, DPI layout/values and captured button records for save.
     ///
     /// Callers can use this before beginning the persistent transaction so an
-    /// unknown runtime record fails without touching onboard memory. Numeric
-    /// DPI range checks are not yet part of this gate (see TODO below).
+    /// unknown record or out-of-range enabled DPI fails without touching
+    /// onboard memory. Inspection through dpi_profile remains permissive.
     pub fn validate_confirmed_runtime_settings(&self) -> Result<(), PerformanceProfileError> {
         if self.section != ProfileSection::Runtime {
             return Err(PerformanceProfileError::ExpectedRuntimeSettingsSource(
@@ -689,10 +689,14 @@ impl PerformanceProfile {
             ));
         }
         self.polling_rate()?;
-        // TODO: validate each decoded X/Y with validate_dpi before onboard
-        // selection. dpi_profile checks flags/indexes, not 200..=16000 values;
-        // the later copy/setter can currently reject these only after selection.
-        self.dpi_profile()?;
+        // Decode layout first, then apply the same per-axis numeric constraints
+        // as set_dpi_profile. Check all enabled stages, not just the active one;
+        // inactive slot bytes are not settings and must not block a safe save.
+        let dpi_profile = self.dpi_profile()?;
+        for (index, stage) in dpi_profile.stages.iter().enumerate() {
+            validate_dpi(index, DpiAxis::X, stage.x)?;
+            validate_dpi(index, DpiAxis::Y, stage.y)?;
+        }
         self.primary_button_layout()?;
         for control in PulsefireRaidControl::ALL {
             if control.is_primary_click() {
@@ -1836,6 +1840,109 @@ mod tests {
             })
         ));
         assert_eq!(onboard.as_bytes(), &onboard_bytes);
+    }
+
+    #[test]
+    fn onboard_copy_rejects_invalid_source_dpi_on_every_enabled_axis_without_mutating() {
+        let mut source = PerformanceProfile::parse(&captured_button_profile()).unwrap();
+        source
+            .set_dpi_profile(&DpiProfile {
+                stages: vec![DpiStage::new(800, 800, RgbColor::BLACK); 5],
+                active_stage: 0,
+            })
+            .unwrap();
+        source.set_polling_rate(PollingRate::Hz125);
+        let original = *source.as_bytes();
+        let mut destination_bytes = profile_fixture(
+            ProfileImageKind::DeviceReadResponse,
+            ProfileSection::Onboard,
+        );
+        destination_bytes[0x10] = 0xA5;
+        destination_bytes[0x7C..0xA8].fill(0xCC);
+        let destination = PerformanceProfile::parse(&destination_bytes).unwrap();
+
+        for stage in 0..5 {
+            for (axis, offset) in [
+                (DpiAxis::X, DPI_X_OFFSETS[stage]),
+                (DpiAxis::Y, DPI_Y_OFFSETS[stage]),
+            ] {
+                for units in [0_u16, 3, 321, u16::MAX] {
+                    let mut malformed = original;
+                    malformed[offset..offset + 2].copy_from_slice(&units.to_be_bytes());
+                    let runtime = PerformanceProfile::parse(&malformed).unwrap();
+                    let expected = PerformanceProfileError::DpiOutOfRange {
+                        stage: stage + 1,
+                        axis,
+                        dpi: u32::from(units) * DPI_UNIT,
+                    };
+                    // Inspection must still decode the raw image; only the
+                    // write/save gate imposes the supported numeric range.
+                    assert!(runtime.dpi_profile().is_ok());
+                    assert_eq!(
+                        runtime.validate_confirmed_runtime_settings(),
+                        Err(expected.clone())
+                    );
+                    let mut onboard = destination.clone();
+                    assert_eq!(
+                        onboard.copy_confirmed_runtime_settings_from(&runtime),
+                        Err(expected)
+                    );
+                    assert_eq!(
+                        onboard,
+                        destination,
+                        "stage {} {axis:?}, units {units}",
+                        stage + 1
+                    );
+                    assert_eq!(runtime.as_bytes(), &malformed);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn save_gate_accepts_dpi_boundaries_and_ignores_disabled_slots() {
+        for stage_count in [1, 4, 5] {
+            for (x, y) in [(200, 16_000), (16_000, 200)] {
+                let mut source = PerformanceProfile::parse(&captured_button_profile()).unwrap();
+                source
+                    .set_dpi_profile(&DpiProfile {
+                        stages: vec![DpiStage::new(x, y, RgbColor::BLACK); stage_count],
+                        active_stage: stage_count - 1,
+                    })
+                    .unwrap();
+                let mut raw = *source.as_bytes();
+                // Inactive slot bytes may be opaque/stale. Validation must
+                // ignore them; the captured save patch clears trailing slots.
+                for stage in stage_count..5 {
+                    raw[DPI_X_OFFSETS[stage]..DPI_X_OFFSETS[stage] + 2].fill(0xFF);
+                    raw[DPI_Y_OFFSETS[stage]..DPI_Y_OFFSETS[stage] + 2].fill(0xFF);
+                }
+                let runtime = PerformanceProfile::parse(&raw).unwrap();
+                runtime.validate_confirmed_runtime_settings().unwrap();
+                let mut onboard = PerformanceProfile::parse(&profile_fixture(
+                    ProfileImageKind::DeviceReadResponse,
+                    ProfileSection::Onboard,
+                ))
+                .unwrap();
+                onboard
+                    .copy_confirmed_runtime_settings_from(&runtime)
+                    .unwrap();
+                assert_eq!(
+                    onboard.dpi_profile().unwrap(),
+                    runtime.dpi_profile().unwrap()
+                );
+                for stage in stage_count..5 {
+                    assert_eq!(
+                        &onboard.as_bytes()[DPI_X_OFFSETS[stage]..DPI_X_OFFSETS[stage] + 2],
+                        &[0, 0]
+                    );
+                    assert_eq!(
+                        &onboard.as_bytes()[DPI_Y_OFFSETS[stage]..DPI_Y_OFFSETS[stage] + 2],
+                        &[0, 0]
+                    );
+                }
+            }
+        }
     }
 
     #[test]
