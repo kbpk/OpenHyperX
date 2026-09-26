@@ -327,10 +327,12 @@ pub enum PulsefireRaidError {
         length: usize,
         actual: [u8; SAVE_ACK_LENGTH],
     },
-    #[error("runtime Button 5 references a macro; provide its definition to save it onboard")]
-    MissingOnboardMacroDefinition,
-    #[error("a macro definition was supplied, but runtime Button 5 does not reference a macro")]
-    UnexpectedOnboardMacroDefinition,
+    #[error("runtime {0:?} references a macro; provide its definition to save it onboard")]
+    MissingOnboardMacroDefinition(PulsefireRaidControl),
+    #[error("a macro definition was supplied, but runtime {0:?} does not reference a macro")]
+    UnexpectedOnboardMacroDefinition(PulsefireRaidControl),
+    #[error("more than one onboard macro definition was supplied for {0:?}")]
+    DuplicateOnboardMacroDefinition(PulsefireRaidControl),
     #[error("Pulsefire Raid save acknowledgements require HID interface 2, got {0}")]
     WrongAcknowledgementInterface(i32),
     #[error("DPI stage {stage} does not exist; the runtime profile has {stage_count} stage(s)")]
@@ -372,6 +374,42 @@ pub struct PulsefireRaidOnboardSaveResult {
     pub polling_rate: PollingRate,
     pub dpi_profile: DpiProfile,
     pub macro_saved: bool,
+    pub macro_controls_saved: Vec<PulsefireRaidControl>,
+}
+
+/// Validated definitions for all referenced capture-backed onboard macro slots.
+/// Construction performs no HID I/O. No raw packet can be supplied by a client.
+#[derive(Clone, Debug, Default)]
+pub struct PulsefireRaidOnboardMacros {
+    reports: Vec<PulsefireRaidMacro>,
+}
+
+impl PulsefireRaidOnboardMacros {
+    pub fn new(
+        definitions: &[(PulsefireRaidControl, &MacroDefinition)],
+    ) -> Result<Self, PulsefireRaidError> {
+        let mut reports = Vec::new();
+        for &(control, definition) in definitions {
+            if reports
+                .iter()
+                .any(|report: &PulsefireRaidMacro| report.control() == control)
+            {
+                return Err(PulsefireRaidError::DuplicateOnboardMacroDefinition(control));
+            }
+            if !matches!(
+                control,
+                PulsefireRaidControl::Button4 | PulsefireRaidControl::Button5
+            ) {
+                return Err(PulsefireRaidError::UnconfirmedMacroControl(control));
+            }
+            let report = encode_macro_definition(control, definition)?;
+            report.to_onboard_report()?;
+            reports.push(report);
+        }
+        // Both repeated two-slot saves sent Button 5 before Button 4.
+        reports.sort_by_key(|report| u8::from(report.control() == PulsefireRaidControl::Button4));
+        Ok(Self { reports })
+    }
 }
 
 pub struct PulsefireRaid<T> {
@@ -460,11 +498,29 @@ impl<T: HidTransport> PulsefireRaid<T> {
         logo: RgbColor,
         macro_definition: Option<&MacroDefinition>,
     ) -> Result<PulsefireRaidOnboardSaveResult, PulsefireRaidError> {
+        let definitions =
+            macro_definition.map(|definition| [(PulsefireRaidControl::Button5, definition)]);
+        let macros = PulsefireRaidOnboardMacros::new(
+            definitions.as_ref().map_or(&[], |items| items.as_slice()),
+        )?;
+        self.save_runtime_to_onboard_with_macros(acknowledgements, wheel, logo, &macros)
+    }
+
+    /// Save confirmed runtime settings and every referenced Button 4/5 macro.
+    /// The volatile vendor session is initialized once, before any onboard
+    /// selection. Missing/mismatched definitions and ACK errors abort without retry.
+    pub fn save_runtime_to_onboard_with_macros<A: HidTransport>(
+        &mut self,
+        acknowledgements: &mut A,
+        wheel: RgbColor,
+        logo: RgbColor,
+        macros: &PulsefireRaidOnboardMacros,
+    ) -> Result<PulsefireRaidOnboardSaveResult, PulsefireRaidError> {
         self.save_runtime_to_onboard_with_wait(
             acknowledgements,
             wheel,
             logo,
-            macro_definition,
+            macros,
             std::thread::sleep,
         )
     }
@@ -531,7 +587,7 @@ impl<T: HidTransport> PulsefireRaid<T> {
         acknowledgements: &mut A,
         wheel: RgbColor,
         logo: RgbColor,
-        macro_definition: Option<&MacroDefinition>,
+        macros: &PulsefireRaidOnboardMacros,
         mut wait: impl FnMut(Duration),
     ) -> Result<PulsefireRaidOnboardSaveResult, PulsefireRaidError> {
         if acknowledgements.interface_number()
@@ -541,21 +597,29 @@ impl<T: HidTransport> PulsefireRaid<T> {
                 acknowledgements.interface_number(),
             ));
         }
-        // Validate the optional macro before opening the persistent part of
-        // the transaction. Runtime fields are validated immediately after the
-        // read and before selecting the onboard section.
-        let macro_report = macro_definition
-            .map(|definition| encode_macro_definition(PulsefireRaidControl::Button5, definition))
-            .transpose()?;
+        // Macro definitions have already been validated without I/O. Initialize
+        // the captured volatile session once; this is not a retry after an ACK failure.
+        self.initialize_vendor_session_with_wait(acknowledgements, &mut wait)?;
         let runtime = self.read_runtime_profile_for_save(acknowledgements, &mut wait)?;
         runtime.validate_confirmed_runtime_settings()?;
 
-        let has_macro_reference =
-            runtime.has_confirmed_macro_reference(PulsefireRaidControl::Button5);
-        match (has_macro_reference, macro_report.is_some()) {
-            (true, false) => return Err(PulsefireRaidError::MissingOnboardMacroDefinition),
-            (false, true) => return Err(PulsefireRaidError::UnexpectedOnboardMacroDefinition),
-            _ => {}
+        for control in [PulsefireRaidControl::Button5, PulsefireRaidControl::Button4] {
+            let has_macro_reference = runtime.has_confirmed_macro_reference(control);
+            let supplied = macros
+                .reports
+                .iter()
+                .any(|report| report.control() == control);
+            match (has_macro_reference, supplied) {
+                (true, false) => {
+                    return Err(PulsefireRaidError::MissingOnboardMacroDefinition(control))
+                }
+                (false, true) => {
+                    return Err(PulsefireRaidError::UnexpectedOnboardMacroDefinition(
+                        control,
+                    ))
+                }
+                _ => {}
+            }
         }
 
         let polling_rate = runtime.polling_rate()?;
@@ -574,7 +638,7 @@ impl<T: HidTransport> PulsefireRaid<T> {
         let mut onboard = self.read_profile_response(ProfileSection::Onboard)?;
         onboard.copy_confirmed_runtime_settings_from(&runtime)?;
 
-        if let Some(macro_report) = &macro_report {
+        for macro_report in &macros.reports {
             self.send_feature_report_with_save_ack(
                 acknowledgements,
                 &macro_report.to_onboard_report()?,
@@ -590,7 +654,12 @@ impl<T: HidTransport> PulsefireRaid<T> {
         Ok(PulsefireRaidOnboardSaveResult {
             polling_rate,
             dpi_profile,
-            macro_saved: macro_report.is_some(),
+            macro_saved: !macros.reports.is_empty(),
+            macro_controls_saved: macros
+                .reports
+                .iter()
+                .map(PulsefireRaidMacro::control)
+                .collect(),
         })
     }
 
@@ -1133,6 +1202,23 @@ mod tests {
         acknowledgements.queue_input_report(save_acknowledgement(opcode));
     }
 
+    fn onboard_macros(definition: Option<&MacroDefinition>) -> PulsefireRaidOnboardMacros {
+        let definitions =
+            definition.map(|definition| [(PulsefireRaidControl::Button5, definition)]);
+        PulsefireRaidOnboardMacros::new(definitions.as_ref().map_or(&[], |items| items.as_slice()))
+            .unwrap()
+    }
+
+    fn script_session_start(
+        configuration: &mut MockHidTransport,
+        acknowledgements: &mut MockHidTransport,
+    ) {
+        let [first, second] = encode_vendor_session_start_reports();
+        configuration.expect_feature_report(first);
+        acknowledgements.queue_input_report(Vec::new());
+        expect_acked_feature(configuration, acknowledgements, second);
+    }
+
     fn script_onboard_save(
         configuration: &mut MockHidTransport,
         acknowledgements: &mut MockHidTransport,
@@ -1142,6 +1228,27 @@ mod tests {
         logo: RgbColor,
         macro_definition: Option<&MacroDefinition>,
     ) {
+        script_onboard_save_with_macros(
+            configuration,
+            acknowledgements,
+            runtime,
+            onboard,
+            wheel,
+            logo,
+            &onboard_macros(macro_definition),
+        );
+    }
+
+    fn script_onboard_save_with_macros(
+        configuration: &mut MockHidTransport,
+        acknowledgements: &mut MockHidTransport,
+        runtime: [u8; DIRECT_REPORT_LENGTH],
+        onboard: [u8; DIRECT_REPORT_LENGTH],
+        wheel: RgbColor,
+        logo: RgbColor,
+        macros: &PulsefireRaidOnboardMacros,
+    ) {
+        script_session_start(configuration, acknowledgements);
         expect_acked_feature(
             configuration,
             acknowledgements,
@@ -1174,9 +1281,7 @@ mod tests {
         onboard_profile
             .copy_confirmed_runtime_settings_from(&runtime_profile)
             .unwrap();
-        if let Some(definition) = macro_definition {
-            let macro_report =
-                encode_macro_definition(PulsefireRaidControl::Button5, definition).unwrap();
+        for macro_report in &macros.reports {
             expect_acked_feature(
                 configuration,
                 acknowledgements,
@@ -1242,7 +1347,7 @@ mod tests {
                 &mut acknowledgements,
                 wheel,
                 logo,
-                None,
+                &PulsefireRaidOnboardMacros::default(),
                 |duration| waits.push(duration),
             )
             .unwrap();
@@ -1252,7 +1357,13 @@ mod tests {
         assert!(!result.macro_saved);
         assert_eq!(
             waits,
-            [PROFILE_READ_DELAY, PROFILE_READ_DELAY, ONBOARD_COMMIT_DELAY]
+            [
+                SESSION_PHASE_DELAY,
+                SESSION_READY_DELAY,
+                PROFILE_READ_DELAY,
+                PROFILE_READ_DELAY,
+                ONBOARD_COMMIT_DELAY
+            ]
         );
         device.into_transport().assert_drained();
         acknowledgements.assert_drained();
@@ -1284,7 +1395,7 @@ mod tests {
                 &mut acknowledgements,
                 wheel,
                 logo,
-                Some(&macro_definition),
+                &onboard_macros(Some(&macro_definition)),
                 |_| {},
             )
             .unwrap();
@@ -1294,10 +1405,204 @@ mod tests {
     }
 
     #[test]
+    fn driver_saves_both_macro_slots_in_captured_button5_then_button4_order() {
+        let mut runtime = save_profile_response(ProfileSection::Runtime, true);
+        runtime[0x88..0x8C].copy_from_slice(&[0x53, 0x00, 0x00, 0x03]);
+        let mut onboard = save_profile_response(ProfileSection::Onboard, false);
+        onboard[0x10] = 0xA5;
+        let ab = captured_ab_macro();
+        let coverage = captured_coverage_macro();
+        let macros = PulsefireRaidOnboardMacros::new(&[
+            (PulsefireRaidControl::Button4, &ab),
+            (PulsefireRaidControl::Button5, &coverage),
+        ])
+        .unwrap();
+        assert_eq!(
+            macros
+                .reports
+                .iter()
+                .map(PulsefireRaidMacro::control)
+                .collect::<Vec<_>>(),
+            [PulsefireRaidControl::Button5, PulsefireRaidControl::Button4]
+        );
+        let mut configuration = MockHidTransport::new(1);
+        let mut acknowledgements = MockHidTransport::new(2);
+        script_onboard_save_with_macros(
+            &mut configuration,
+            &mut acknowledgements,
+            runtime,
+            onboard,
+            RgbColor::BLACK,
+            RgbColor::new(0, 0, 0xFF),
+            &macros,
+        );
+        let mut device = PulsefireRaid::new(configuration).unwrap();
+        let saved = device
+            .save_runtime_to_onboard_with_wait(
+                &mut acknowledgements,
+                RgbColor::BLACK,
+                RgbColor::new(0, 0, 0xFF),
+                &macros,
+                |_| {},
+            )
+            .unwrap();
+        assert_eq!(
+            saved.macro_controls_saved,
+            [PulsefireRaidControl::Button5, PulsefireRaidControl::Button4]
+        );
+        device.into_transport().assert_drained();
+        acknowledgements.assert_drained();
+    }
+
+    #[test]
+    fn onboard_macro_definitions_reject_duplicates_unsupported_targets_and_invalid_timelines() {
+        let ab = captured_ab_macro();
+        assert!(matches!(
+            PulsefireRaidOnboardMacros::new(&[
+                (PulsefireRaidControl::Button4, &ab),
+                (PulsefireRaidControl::Button4, &ab),
+            ]),
+            Err(PulsefireRaidError::DuplicateOnboardMacroDefinition(
+                PulsefireRaidControl::Button4
+            ))
+        ));
+        assert!(matches!(
+            PulsefireRaidOnboardMacros::new(&[(PulsefireRaidControl::Dpi, &ab)]),
+            Err(PulsefireRaidError::UnconfirmedMacroControl(
+                PulsefireRaidControl::Dpi
+            ))
+        ));
+        let mut invalid = ab;
+        invalid.events.clear();
+        assert!(
+            PulsefireRaidOnboardMacros::new(&[(PulsefireRaidControl::Button4, &invalid)]).is_err()
+        );
+    }
+
+    #[test]
+    fn driver_does_not_commit_the_profile_after_a_failed_button4_macro_ack() {
+        let mut runtime = save_profile_response(ProfileSection::Runtime, true);
+        runtime[0x88..0x8C].copy_from_slice(&[0x53, 0, 0, 0x03]);
+        let ab = captured_ab_macro();
+        let coverage = captured_coverage_macro();
+        let macros = PulsefireRaidOnboardMacros::new(&[
+            (PulsefireRaidControl::Button4, &ab),
+            (PulsefireRaidControl::Button5, &coverage),
+        ])
+        .unwrap();
+        let mut configuration = MockHidTransport::new(1);
+        let mut acknowledgements = MockHidTransport::new(2);
+        script_session_start(&mut configuration, &mut acknowledgements);
+        for report in [
+            encode_runtime_profile_read_prelude(),
+            encode_profile_read_request(),
+            encode_onboard_profile_read_prelude(),
+        ] {
+            expect_acked_feature(&mut configuration, &mut acknowledgements, report);
+        }
+        configuration.queue_feature_response(runtime);
+        for report in encode_onboard_static_lighting_reports(RgbColor::BLACK, RgbColor::BLACK) {
+            expect_acked_feature(&mut configuration, &mut acknowledgements, report);
+        }
+        expect_acked_feature(
+            &mut configuration,
+            &mut acknowledgements,
+            encode_profile_read_request(),
+        );
+        configuration.queue_feature_response(save_profile_response(ProfileSection::Onboard, false));
+        expect_acked_feature(
+            &mut configuration,
+            &mut acknowledgements,
+            macros.reports[0].to_onboard_report().unwrap(),
+        );
+        configuration.expect_feature_report(macros.reports[1].to_onboard_report().unwrap());
+        acknowledgements.queue_input_report(Vec::new());
+        acknowledgements.queue_input_report([0, 0, 0x07, 0x01, 0, 0, 0, 0]);
+        let mut device = PulsefireRaid::new(configuration).unwrap();
+        assert!(matches!(
+            device.save_runtime_to_onboard_with_wait(
+                &mut acknowledgements,
+                RgbColor::BLACK,
+                RgbColor::BLACK,
+                &macros,
+                |_| {}
+            ),
+            Err(PulsefireRaidError::UnexpectedSaveAcknowledgement { opcode: 0x05, .. })
+        ));
+        device.into_transport().assert_drained();
+        acknowledgements.assert_drained();
+    }
+
+    #[test]
+    fn driver_aborts_save_before_profile_access_when_session_ack_is_missing() {
+        let mut configuration = MockHidTransport::new(1);
+        for report in encode_vendor_session_start_reports() {
+            configuration.expect_feature_report(report);
+        }
+        let mut acknowledgements = MockHidTransport::new(2);
+        for _ in 0..3 {
+            acknowledgements.queue_input_report(Vec::new());
+        }
+        let mut device = PulsefireRaid::new(configuration).unwrap();
+        assert!(matches!(
+            device.save_runtime_to_onboard_with_wait(
+                &mut acknowledgements,
+                RgbColor::BLACK,
+                RgbColor::BLACK,
+                &PulsefireRaidOnboardMacros::default(),
+                |_| {}
+            ),
+            Err(PulsefireRaidError::WrongSaveAcknowledgementLength {
+                opcode: 0x07,
+                actual: 0
+            })
+        ));
+        device.into_transport().assert_drained();
+        acknowledgements.assert_drained();
+    }
+
+    #[test]
+    fn driver_refuses_a_definition_without_its_runtime_macro_reference() {
+        let mut configuration = MockHidTransport::new(1);
+        let mut acknowledgements = MockHidTransport::new(2);
+        script_session_start(&mut configuration, &mut acknowledgements);
+        expect_acked_feature(
+            &mut configuration,
+            &mut acknowledgements,
+            encode_runtime_profile_read_prelude(),
+        );
+        expect_acked_feature(
+            &mut configuration,
+            &mut acknowledgements,
+            encode_profile_read_request(),
+        );
+        configuration.queue_feature_response(save_profile_response(ProfileSection::Runtime, false));
+        let ab = captured_ab_macro();
+        let macros =
+            PulsefireRaidOnboardMacros::new(&[(PulsefireRaidControl::Button4, &ab)]).unwrap();
+        let mut device = PulsefireRaid::new(configuration).unwrap();
+        assert!(matches!(
+            device.save_runtime_to_onboard_with_wait(
+                &mut acknowledgements,
+                RgbColor::BLACK,
+                RgbColor::BLACK,
+                &macros,
+                |_| {}
+            ),
+            Err(PulsefireRaidError::UnexpectedOnboardMacroDefinition(
+                PulsefireRaidControl::Button4
+            ))
+        ));
+        device.into_transport().assert_drained();
+        acknowledgements.assert_drained();
+    }
+
+    #[test]
     fn driver_refuses_missing_macro_before_selecting_onboard_memory() {
         let runtime = save_profile_response(ProfileSection::Runtime, true);
         let mut configuration = MockHidTransport::new(1);
         let mut acknowledgements = MockHidTransport::new(2);
+        script_session_start(&mut configuration, &mut acknowledgements);
         expect_acked_feature(
             &mut configuration,
             &mut acknowledgements,
@@ -1316,21 +1621,24 @@ mod tests {
                 &mut acknowledgements,
                 RgbColor::BLACK,
                 RgbColor::BLACK,
-                None,
+                &PulsefireRaidOnboardMacros::default(),
                 |_| {}
             ),
-            Err(PulsefireRaidError::MissingOnboardMacroDefinition)
+            Err(PulsefireRaidError::MissingOnboardMacroDefinition(
+                PulsefireRaidControl::Button5
+            ))
         ));
         device.into_transport().assert_drained();
         acknowledgements.assert_drained();
     }
 
     #[test]
-    fn driver_refuses_button4_macro_before_selecting_onboard_memory() {
+    fn driver_refuses_missing_button4_definition_before_selecting_onboard_memory() {
         let mut runtime = save_profile_response(ProfileSection::Runtime, true);
         runtime[0x88..0x8C].copy_from_slice(&[0x53, 0x00, 0x00, 0x03]);
         let mut configuration = MockHidTransport::new(1);
         let mut acknowledgements = MockHidTransport::new(2);
+        script_session_start(&mut configuration, &mut acknowledgements);
         expect_acked_feature(
             &mut configuration,
             &mut acknowledgements,
@@ -1350,13 +1658,11 @@ mod tests {
                 &mut acknowledgements,
                 RgbColor::BLACK,
                 RgbColor::BLACK,
-                Some(&macro_definition),
+                &onboard_macros(Some(&macro_definition)),
                 |_| {}
             ),
-            Err(PulsefireRaidError::InvalidProfile(
-                PerformanceProfileError::UnconfirmedOnboardMacroControl(
-                    PulsefireRaidControl::Button4
-                )
+            Err(PulsefireRaidError::MissingOnboardMacroDefinition(
+                PulsefireRaidControl::Button4
             ))
         ));
         device.into_transport().assert_drained();
@@ -1366,8 +1672,9 @@ mod tests {
     #[test]
     fn driver_aborts_on_an_unexpected_save_acknowledgement() {
         let mut configuration = MockHidTransport::new(1);
-        configuration.expect_feature_report(encode_runtime_profile_read_prelude());
         let mut acknowledgements = MockHidTransport::new(2);
+        script_session_start(&mut configuration, &mut acknowledgements);
+        configuration.expect_feature_report(encode_runtime_profile_read_prelude());
         acknowledgements.queue_input_report(Vec::new());
         acknowledgements.queue_input_report([0x00; SAVE_ACK_LENGTH]);
 
@@ -1377,7 +1684,7 @@ mod tests {
                 &mut acknowledgements,
                 RgbColor::BLACK,
                 RgbColor::BLACK,
-                None,
+                &PulsefireRaidOnboardMacros::default(),
                 |_| {}
             ),
             Err(PulsefireRaidError::UnexpectedSaveAcknowledgement { opcode: 0x03, .. })
@@ -1551,7 +1858,7 @@ mod tests {
                 &mut wrong_acknowledgements,
                 RgbColor::BLACK,
                 RgbColor::BLACK,
-                None,
+                &PulsefireRaidOnboardMacros::default(),
                 |_| {}
             ),
             Err(PulsefireRaidError::WrongAcknowledgementInterface(1))

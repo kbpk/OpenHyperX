@@ -1039,9 +1039,10 @@ step resent only the existing Button 5 macro and restored Button 4 to
 were stable. No `Save to mouse` action occurred.
 
 This confirms a separate runtime macro slot for Button 4 and permits a typed
-runtime write for that target. It does not establish the Button 4 onboard
-macro transaction: the save path rejects a runtime Button 4 macro before
-selecting onboard memory. Only the AB/20-ms timeline was isolated and
+runtime write for that target. At this stage it did not establish the Button 4
+onboard macro transaction, so the save path rejected that reference before
+selecting onboard memory; the later persistent captures are documented below.
+Only the AB/20-ms timeline was isolated and
 functionally tested on Button 4; other supported event timelines reuse the
 Button 5 event codec and still need Button 4-specific hardware checks. Other
 button targets still need isolated captures.
@@ -1222,7 +1223,8 @@ now encodes only these two complete constant reports. An explicit diagnostic
 sends phase 1 and checks its exact ACK, waits 315 ms, then probes the known
 runtime selector. Any queued input, missing ACK or wrong ACK aborts without
 retry. It sends no profile image, macro or lighting snapshot and does not
-select/write onboard memory. The save path does not initialize automatically.
+select/write onboard memory. At that diagnostic stage, saves did not yet
+initialize automatically; the later integration is documented below.
 Golden and mock tests cover the reports, ordering, waits and failure gates;
 hardware validation of the OpenHyperX initializer after a fresh USB
 power-cycle was the next step.
@@ -1270,9 +1272,95 @@ persistent write was present. The diagnostic and independent native `info`
 both exited successfully; its full runtime image and all decoded fields
 remained unchanged. This verifies repeatable startup on this already-active
 release-`1124` unit, not arbitrary phase values or other firmware revisions.
-Next: integrate the verified fixed startup before the existing save sequence,
-retain fail-closed ACK checks, then implement and power-cycle-test Button 4's
-already captured onboard macro format.
+The following implementation integrates that verified startup before the
+existing save sequence, retaining fail-closed ACK checks.
+
+### Multi-slot save implementation
+
+On 2026-09-26, the driver was extended to initialize the confirmed vendor
+session once at the start of each explicitly requested onboard save. This is
+normal transaction setup, not a retry after a missing acknowledgement. All
+following stages retain exact ACK checks and fail closed.
+
+Both Button 4 and Button 5 Play Once macro reports can now be converted to the
+captured onboard section. The typed `PulsefireRaidOnboardMacros` validates
+targets, uniqueness and complete timelines without HID I/O. Every runtime
+macro reference must have its definition, and a supplied definition without
+the corresponding reference is rejected before onboard selection. Reports
+are ordered Button 5 then Button 4 exactly as in the repeated two-slot captures.
+The existing single-Button-5 entry point remains a compatibility wrapper.
+
+CLI `--macro-definition` accepts repeatable `button4=FILE` / `button5=FILE`;
+a bare path retains the original Button 5 meaning. Files and encoders are
+validated before discovery. The original macro timelines cannot be recovered
+from profile references, so supplying the correct event streams remains the
+caller's responsibility. The command does not silently replace runtime macros.
+Golden/mock tests cover Button 4's full 264-byte onboard report, two-slot order,
+unknown-byte preservation, missing/mismatched/duplicate definitions, startup
+failure, and abort before profile commit on an unexpected Button 4 macro ACK.
+### OpenHyperX two-slot persistent save capture
+
+The explicitly approved `openhyperx-button4-save-ab-20260926.pcapng` capture
+was 23,848 bytes. Injected descriptors identified `0951:16E4`, release `1124`,
+at temporary address 21. NGENUITY Legacy and other competing writers were
+closed. The fixed-purpose `scripts/verify-button4-save-windows.ps1` first read
+the baseline, assigned AB/20-ms/Play-Once to Button 4 in runtime, and performed
+one acknowledged onboard save without retrying. Button 5's existing
+`coverage-recorded-timing.toml` timeline and wheel-off/logo-blue snapshot were
+explicitly supplied, not inferred from profile references.
+
+Frames 247/249 contained the two fixed startup reports, separated by 111.350 ms;
+frame 251 contained the exact `00 00 07 07 00 00 00 00` ACK. The save selected
+onboard at frame 263, sent the three indexed lighting reports at 267/271/275,
+read onboard at 283/284, wrote Button 5's macro at 285, Button 4's macro at 289,
+committed the profile at 293, and restored runtime selection at 297, 1.001 s
+after the commit ACK. All acknowledged stages returned the complete expected
+eight-byte ACK on endpoint `0x83`; phase 0 intentionally had no ACK.
+
+The full 264-byte macro reports at 285/289 were byte-identical to the repeated
+Legacy persistent captures. Comparing the baseline runtime response (frame 76)
+with the pre-save runtime response (262) changed only offsets `0x88: 02 -> 53`
+and `0x89: F8 -> 00`. Comparing the onboard response (284) with the commit (293)
+changed those same two mapping bytes and only the read/write opcode at `0x01`.
+Every other byte, including DPI stages and colors, polling, all other button
+records and unknown onboard fields, was preserved. A separate native `info`
+read after the save exited successfully; it finished outside the eight-second
+capture window. Physical USB power-cycle validation follows separately.
+
+With Legacy still closed, the operator physically disconnected USB for five
+seconds, reconnected, and confirmed that pressing Button 4 once still typed
+exactly lowercase `ab`. The cursor and primary clicks worked normally, wheel
+remained off, and logo remained blue. This establishes OpenHyperX persistence
+of the Button 4 event stream alongside the existing Button 5 macro, rather
+than only a successful profile-reference write.
+
+The separate restoration capture
+`openhyperx-button4-save-back-20260926.pcapng` was 27,548 bytes and resolved
+the same identity/release to address 22 after reconnection. Its first full
+runtime read (frame 72) was byte-identical to the macro runtime image from the
+previous save (frame 262), independently confirming all decoded settings and
+opaque runtime bytes across USB power loss. Before startup, ordinary runtime
+reads/writes produced no interrupt ACKs; after the two fixed startup reports
+(233/235), the initializer and every save stage returned the expected ACK.
+
+Restoration changed only `0x88: 53 -> 02` and `0x89: 00 -> F8`. The onboard
+commit at frame 275 differed from its source response (270) only in those
+mapping bytes and the opcode at `0x01`. The single Button 5 onboard report at
+271 remained byte-identical to Legacy's captured timeline; there was no Button
+4 macro report during Back restoration. After runtime reselection (279), a
+separately opened CLI read (352) confirmed the same two-byte restoration and
+no unrelated runtime changes. The lab script now captures for twelve seconds
+to include this independent after-read, with no extra manual UI transitions.
+
+The operator then disconnected/reconnected USB again with Legacy closed and
+confirmed physical Button 4 Back, normal cursor and primary clicks, wheel off
+and blue logo. Both the macro save and the explicit Back restoration therefore
+passed independent physical power-cycle checks.
+A final independent native `--trace info` read after this second reconnection
+returned all seven expected HID collections and a complete 264-byte runtime
+profile byte-identical to the original pre-test Back baseline. Polling remained
+1000 Hz and active DPI remained stage 1 at 800; the four stage values/colors,
+Button 5 macro reference and all other bindings were unchanged.
 
 ## NGENUITY Legacy `.hxp` preset format
 
@@ -1336,7 +1424,7 @@ assumption.
 | polling | all four interval codes captured; runtime 1000→500→1000 set/readback validated; 1000 Hz persisted through a separate NGENUITY Legacy save and power-cycle | verify effective USB report rate with an external rate tester |
 | NGENUITY Legacy `.hxp` | version-40 container, DPI records, Play Once keyboard/primary-click macros and macro references are parsed offline; imports are explicitly partial | compare Legacy exports differing only in active stage, polling, lighting, one physical assignment and each repeat mode |
 | button bindings | all 11 mappings are readable; all ten Mouse Functions, all seven Multimedia functions, all six Windows Shortcuts, Disabled and named keyboard usages are writable on the nine general controls; the physical primary pair has a repeated capture-backed Standard/Swapped encoding and OpenHyperX's atomic swap/restore was read back and functionally verified; Button 4 and Button 5 have separate captured Play Once runtime macro slots, with OpenHyperX's Button 4 AB assignment independently read back and functionally verified; the full Button 4 Mouse, Multimedia and Shortcut matrices are capture-backed, and OpenHyperX's Scroll Up, Play/Pause and Cycle Apps writes were read back and functionally verified on Button 4; portable writes are also hardware-tested on Button 6 and DPI; bounded Play Once macros support chords, nonuniform timing and primary clicks on confirmed targets | capture additional macro targets, repeat modes, longer timelines and remaining macro mouse events |
-| onboard save | preservation-first driver/CLI transaction is covered by golden/mock tests and previously hardware-validated across a power-cycle for DPI, polling, all ordinary mappings, the complete Button 5 macro and independent wheel/logo Solid colors; Button 4's persistent macro report and power-cycle behavior are confirmed through NGENUITY Legacy but OpenHyperX still rejects it; a later save stopped on a missing first ACK; repeated Legacy lifecycle captures and OpenHyperX's independently hardware-validated volatile initializer restore ACKs on fresh and already-active sessions without changing the profile | integrate the verified fixed startup into saves, then enable/validate Button 4 onboard save; investigate non-Solid persistent lighting separately |
+| onboard save | preservation-first driver/CLI transaction is covered by golden/mock tests and hardware-validated across a power-cycle for DPI, polling, all ordinary mappings, complete Button 4/5 Play Once macros and independent wheel/logo Solid colors; saves now initialize the verified volatile session once and check every ACK without retrying; the two-slot OpenHyperX save matched repeated Legacy macro packets exactly and preserved every unrelated onboard byte; Button 4 AB survived physical USB reconnection with Legacy closed | capture other macro targets and repeat modes; investigate non-Solid persistent lighting separately |
 | NGENUITY Legacy locking | unknown | run `devices`, then future read-only `info`, with NGENUITY Legacy open and closed; record open errors |
 | admin requirement | configuration collection opens without elevation | retest on a second Windows machine/account |
 

@@ -55,28 +55,31 @@ The driver also owns the acknowledged Pulsefire Raid onboard-save transaction.
 It validates the complete runtime source before selecting onboard memory, reads
 the existing onboard image, and patches only the confirmed DPI, polling and 11
 button-record fields. Unknown onboard bytes are preserved. A referenced Button
-5 macro requires its caller-supplied typed definition because the event stream
-cannot be recovered from the profile image. Every save-stage interrupt
+4 or Button 5 macro requires its caller-supplied typed definition because the
+event stream cannot be recovered from the profile image. Every save-stage interrupt
 acknowledgement is checked and an unexpected response aborts without retry.
 The acknowledgement read is now armed before each feature report on Windows
 to reduce a possible read-posting race; hardware probing showed that this
 alone does not restore missing ACKs. A
 separate non-persistent CLI probe exercises only the known runtime selector
 and its acknowledgement path.
-The save path rejects a runtime Button 4 macro before selecting onboard memory;
-the onboard format has now been captured, but is not enabled in OpenHyperX
-until the acknowledgement path is revalidated.
+`PulsefireRaidOnboardMacros` validates timelines, targets and uniqueness without
+HID I/O. Every referenced Button 4/5 slot must have a supplied definition;
+ordinary bindings must not receive one. The repeated capture order is Button 5
+then Button 4, regardless of caller order. Unknown onboard bytes remain intact.
 Feature reports use the interface-1 configuration collection, while the
 eight-byte acknowledgements are read through a separate interface-2 HID
 handle. The complete path was hardware-validated across a physical power-cycle,
 but a later session lacked ACKs and aborted before onboard selection.
 Repeated Legacy launches and power-cycle probes now establish the fixed
-two-report volatile vendor-session startup. It is exposed only through an
+two-report volatile vendor-session startup. It is exposed through an
 explicit non-persistent diagnostic flag. Fresh-reconnect and already-active
 hardware checks verified its ACKs and an unchanged complete runtime image;
 the operator confirmed normal physical operation and unchanged lighting after
-the first check. Integration into saves is the next step; the save path does
-not initialize automatically yet.
+the first check. Saves now initialize once before the acknowledged runtime
+read, never as an automatic retry after an ACK failure. Runtime validation
+and macro-reference checks still precede any onboard selection. The old
+single-Button-5 driver entry point delegates to the multi-slot save API.
 No arbitrary phase/mode values
 or unrelated Legacy startup profile writes are replayed.
 

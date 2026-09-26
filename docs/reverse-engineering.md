@@ -100,6 +100,21 @@ and a new output path. It sends only the two constant startup reports and the
 known runtime-selector probe. Do not use it as an automatic retry after an
 ambiguous save. No profile, macro, lighting snapshot or onboard data is written.
 
+## Fixed-purpose Button 4 onboard verification
+
+`scripts/verify-button4-save-windows.ps1` is a persistent lab test, separate
+from the non-persistent ACK probe. Use it only with operator agreement and
+the recorded local state: Button 5 has the exact `coverage-recorded-timing`
+timeline, wheel is off, and logo is `#0000FF`. It requires `-ConfirmSave`.
+`-Action save-ab` assigns the captured AB/20-ms/Play-Once runtime macro to
+Button 4, supplies both definitions, and performs one acknowledged save.
+`-Action restore-back` restores Button 4 Back and saves only the existing
+Button 5 macro definition. Both actions capture all traffic through identity
+mode, perform independent before/after reads, and refuse competing writers.
+On any failure, stop and review the entire capture; there is no retry or
+automatic restoration. After a successful capture review, physically reconnect
+USB with Legacy closed and test Button 4 in Notepad (AB) or navigation (Back).
+
 ## Minimal text fixture format
 
 Until a capture parser is justified, normalize reports into a small reviewable

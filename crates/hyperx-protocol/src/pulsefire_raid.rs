@@ -595,11 +595,6 @@ impl PerformanceProfile {
         self.polling_rate()?;
         self.dpi_profile()?;
         self.primary_button_layout()?;
-        if self.has_confirmed_macro_reference(PulsefireRaidControl::Button4) {
-            return Err(PerformanceProfileError::UnconfirmedOnboardMacroControl(
-                PulsefireRaidControl::Button4,
-            ));
-        }
         for control in PulsefireRaidControl::ALL {
             if control.is_primary_click() {
                 continue;
@@ -781,10 +776,13 @@ impl PulsefireRaidMacro {
 
     /// Produce the capture-confirmed onboard variant of the macro report.
     ///
-    /// A Save-to-mouse capture containing the same 14-event macro changed only
+    /// Repeated Button 4 AB and Button 5 14-event save captures changed only
     /// the profile-section byte from runtime `0x04` to onboard `0x01`.
     pub fn to_onboard_report(&self) -> Result<[u8; DIRECT_REPORT_LENGTH], PulsefireRaidMacroError> {
-        if self.control != PulsefireRaidControl::Button5 {
+        if !matches!(
+            self.control,
+            PulsefireRaidControl::Button4 | PulsefireRaidControl::Button5
+        ) {
             return Err(PulsefireRaidMacroError::UnconfirmedOnboardControl(
                 self.control,
             ));
@@ -1381,17 +1379,12 @@ mod tests {
         assert_eq!(&profile.as_bytes()[0x88..0x8C], &[0x53, 0x00, 0x00, 0x03]);
         assert!(profile.has_confirmed_macro_reference(PulsefireRaidControl::Button4));
         assert_eq!(&profile.as_bytes()[0x8C..0x90], &original[0x8C..0x90]);
+        profile.validate_confirmed_runtime_settings().unwrap();
+        let mut expected_onboard = expected;
+        expected_onboard[2] = 0x01;
         assert_eq!(
-            profile.validate_confirmed_runtime_settings(),
-            Err(PerformanceProfileError::UnconfirmedOnboardMacroControl(
-                PulsefireRaidControl::Button4,
-            ))
-        );
-        assert_eq!(
-            macro_definition.to_onboard_report(),
-            Err(PulsefireRaidMacroError::UnconfirmedOnboardControl(
-                PulsefireRaidControl::Button4,
-            ))
+            macro_definition.to_onboard_report().unwrap(),
+            expected_onboard
         );
 
         profile

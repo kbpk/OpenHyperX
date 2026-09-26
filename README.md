@@ -232,8 +232,9 @@ fixed, capture-backed volatile Legacy startup sequence before that probe. It
 does not replay Legacy's automatic profile writes or save onboard settings.
 Hardware checks after a fresh USB reconnect and in an already-active session
 passed and preserved the complete runtime profile. Close Legacy and other
-writers first. Session
-initialization is not yet automatic in `save-to-mouse`.
+writers first. `save-to-mouse` now performs this verified fixed startup once
+before reading/validating runtime settings or selecting onboard memory. It
+never retries a failed ACK.
 
 To perform the persistent save after the acknowledgement path works:
 
@@ -247,15 +248,32 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
   --confirm
 ```
 
+When both Button 4 and Button 5 reference macros, supply both complete timelines:
+
+```text
+hyperx-cli profile save-to-mouse --wheel off --logo 0000FF \
+  --macro-definition button4=examples/macros/ab-20ms.toml \
+  --macro-definition button5=examples/macros/coverage-recorded-timing.toml \
+  --confirm
+```
+
+`--macro-definition` is repeatable and accepts only captured Button 4/5 targets.
+A bare file path remains a Button 5 alias for backwards compatibility. Every
+referenced slot requires its exact definition; duplicate targets, invalid
+timelines, missing definitions and definitions for ordinary runtime bindings
+are rejected. Supply the macro currently assigned to that button, not an
+unrelated file: the mouse profile contains only references, so the CLI cannot
+verify its event stream against the device. The save command does not assign
+new runtime macros by itself.
+
 Close every NGENUITY variant and other device writers first. The command reads
 and validates the runtime profile, reads the existing onboard image, copies
 only confirmed DPI, polling and button fields, checks every eight-byte device
 acknowledgement through the mouse's separate acknowledgement collection, and
-restores the runtime section after the commit delay. If
-Button 5 contains the known macro reference, `--macro-definition FILE` is
-required because its event timeline cannot be read from the profile image. Do
-not supply it when Button 5 is not a macro. Onboard save rejects a runtime
-Button 4 macro until that target's persistent transaction is captured.
+restores the runtime section after the commit delay. Every referenced Button
+4/5 macro requires its complete definition as described above. OpenHyperX's
+two-slot save was captured, independently read back and physically power-cycle
+tested with Legacy closed; Button 4 AB and its restoration to Back persisted.
 
 Both `--wheel` and `--logo` are mandatory (`off` means black). They describe
 the two-zone static snapshot carried by NGENUITY Legacy's save transaction.

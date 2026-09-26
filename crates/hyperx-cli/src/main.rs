@@ -15,8 +15,9 @@ use hyperx_core::{
     SoftwareLightingEffect, SoftwareLightingProgram, UsbId, WindowsShortcut,
 };
 use hyperx_devices::{
-    find_supported_device, PulsefireRaid, PulsefireRaidRuntimeAssignment, PULSEFIRE_RAID,
-    PULSEFIRE_RAID_ACKNOWLEDGEMENT_INTERFACE, PULSEFIRE_RAID_DPI,
+    find_supported_device, PulsefireRaid, PulsefireRaidOnboardMacros,
+    PulsefireRaidRuntimeAssignment, PULSEFIRE_RAID, PULSEFIRE_RAID_ACKNOWLEDGEMENT_INTERFACE,
+    PULSEFIRE_RAID_DPI,
 };
 use hyperx_hid::{HidApiDiscovery, HidApiTransport, HidDiscovery, HidTransport};
 use hyperx_protocol::{
@@ -142,13 +143,40 @@ enum ProfileCommand {
         /// Static HyperX-logo snapshot carried by the save transaction, or "off".
         #[arg(long, value_parser = parse_rgb_or_off)]
         logo: RgbColor,
-        /// Button 5 macro definition required when runtime contains its macro reference.
-        #[arg(long, value_name = "FILE")]
-        macro_definition: Option<PathBuf>,
+        /// Referenced macro definition: button4=FILE or button5=FILE. Repeat for both.
+        /// A bare FILE remains compatible with the original Button 5 syntax.
+        #[arg(long, value_name = "CONTROL=FILE", value_parser = parse_onboard_macro_file)]
+        macro_definition: Vec<OnboardMacroFile>,
         /// Acknowledge that this command writes persistent onboard memory.
         #[arg(long, required = true)]
         confirm: bool,
     },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct OnboardMacroFile {
+    control: PulsefireRaidControl,
+    path: PathBuf,
+}
+
+fn parse_onboard_macro_file(input: &str) -> Result<OnboardMacroFile, String> {
+    let (control, path) = match input.split_once('=') {
+        Some(("button4", path)) => (PulsefireRaidControl::Button4, path),
+        Some(("button5", path)) => (PulsefireRaidControl::Button5, path),
+        Some((control, _)) => {
+            return Err(format!(
+                "onboard macro target {control:?} is unsupported; use button4 or button5"
+            ))
+        }
+        None => (PulsefireRaidControl::Button5, input),
+    };
+    if path.is_empty() {
+        return Err("macro file path must not be empty".to_owned());
+    }
+    Ok(OnboardMacroFile {
+        control,
+        path: PathBuf::from(path),
+    })
 }
 
 #[derive(Debug, Subcommand)]
@@ -721,17 +749,26 @@ fn profile(command: ProfileCommand) -> Result<()> {
             confirm,
         } => {
             debug_assert!(confirm, "clap requires --confirm");
-            let macro_definition = macro_definition
-                .as_deref()
-                .map(load_macro_definition)
-                .transpose()?;
+            let definitions = macro_definition
+                .iter()
+                .map(|file| {
+                    load_macro_definition(&file.path).map(|definition| (file.control, definition))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let references = definitions
+                .iter()
+                .map(|(control, definition)| (*control, definition))
+                .collect::<Vec<_>>();
+            // Duplicate targets, unsupported timelines and all macro bounds are
+            // checked before discovery/opening either HID collection.
+            let macros = PulsefireRaidOnboardMacros::new(&references)?;
             let (mut device, mut acknowledgements) = open_pulsefire_raid_for_save()?;
             let saved = device
-                .save_runtime_to_onboard(
+                .save_runtime_to_onboard_with_macros(
                     &mut acknowledgements,
                     wheel,
                     logo,
-                    macro_definition.as_ref(),
+                    &macros,
                 )
                 .context(
                     "failed to complete the acknowledged onboard save; do not retry blindly, close every NGENUITY variant and inspect --trace output",
@@ -742,14 +779,17 @@ fn profile(command: ProfileCommand) -> Result<()> {
             println!("DPI stages:");
             print_dpi_profile(&saved.dpi_profile);
             println!("Button mappings: 11 profile records copied from runtime.");
-            println!(
-                "Button 5 macro definition: {}.",
-                if saved.macro_saved {
-                    "saved"
-                } else {
-                    "not present"
-                }
-            );
+            for control in [PulsefireRaidControl::Button4, PulsefireRaidControl::Button5] {
+                println!(
+                    "{} macro definition: {}.",
+                    control.name(),
+                    if saved.macro_controls_saved.contains(&control) {
+                        "saved"
+                    } else {
+                        "not present"
+                    }
+                );
+            }
             println!(
                 "Lighting snapshot: wheel=#{:02X}{:02X}{:02X}, logo=#{:02X}{:02X}{:02X}.",
                 wheel.red, wheel.green, wheel.blue, logo.red, logo.green, logo.blue
@@ -2601,6 +2641,51 @@ mod tests {
                 .into_assignment(PulsefireRaidControl::Button7)
                 .is_ok());
         }
+    }
+
+    #[test]
+    fn onboard_macro_file_arguments_are_targeted_and_keep_legacy_button5_syntax() {
+        assert_eq!(
+            parse_onboard_macro_file("button4=C:\\macros\\ab.toml").unwrap(),
+            OnboardMacroFile {
+                control: PulsefireRaidControl::Button4,
+                path: PathBuf::from("C:\\macros\\ab.toml"),
+            }
+        );
+        assert_eq!(
+            parse_onboard_macro_file("macro.toml").unwrap().control,
+            PulsefireRaidControl::Button5
+        );
+        assert!(parse_onboard_macro_file("button4=").is_err());
+        assert!(parse_onboard_macro_file("button6=macro.toml").is_err());
+        assert!(parse_onboard_macro_file("").is_err());
+        let parsed = Cli::try_parse_from([
+            "hyperx-cli",
+            "profile",
+            "save-to-mouse",
+            "--wheel",
+            "off",
+            "--logo",
+            "0000FF",
+            "--macro-definition",
+            "button4=ab.toml",
+            "--macro-definition",
+            "button5=coverage.toml",
+            "--confirm",
+        ])
+        .unwrap();
+        let Command::Profile {
+            command:
+                ProfileCommand::SaveToMouse {
+                    macro_definition, ..
+                },
+        } = parsed.command
+        else {
+            panic!("unexpected command")
+        };
+        assert_eq!(macro_definition.len(), 2);
+        assert_eq!(macro_definition[0].control, PulsefireRaidControl::Button4);
+        assert_eq!(macro_definition[1].control, PulsefireRaidControl::Button5);
     }
 
     #[test]
