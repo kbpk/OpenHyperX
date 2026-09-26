@@ -103,8 +103,6 @@ $captureArguments = @(
     "-o", $fullOutputPath
 )
 
-Write-Output ("Capturing {0}, device address {1}, for {2} seconds..." -f $Interface, $DeviceAddress, $DurationSeconds)
-
 $captureOptions = @{
     FilePath     = $usbPcap
     ArgumentList = $captureArguments
@@ -112,6 +110,7 @@ $captureOptions = @{
     NoNewWindow  = $true
 }
 $capture = Start-Process @captureOptions
+Write-Output ("Capturing {0}, device address {1}, for {2} seconds..." -f $Interface, $DeviceAddress, $DurationSeconds)
 
 try {
     $exitedEarly = $capture.WaitForExit($DurationSeconds * 1000)

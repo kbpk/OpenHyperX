@@ -126,6 +126,9 @@ enum ProfileCommand {
         /// New TOML file. Existing files are never overwritten.
         output: PathBuf,
     },
+    /// Check the save ACK path using only a known, non-persistent runtime selector.
+    #[command(name = "check-save-ack")]
+    CheckSaveAck,
     /// Persist confirmed runtime settings to the mouse's onboard profile.
     #[command(name = "save-to-mouse")]
     SaveToMouse {
@@ -691,6 +694,15 @@ fn profile(command: ProfileCommand) -> Result<()> {
                 "The profile is marked partial: polling, lighting and physical assignment targets are not decoded from .hxp yet."
             );
             println!("No HID device was opened and no onboard profile was written.");
+            Ok(())
+        }
+        ProfileCommand::CheckSaveAck => {
+            let (mut device, mut acknowledgements) = open_pulsefire_raid_for_save()?;
+            device
+                .check_save_ack_path(&mut acknowledgements)
+                .context("the non-persistent save ACK check failed; no onboard profile was selected or written")?;
+            println!("Save ACK path responded to the known runtime selector.");
+            println!("No onboard profile was selected or written.");
             Ok(())
         }
         ProfileCommand::SaveToMouse {
@@ -2237,6 +2249,8 @@ mod tests {
             "Base Settings.hxp",
         ])
         .is_err());
+
+        assert!(Cli::try_parse_from(["hyperx-cli", "profile", "check-save-ack"]).is_ok());
 
         assert!(Cli::try_parse_from([
             "hyperx-cli",

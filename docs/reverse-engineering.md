@@ -66,6 +66,32 @@ Keeping the files directly in the caller's existing Temp directory avoids the
 different ACL inheritance of a directory created by an elevated process. Keep
 the raw files outside Git.
 
+## Non-persistent save-ACK diagnostic
+
+Build the native Windows CLI first. With NGENUITY Legacy and other writers
+closed, `profile check-save-ack` tests the existing runtime selector and its
+interrupt-IN acknowledgement without selecting or writing onboard memory.
+Use the fixed-purpose wrapper when a USB capture is needed:
+
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/capture-save-ack-windows.ps1")" \
+  -Interface '\\.\USBPcap1' \
+  -OutputPath '%TEMP%\openhyperx-save-ack-probe.pcapng'
+```
+
+The wrapper refuses competing writers, resolves the current device identity,
+starts an eight-second capture, then invokes exactly one known-selector probe.
+It does not expose arbitrary command execution or retry a failed probe. Inspect
+the captured transfer and endpoint `0x83` responses before another experiment.
+A timeout must never be treated as permission to continue an onboard save.
+
+For ACK lifecycle research, isolate app launch and close-from-tray in separate
+captures without settings changes. Legacy may automatically reapply its runtime
+profile when opened; inspect all feature reports, not just the new opcode.
+Unknown startup/closure reports remain non-replayable until repeated captures
+establish their fields and effects.
+
 ## Minimal text fixture format
 
 Until a capture parser is justified, normalize reports into a small reviewable

@@ -316,6 +316,14 @@ pub enum PulsefireRaidError {
         opcode: u8,
         actual: [u8; SAVE_ACK_LENGTH],
     },
+    #[error(
+        "input was already queued before save opcode 0x{opcode:02X}: {length} bytes {actual:02X?}"
+    )]
+    PreexistingSaveInput {
+        opcode: u8,
+        length: usize,
+        actual: [u8; SAVE_ACK_LENGTH],
+    },
     #[error("runtime Button 5 references a macro; provide its definition to save it onboard")]
     MissingOnboardMacroDefinition,
     #[error("a macro definition was supplied, but runtime Button 5 does not reference a macro")]
@@ -455,6 +463,27 @@ impl<T: HidTransport> PulsefireRaid<T> {
             logo,
             macro_definition,
             std::thread::sleep,
+        )
+    }
+
+    /// Test only the known runtime-section selection and its acknowledgement.
+    ///
+    /// This does not select or write the onboard section. It is useful for
+    /// checking the Windows acknowledgement collection before a save.
+    pub fn check_save_ack_path<A: HidTransport>(
+        &mut self,
+        acknowledgements: &mut A,
+    ) -> Result<(), PulsefireRaidError> {
+        if acknowledgements.interface_number()
+            != PULSEFIRE_RAID_ACKNOWLEDGEMENT_INTERFACE.interface_number
+        {
+            return Err(PulsefireRaidError::WrongAcknowledgementInterface(
+                acknowledgements.interface_number(),
+            ));
+        }
+        self.send_feature_report_with_save_ack(
+            acknowledgements,
+            &encode_runtime_profile_read_prelude(),
         )
     }
 
@@ -818,9 +847,21 @@ impl<T: HidTransport> PulsefireRaid<T> {
         acknowledgements: &mut A,
         report: &[u8],
     ) -> Result<(), PulsefireRaidError> {
-        self.send_feature_report(report)?;
         let opcode = report[1];
         let mut actual = [0_u8; SAVE_ACK_LENGTH];
+        // hidapi's Windows-native backend starts its overlapped ReadFile only
+        // when read_timeout is called. Arm it before the SET_REPORT so a fast
+        // interrupt-IN acknowledgement cannot arrive between TX and ReadFile.
+        // A queued report is ambiguous: stop before sending anything new.
+        let pending_length = acknowledgements.read_timeout(&mut actual, 0)?;
+        if pending_length != 0 {
+            return Err(PulsefireRaidError::PreexistingSaveInput {
+                opcode,
+                length: pending_length,
+                actual,
+            });
+        }
+        self.send_feature_report(report)?;
         let length = acknowledgements.read_timeout(&mut actual, SAVE_ACK_TIMEOUT_MS)?;
         if length != SAVE_ACK_LENGTH {
             return Err(PulsefireRaidError::WrongSaveAcknowledgementLength {
@@ -1039,6 +1080,7 @@ mod tests {
     ) {
         let opcode = report[1];
         configuration.expect_feature_report(report);
+        acknowledgements.queue_input_report(Vec::new());
         acknowledgements.queue_input_report(save_acknowledgement(opcode));
     }
 
@@ -1277,6 +1319,7 @@ mod tests {
         let mut configuration = MockHidTransport::new(1);
         configuration.expect_feature_report(encode_runtime_profile_read_prelude());
         let mut acknowledgements = MockHidTransport::new(2);
+        acknowledgements.queue_input_report(Vec::new());
         acknowledgements.queue_input_report([0x00; SAVE_ACK_LENGTH]);
 
         let mut device = PulsefireRaid::new(configuration).unwrap();
@@ -1289,6 +1332,61 @@ mod tests {
                 |_| {}
             ),
             Err(PulsefireRaidError::UnexpectedSaveAcknowledgement { opcode: 0x03, .. })
+        ));
+        device.into_transport().assert_drained();
+        acknowledgements.assert_drained();
+    }
+
+    #[test]
+    fn save_ack_probe_arms_read_then_accepts_the_known_runtime_ack() {
+        let mut configuration = MockHidTransport::new(1);
+        let mut acknowledgements = MockHidTransport::new(2);
+        expect_acked_feature(
+            &mut configuration,
+            &mut acknowledgements,
+            encode_runtime_profile_read_prelude(),
+        );
+
+        let mut device = PulsefireRaid::new(configuration).unwrap();
+        device.check_save_ack_path(&mut acknowledgements).unwrap();
+        device.into_transport().assert_drained();
+        acknowledgements.assert_drained();
+    }
+
+    #[test]
+    fn save_ack_probe_rejects_queued_input_before_transmitting() {
+        let configuration = MockHidTransport::new(1);
+        let mut acknowledgements = MockHidTransport::new(2);
+        acknowledgements.queue_input_report([0x00, 0x00, 0x07, 0x03, 0, 0, 0, 0]);
+
+        let mut device = PulsefireRaid::new(configuration).unwrap();
+        assert!(matches!(
+            device.check_save_ack_path(&mut acknowledgements),
+            Err(PulsefireRaidError::PreexistingSaveInput {
+                opcode: 0x03,
+                length: SAVE_ACK_LENGTH,
+                ..
+            })
+        ));
+        device.into_transport().assert_drained();
+        acknowledgements.assert_drained();
+    }
+
+    #[test]
+    fn save_ack_probe_aborts_after_missing_ack_without_retry() {
+        let mut configuration = MockHidTransport::new(1);
+        configuration.expect_feature_report(encode_runtime_profile_read_prelude());
+        let mut acknowledgements = MockHidTransport::new(2);
+        acknowledgements.queue_input_report(Vec::new());
+        acknowledgements.queue_input_report(Vec::new());
+
+        let mut device = PulsefireRaid::new(configuration).unwrap();
+        assert!(matches!(
+            device.check_save_ack_path(&mut acknowledgements),
+            Err(PulsefireRaidError::WrongSaveAcknowledgementLength {
+                opcode: 0x03,
+                actual: 0
+            })
         ));
         device.into_transport().assert_drained();
         acknowledgements.assert_drained();

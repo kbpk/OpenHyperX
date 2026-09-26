@@ -213,7 +213,21 @@ buttons. Unsupported keys, playback modes and malformed timelines are rejected
 before the mouse is opened. See [docs/macro-format.md](docs/macro-format.md).
 These commands do not save onboard.
 
-Persist the current runtime performance/button profile to the mouse:
+Check the acknowledgement path before saving to the mouse:
+
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/windows-cargo.ps1")" \
+  run --target x86_64-pc-windows-msvc --bin hyperx-cli -- \
+  profile check-save-ack
+```
+
+`check-save-ack` sends only the confirmed, non-persistent runtime-section
+selector and verifies its interrupt-IN acknowledgement. It does not select or
+write onboard memory. Close NGENUITY and other device writers before running
+it; if it fails, do not blindly retry a save.
+
+To perform the persistent save after the acknowledgement path works:
 
 ```bash
 powershell.exe -NoProfile -ExecutionPolicy Bypass \

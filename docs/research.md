@@ -1,6 +1,6 @@
 # Pulsefire Raid research
 
-Last updated: 2026-09-25.
+Last updated: 2026-09-26.
 
 This document separates manufacturer facts, public implementation evidence,
 local observations and hypotheses. Do not promote a hypothesis into a device
@@ -1056,6 +1056,131 @@ No onboard save occurred. This also verifies that resending the existing
 Button 5 macro definition, as NGENUITY does, is unnecessary for this volatile
 Button 4 update.
 
+### Button 4 Play Once macro in the onboard-save transaction
+
+On 2026-09-25, a five-step NGENUITY Legacy capture series isolated a no-op
+baseline, two consecutive `Save to mouse` clicks with the existing Button 4
+AB/20-ms/Play-Once macro, a runtime return to Mouse Back, and a final
+`Save to mouse` return to Back. The checked-in capture plan documents each UI
+transition. USBPcap identity mode resolved `0951:16E4`, release `1124`, on
+`\\.\USBPcap1` to temporary address 15 for this series. All five files were
+nonempty (73,962, 105,214, 78,988, 94,954 and 77,876 bytes) and remain
+outside Git. The no-op baseline contained no profile or macro write.
+
+Both macro saves had the same ordered transaction already known for Button 5:
+onboard selection `07 03 01 64`, three indexed `07 18 01 00` lighting reports,
+`07 81` profile request/response, the existing Button 5 macro report
+`07 05 01 04`, then a separate Button 4 macro report `07 05 01 03`, a full
+`07 01 01` profile write, and runtime selection `07 03 04 64` about one second
+later. Every stage received the previously documented eight-byte success ACK
+on endpoint `0x83`. The Button 4 report was 264 bytes, with nonzero prefix:
+
+```text
+07 05 01 03 00 00 00 00 00 01
+80 14 04 00 14 04 80 14 05 00 14 05
+```
+
+The rest was zero-filled. The two onboard Button 4 reports were byte-for-byte
+identical. Compared with the independently captured runtime Button 4 AB report,
+only offset `0x02` changed from section `04` to section `01`. The existing
+Button 5 definition was also identical across the two macro saves and the
+final Back save. The first onboard profile read still had Button 4 Back
+`02 F8 00 03`; the first write changed it to `53 00 00 03`. The second save
+read that reference and wrote the same full profile image, apart from the
+read/write opcode byte. The final Back save read the macro reference and
+changed only the Button 4 record to `02 F8 00 03`.
+
+One unrelated byte changed on the *first* save: offset `0x83`, the last byte
+of the right-click record, went from `00` to `02`. It remained `02` in the
+second and final onboard reads/writes. This appears to be NGENUITY Legacy
+normalizing an existing record, not part of the Button 4 macro transaction;
+its precise semantics are not established and must not be used to invent a
+new encoder. No other profile bytes changed. This capture proves the packet
+ordering and repeated write/readback. The operator then repeated the known
+NGENUITY Legacy save with Button 4's AB macro, closed the app and helper,
+unplugged/replugged the mouse, and confirmed that physical Button 4 still
+typed exactly `ab`. An independent OpenHyperX `info` read after reconnection
+found both Button 4 and Button 5 macro references. This confirms persistence
+of the Button 4 event stream, not merely its profile reference.
+
+OpenHyperX subsequently changed Button 4 to Back in the runtime profile and
+independently read it back. Its previously verified `profile save-to-mouse`
+path was then used to restore Back onboard, but the first `0x03` prelude
+received **zero** bytes on the acknowledgement handle within 500 ms. The
+driver aborted before selecting onboard memory and did not retry. The operator
+used NGENUITY Legacy to save Back again; after closing it and power-cycling,
+physical Button 4 functioned as Back and the cursor and primary clicks worked
+normally. The missed ACK is an ACK-path failure to diagnose separately,
+not evidence for changing the captured Button 4 report format.
+
+The pinned `hidapi` 2.6.1 Windows-native backend starts an overlapped
+`ReadFile` only when `read_timeout` is first called. Our save path previously
+called it *after* sending each feature report, leaving a possible race with
+the fast interrupt-IN ACK. Pre-arming a zero-timeout read before TX is a
+source-backed mitigation, but that causal explanation remains a hypothesis
+until a narrow hardware ACK check or USBPcap trace confirms it. No automatic
+retry of an ambiguous save is allowed.
+
+### ACK diagnostic and NGENUITY Legacy startup
+
+On 2026-09-26, pre-arming the read did **not** fix the missing ACK. The
+non-persistent `profile check-save-ack` probe sent only the confirmed runtime
+selector `07 03 04 64`; it did not select or write onboard memory. Its
+automated eight-second USBPcap capture
+`openhyperx-save-ack-probe-20260926.pcapng` was 6,616 bytes and contained 100
+frames. Injected descriptors confirmed `0951:16E4`, release `1124`, at the
+temporary address 19. Frame 99 contained the complete 264-byte feature report,
+and frame 100 completed the control transfer successfully. There were no
+endpoint-`0x83` transfers or ACK payloads in this capture. The CLI timed out
+without retrying. This is evidence against a read-posting race being the sole
+cause; it does not justify skipping ACK validation.
+
+A separate 15-second capture of launching NGENUITY Legacy, without deliberate
+setting changes or `Save to mouse`, produced
+`openhyperx-ngenuity-legacy-startup-ack-20260926.pcapng` (119,386 bytes).
+Descriptors again confirmed the same identity and release. The first two
+264-byte interface-1 feature reports were:
+
+| Frame | Time (s) | Prefix | Remaining bytes |
+| --- | --- | --- | --- |
+| 7 | 3.455358 | `07 07 00` | all zero |
+| 9 | 3.563318 | `07 07 01` | all zero |
+
+The first vendor ACK was frame 11 at 3.564226 s:
+`00 00 07 07 00 00 00 00`, received on endpoint `0x83`. Subsequent known
+runtime-selector, profile-request, Button 5 macro and runtime-profile reports
+each had their expected ACK. NGENUITY Legacy automatically reapplied its
+runtime profile and existing Button 5 macro; no onboard selector, indexed
+onboard-lighting report or onboard-profile write was observed. The later
+`02 03 ...` input packets are button events, not save acknowledgements.
+
+**Hypothesis only:** opcode `0x07` and byte 2 may switch vendor input/ACK
+delivery off/on. Startup ordering correlates with ACK availability, but a
+single startup does not establish lifecycle, persistence or all side effects.
+Neither report is encoded or transmitted by OpenHyperX. Required next
+evidence: isolated close-from-tray capture, repeated launch/close lifecycle,
+then a separate non-persistent known-selector ACK probe with Legacy closed.
+Do not infer firmware commands, bypass acknowledgements or retry a save from
+this observation.
+
+An isolated eight-second close-from-tray capture
+`openhyperx-ngenuity-legacy-close-ack-20260926.pcapng` (69,674 bytes) contained
+53 direct-RGB reports followed by one known onboard selector `07 03 01 64`
+at 3.344453 s. Its expected `00 00 07 03 00 00 00 00` ACK arrived at
+3.407799 s. There was no opcode-`0x07` report, profile write, macro write or
+indexed lighting write. Selecting the existing onboard section is distinct
+from persisting new settings.
+
+With Legacy closed, the same fixed-purpose OpenHyperX probe then **succeeded**.
+`openhyperx-save-ack-after-legacy-startup-20260926.pcapng` (9,154 bytes)
+confirmed the same identity and contained exactly one feature report: runtime
+selector at frame 151, 2.473356 s, followed by its expected ACK at frame 153,
+2.536729 s (63.373 ms later). The wrapper exited successfully. No profile or
+onboard-memory write occurred. This establishes that the ACK path works after
+Legacy startup and remains available after its captured tray closure. It
+does not yet isolate the side effects of opcode `0x07`; a USB power-cycle and
+repeated startup are needed before introducing a typed initialization codec.
+
 ## NGENUITY Legacy `.hxp` preset format
 
 On 2026-09-18, an exported `Base Settings.hxp` from NGENUITY Legacy `5.38.0.0`
@@ -1118,7 +1243,7 @@ assumption.
 | polling | all four interval codes captured; runtime 1000→500→1000 set/readback validated; 1000 Hz persisted through a separate NGENUITY Legacy save and power-cycle | verify effective USB report rate with an external rate tester |
 | NGENUITY Legacy `.hxp` | version-40 container, DPI records, Play Once keyboard/primary-click macros and macro references are parsed offline; imports are explicitly partial | compare Legacy exports differing only in active stage, polling, lighting, one physical assignment and each repeat mode |
 | button bindings | all 11 mappings are readable; all ten Mouse Functions, all seven Multimedia functions, all six Windows Shortcuts, Disabled and named keyboard usages are writable on the nine general controls; the physical primary pair has a repeated capture-backed Standard/Swapped encoding and OpenHyperX's atomic swap/restore was read back and functionally verified; Button 4 and Button 5 have separate captured Play Once runtime macro slots, with OpenHyperX's Button 4 AB assignment independently read back and functionally verified; the full Button 4 Mouse, Multimedia and Shortcut matrices are capture-backed, and OpenHyperX's Scroll Up, Play/Pause and Cycle Apps writes were read back and functionally verified on Button 4; portable writes are also hardware-tested on Button 6 and DPI; bounded Play Once macros support chords, nonuniform timing and primary clicks on confirmed targets | capture additional macro targets, repeat modes, longer timelines and remaining macro mouse events |
-| onboard save | preservation-first driver/CLI transaction is covered by golden/mock tests and hardware-validated across a power-cycle for DPI, polling, all ordinary mappings, the complete Button 5 macro and independent wheel/logo Solid colors; acknowledgements use a separate `MI_02` handle; Button 4 macro is rejected before onboard selection | capture Button 4 persistent macro transaction and non-Solid persistent lighting separately |
+| onboard save | preservation-first driver/CLI transaction is covered by golden/mock tests and previously hardware-validated across a power-cycle for DPI, polling, all ordinary mappings, the complete Button 5 macro and independent wheel/logo Solid colors; Button 4's persistent macro report and power-cycle behavior are confirmed through NGENUITY Legacy but OpenHyperX still rejects it; a later save stopped on a missing first ACK before onboard selection, and the pre-armed probe still received no ACK | capture and establish the Legacy startup/closure ACK lifecycle before enabling Button 4 onboard save; investigate non-Solid persistent lighting separately |
 | NGENUITY Legacy locking | unknown | run `devices`, then future read-only `info`, with NGENUITY Legacy open and closed; record open errors |
 | admin requirement | configuration collection opens without elevation | retest on a second Windows machine/account |
 

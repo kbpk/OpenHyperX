@@ -1,0 +1,25 @@
+{
+  "name": "pulsefire-raid-button4-macro-onboard-20260925",
+  "steps": [
+    {
+      "slug": "baseline-ab-no-op",
+      "instruction": "Do not change anything. Button 4 must already have the existing AB, Play Once, 20 ms macro assigned. Do not click Save to mouse yet."
+    },
+    {
+      "slug": "save-ab-macro",
+      "instruction": "Click Save to mouse once with the existing AB macro on Button 4. Do not change any other setting."
+    },
+    {
+      "slug": "save-ab-macro-repeat",
+      "instruction": "Click Save to mouse once more without changing any setting. This repeats the same persistent transaction."
+    },
+    {
+      "slug": "ab-macro-to-back-runtime",
+      "instruction": "Change only Button 4 from the AB macro to Mouse Function > Back. Do not click Save to mouse during this step."
+    },
+    {
+      "slug": "save-back-restore",
+      "instruction": "Click Save to mouse once with Button 4 restored to Back. This restores the original Button 4 onboard assignment."
+    }
+  ]
+}

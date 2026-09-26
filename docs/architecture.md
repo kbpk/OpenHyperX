@@ -58,11 +58,19 @@ button-record fields. Unknown onboard bytes are preserved. A referenced Button
 5 macro requires its caller-supplied typed definition because the event stream
 cannot be recovered from the profile image. Every save-stage interrupt
 acknowledgement is checked and an unexpected response aborts without retry.
+The acknowledgement read is now armed before each feature report on Windows
+to reduce a possible read-posting race; hardware probing showed that this
+alone does not restore missing ACKs. A
+separate non-persistent CLI probe exercises only the known runtime selector
+and its acknowledgement path.
 The save path rejects a runtime Button 4 macro before selecting onboard memory;
-only its runtime encoding has been captured.
+the onboard format has now been captured, but is not enabled in OpenHyperX
+until the acknowledgement path is revalidated.
 Feature reports use the interface-1 configuration collection, while the
 eight-byte acknowledgements are read through a separate interface-2 HID
-handle. The complete path is hardware-validated across a physical power-cycle.
+handle. The complete path was hardware-validated across a physical power-cycle,
+but a later session lacked ACKs and aborted before onboard selection. Unknown
+Legacy startup reports remain research-only pending lifecycle evidence.
 
 ## Crate responsibilities
 
