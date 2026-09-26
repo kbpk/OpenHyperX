@@ -162,8 +162,10 @@ pub mod testing {
     #[derive(Debug, Default)]
     pub struct MockHidTransport {
         interface_number: i32,
-        expected_feature_tx: VecDeque<Vec<u8>>,
-        feature_rx: VecDeque<Vec<u8>>,
+        expected_feature_tx: VecDeque<(Vec<u8>, Result<usize, HidError>)>,
+        feature_rx: VecDeque<Result<Vec<u8>, HidError>>,
+        feature_tx_attempts: Vec<Vec<u8>>,
+        feature_read_attempts: usize,
         expected_output_tx: VecDeque<Vec<u8>>,
         input_rx: VecDeque<Vec<u8>>,
     }
@@ -177,11 +179,36 @@ pub mod testing {
         }
 
         pub fn expect_feature_report(&mut self, report: impl Into<Vec<u8>>) {
-            self.expected_feature_tx.push_back(report.into());
+            let report = report.into();
+            let length = report.len();
+            self.expect_feature_report_result(report, Ok(length));
+        }
+
+        /// Match the exact packet but inject a short write or transport failure.
+        pub fn expect_feature_report_result(
+            &mut self,
+            report: impl Into<Vec<u8>>,
+            result: Result<usize, HidError>,
+        ) {
+            self.expected_feature_tx.push_back((report.into(), result));
         }
 
         pub fn queue_feature_response(&mut self, report: impl Into<Vec<u8>>) {
-            self.feature_rx.push_back(report.into());
+            self.feature_rx.push_back(Ok(report.into()));
+        }
+
+        pub fn queue_feature_error(&mut self, error: HidError) {
+            self.feature_rx.push_back(Err(error));
+        }
+
+        /// Includes failed/unexpected attempts: an empty script alone cannot
+        /// prove the driver stopped sending after a failure.
+        pub fn feature_reports_sent(&self) -> &[Vec<u8>] {
+            &self.feature_tx_attempts
+        }
+
+        pub const fn feature_read_attempts(&self) -> usize {
+            self.feature_read_attempts
         }
 
         pub fn expect_output_report(&mut self, report: impl Into<Vec<u8>>) {
@@ -236,13 +263,27 @@ pub mod testing {
         }
 
         fn send_feature_report(&mut self, report: &[u8]) -> Result<usize, HidError> {
-            Self::check_tx(&mut self.expected_feature_tx, report)
+            self.feature_tx_attempts.push(report.to_vec());
+            let (expected, result) = self.expected_feature_tx.pop_front().ok_or_else(|| {
+                HidError::Transport("unexpected report: no transmission was queued".to_owned())
+            })?;
+            if expected != report {
+                return Err(HidError::Transport(format!(
+                    "report mismatch: expected {expected:02X?}, got {report:02X?}"
+                )));
+            }
+            result
         }
 
         fn get_feature_report(&mut self, report: &mut [u8]) -> Result<usize, HidError> {
+            self.feature_read_attempts += 1;
+            if self.feature_rx.front().is_some_and(Result::is_err) {
+                return Err(self.feature_rx.pop_front().unwrap().unwrap_err());
+            }
             let expected_report_id = self
                 .feature_rx
                 .front()
+                .and_then(|response| response.as_ref().ok())
                 .and_then(|response| response.first())
                 .copied()
                 .ok_or_else(|| {
@@ -254,7 +295,16 @@ pub mod testing {
                     report.first()
                 )));
             }
-            Self::receive(&mut self.feature_rx, report)
+            let response = self.feature_rx.pop_front().unwrap()?;
+            if response.len() > report.len() {
+                return Err(HidError::Transport(format!(
+                    "mock response has {} bytes but buffer has {}",
+                    response.len(),
+                    report.len()
+                )));
+            }
+            report[..response.len()].copy_from_slice(&response);
+            Ok(response.len())
         }
 
         fn write(&mut self, report: &[u8]) -> Result<usize, HidError> {
@@ -301,6 +351,8 @@ mod tests {
 
         let error = transport.send_feature_report(&[0x07, 0x0B]).unwrap_err();
         assert!(error.to_string().contains("report mismatch"));
+        // A consumed script must not erase evidence of the failed attempt.
+        assert_eq!(transport.feature_reports_sent(), &[vec![0x07, 0x0B]]);
     }
 
     #[test]
@@ -322,6 +374,38 @@ mod tests {
 
         assert_eq!(transport.read_timeout(&mut response, 50).unwrap(), 2);
         assert_eq!(&response[..2], &[0x03, 0xAA]);
+        transport.assert_drained();
+    }
+
+    #[test]
+    fn mock_feature_reports_inject_short_writes_and_errors_without_losing_history() {
+        let mut transport = MockHidTransport::new(1);
+        transport.expect_feature_report_result([7, 1, 4], Ok(2));
+        transport.expect_feature_report_result(
+            [7, 5, 4],
+            Err(super::HidError::Transport("injected write error".into())),
+        );
+        assert_eq!(transport.send_feature_report(&[7, 1, 4]).unwrap(), 2);
+        assert!(transport.send_feature_report(&[7, 5, 4]).is_err());
+        assert!(transport.send_feature_report(&[7, 3, 4]).is_err());
+        assert_eq!(
+            transport.feature_reports_sent(),
+            &[vec![7, 1, 4], vec![7, 5, 4], vec![7, 3, 4]]
+        );
+        transport.assert_drained();
+    }
+
+    #[test]
+    fn mock_feature_read_error_is_consumed_once_and_counted() {
+        let mut transport = MockHidTransport::new(1);
+        transport.queue_feature_error(super::HidError::Transport("injected read error".into()));
+        transport.queue_feature_response([7, 0x81, 4]);
+        let mut report = [7, 0, 0];
+        let error = transport.get_feature_report(&mut report).unwrap_err();
+        assert!(error.to_string().contains("injected read error"));
+        assert_eq!(transport.get_feature_report(&mut report).unwrap(), 3);
+        assert_eq!(report, [7, 0x81, 4]);
+        assert_eq!(transport.feature_read_attempts(), 2);
         transport.assert_drained();
     }
 }

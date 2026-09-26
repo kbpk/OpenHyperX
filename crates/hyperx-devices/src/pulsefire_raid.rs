@@ -17,6 +17,8 @@ use hyperx_protocol::pulsefire_raid::{
 };
 use thiserror::Error;
 
+#[cfg(test)]
+mod runtime_safety_tests;
 mod software_profile;
 pub use software_profile::{
     PulsefireRaidProfileChange, PulsefireRaidProfileError, PulsefireRaidProfilePreview,
@@ -480,6 +482,19 @@ impl<T: HidTransport> PulsefireRaid<T> {
         Ok(profile)
     }
 
+    /// A read envelope can be valid while its settings are unusable (including
+    /// the observed header-only/zero-body response). Never patch that image into
+    /// a write, even to replace the field which failed validation. Inspection
+    /// remains permissive through runtime_profile_with_wait.
+    fn validated_runtime_profile_with_wait(
+        &mut self,
+        wait: impl FnMut(Duration),
+    ) -> Result<PerformanceProfile, PulsefireRaidError> {
+        let profile = self.runtime_profile_with_wait(wait)?;
+        profile.validate_confirmed_runtime_settings()?;
+        Ok(profile)
+    }
+
     /// Persist the confirmed runtime DPI, polling and button records to the
     /// mouse's onboard profile.
     ///
@@ -727,7 +742,7 @@ impl<T: HidTransport> PulsefireRaid<T> {
         wait: impl FnMut(Duration),
     ) -> Result<DpiProfile, PulsefireRaidError> {
         let dpi = PULSEFIRE_RAID_DPI.validate(dpi)?;
-        let mut profile = self.runtime_profile_with_wait(wait)?;
+        let mut profile = self.validated_runtime_profile_with_wait(wait)?;
         let mut dpi_profile = profile.dpi_profile()?;
         let stage = &mut dpi_profile.stages[dpi_profile.active_stage];
         stage.x = dpi;
@@ -766,7 +781,7 @@ impl<T: HidTransport> PulsefireRaid<T> {
         let dpi = dpi
             .map(|value| PULSEFIRE_RAID_DPI.validate(value))
             .transpose()?;
-        let mut profile = self.runtime_profile_with_wait(wait)?;
+        let mut profile = self.validated_runtime_profile_with_wait(wait)?;
         let mut dpi_profile = profile.dpi_profile()?;
         let stage_count = dpi_profile.stages.len();
         let stage = dpi_profile.stages.get_mut(stage_index).ok_or(
@@ -808,7 +823,7 @@ impl<T: HidTransport> PulsefireRaid<T> {
         wait: impl FnMut(Duration),
     ) -> Result<DpiProfile, PulsefireRaidError> {
         let dpi = PULSEFIRE_RAID_DPI.validate(dpi)?;
-        let mut profile = self.runtime_profile_with_wait(wait)?;
+        let mut profile = self.validated_runtime_profile_with_wait(wait)?;
         let mut dpi_profile = profile.dpi_profile()?;
         if dpi_profile.stages.len() >= usize::from(PULSEFIRE_RAID_DPI.max_stages) {
             return Err(PulsefireRaidError::TooManyDpiStages(
@@ -838,7 +853,7 @@ impl<T: HidTransport> PulsefireRaid<T> {
         &mut self,
         wait: impl FnMut(Duration),
     ) -> Result<DpiProfile, PulsefireRaidError> {
-        let mut profile = self.runtime_profile_with_wait(wait)?;
+        let mut profile = self.validated_runtime_profile_with_wait(wait)?;
         let mut dpi_profile = profile.dpi_profile()?;
         if dpi_profile.stages.len() == 1 {
             return Err(PulsefireRaidError::CannotRemoveOnlyDpiStage);
@@ -880,10 +895,13 @@ impl<T: HidTransport> PulsefireRaid<T> {
         let control = assignment.control();
         let macro_definition = assignment.encoded_macro()?;
         let ordinary_binding = assignment.ordinary_binding();
-        let mut profile = self.runtime_profile_with_wait(wait)?;
+        let mut profile = self.validated_runtime_profile_with_wait(wait)?;
 
         if let Some(macro_definition) = macro_definition {
             macro_definition.apply_to_profile(&mut profile)?;
+            // Validate the reference image BEFORE uploading any macro events;
+            // the guard inside write_runtime_profile alone would be too late.
+            profile.validate_confirmed_runtime_settings()?;
             self.send_feature_report(macro_definition.as_bytes())?;
         } else {
             profile.set_button_binding(
@@ -912,7 +930,7 @@ impl<T: HidTransport> PulsefireRaid<T> {
         layout: PrimaryButtonLayout,
         wait: impl FnMut(Duration),
     ) -> Result<PrimaryButtonLayout, PulsefireRaidError> {
-        let mut profile = self.runtime_profile_with_wait(wait)?;
+        let mut profile = self.validated_runtime_profile_with_wait(wait)?;
         profile.set_primary_button_layout(layout);
         self.write_runtime_profile(&profile)?;
         Ok(layout)
@@ -931,7 +949,7 @@ impl<T: HidTransport> PulsefireRaid<T> {
         polling_rate: PollingRate,
         wait: impl FnMut(Duration),
     ) -> Result<PollingRate, PulsefireRaidError> {
-        let mut profile = self.runtime_profile_with_wait(wait)?;
+        let mut profile = self.validated_runtime_profile_with_wait(wait)?;
         profile.set_polling_rate(polling_rate);
         self.write_runtime_profile(&profile)?;
         Ok(polling_rate)
@@ -947,6 +965,10 @@ impl<T: HidTransport> PulsefireRaid<T> {
                 section: profile.section(),
             });
         }
+        // Defense in depth for every caller, including composed software
+        // profiles. This is not a substitute for validating the unmodified
+        // baseline before patching, or before a separate macro upload.
+        profile.validate_confirmed_runtime_settings()?;
         self.send_feature_report(&profile.to_write_report())?;
         Ok(())
     }
@@ -1223,18 +1245,8 @@ mod tests {
         response[0x25..0x27].copy_from_slice(&[0x00, 0x10]);
         response[0x32] = 0x01;
         response[0x69..0x6C].copy_from_slice(&[0x2B, 0x00, 0xFF]);
-        response
-    }
-
-    pub(super) fn save_profile_response(
-        section: ProfileSection,
-        with_macro: bool,
-    ) -> [u8; DIRECT_REPORT_LENGTH] {
-        let mut response = performance_profile_response();
-        response[2] = match section {
-            ProfileSection::Onboard => 0x01,
-            ProfileSection::Runtime => 0x04,
-        };
+        // Runtime writes now require a complete usable snapshot, not just the
+        // performance fields. Use the same captured records as save fixtures.
         response[0x7C..0xA8].copy_from_slice(&[
             0x02, 0xF0, 0x00, 0x00, // left click
             0x02, 0xF2, 0x00, 0x00, // right click
@@ -1248,6 +1260,18 @@ mod tests {
             0x02, 0xF5, 0x00, 0x00, // wheel tilt left
             0x02, 0xF6, 0x00, 0x00, // wheel tilt right
         ]);
+        response
+    }
+
+    pub(super) fn save_profile_response(
+        section: ProfileSection,
+        with_macro: bool,
+    ) -> [u8; DIRECT_REPORT_LENGTH] {
+        let mut response = performance_profile_response();
+        response[2] = match section {
+            ProfileSection::Onboard => 0x01,
+            ProfileSection::Runtime => 0x04,
+        };
         if with_macro {
             response[0x8C..0x90].copy_from_slice(&[0x53, 0x00, 0x00, 0x04]);
         }
