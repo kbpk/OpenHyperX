@@ -18,6 +18,9 @@ use hyperx_protocol::pulsefire_raid::{
 use thiserror::Error;
 
 const PROFILE_PRELUDE_DELAY: Duration = Duration::from_millis(65);
+// Captured selector/request/GET pacing, not values decoded from the selector's
+// fixed 64 trailer. The one-second wait is the observed onboard commit interval;
+// the separate 110/315 ms waits belong to the verified two-phase session startup.
 const PROFILE_READ_DELAY: Duration = Duration::from_millis(110);
 const ONBOARD_COMMIT_DELAY: Duration = Duration::from_secs(1);
 const SAVE_ACK_LENGTH: usize = 8;
@@ -448,6 +451,8 @@ impl<T: HidTransport> PulsefireRaid<T> {
         wait(PROFILE_READ_DELAY);
 
         let mut response = [0_u8; DIRECT_REPORT_LENGTH];
+        // hidapi GET requires the requested report ID in byte 0 before the call;
+        // it is also part of the returned 264-byte image, not a removable prefix.
         response[0] = DIRECT_REPORT_ID;
         let response_length = self.transport.get_feature_report(&mut response)?;
         if response_length != DIRECT_REPORT_LENGTH {
@@ -537,6 +542,8 @@ impl<T: HidTransport> PulsefireRaid<T> {
             ));
         }
         let [first, second] = encode_vendor_session_start_reports();
+        // The lifecycle captures establish this exact 00 -> 01 pair, not a
+        // general reset/enable API. The numeric phase semantics remain unknown.
         self.arm_save_ack_read(acknowledgements, first[1])?;
         // The first phase had no ACK in either capture; only the second phase
         // is acknowledged. Do not infer ACKs or send unrelated startup writes.
@@ -587,8 +594,13 @@ impl<T: HidTransport> PulsefireRaid<T> {
         // the captured volatile session once; this is not a retry after an ACK failure.
         self.initialize_vendor_session_with_wait(acknowledgements, &mut wait)?;
         let runtime = self.read_runtime_profile_for_save(acknowledgements, &mut wait)?;
+        // Structural/binding gate before onboard selection. Numeric DPI range
+        // prevalidation is still missing here; see the protocol method's TODO.
         runtime.validate_confirmed_runtime_settings()?;
 
+        // A reference contains no timeline. Supplying a definition for an
+        // ordinary binding is also an error: saving must not silently replace
+        // the actual runtime assignment with the caller's unrelated macro.
         for control in [PulsefireRaidControl::Button5, PulsefireRaidControl::Button4] {
             let has_macro_reference = runtime.has_confirmed_macro_reference(control);
             let supplied = macros
@@ -611,6 +623,10 @@ impl<T: HidTransport> PulsefireRaid<T> {
         let polling_rate = runtime.polling_rate()?;
         let dpi_profile = runtime.dpi_profile()?;
 
+        // Keep Legacy's complete save order: select onboard, send all indexed
+        // Solid snapshots, request/read the destination, definitions, full write.
+        // Starting from the onboard read preserves its opaque fields; copying
+        // the whole runtime image would replace unrelated persistent state.
         self.send_feature_report_with_save_ack(
             acknowledgements,
             &encode_onboard_profile_read_prelude(),
@@ -631,6 +647,9 @@ impl<T: HidTransport> PulsefireRaid<T> {
             )?;
         }
         self.send_feature_report_with_save_ack(acknowledgements, &onboard.to_write_report())?;
+        // A successful write ACK is not evidence that persistent commit is complete.
+        // Wait the captured interval before selecting runtime again; no retry
+        // or rollback is invented after an ambiguous persistent-stage failure.
         wait(ONBOARD_COMMIT_DELAY);
         self.send_feature_report_with_save_ack(
             acknowledgements,
@@ -953,6 +972,9 @@ impl<T: HidTransport> PulsefireRaid<T> {
             });
         }
         let expected = save_acknowledgement(opcode);
+        // A full matching input packet confirms this captured response pattern,
+        // not power-cycle persistence. Stop on any mismatch; consuming unrelated
+        // packets until one matches could hide a stale ACK or failed command.
         if actual != expected {
             return Err(PulsefireRaidError::UnexpectedSaveAcknowledgement { opcode, actual });
         }
@@ -986,6 +1008,10 @@ impl<T: HidTransport> PulsefireRaid<T> {
 }
 
 fn save_acknowledgement(opcode: u8) -> [u8; SAVE_ACK_LENGTH] {
+    // Interface-2 endpoint 83 response, distinct from interface-1 feature data.
+    // Successful 81 request ACKs contain FF; successful 03/18/05/01 (and startup
+    // 07) contain 00. FF is NOT treated as a generic failure code, and these
+    // exact capture patterns do not establish status semantics for other values.
     [
         0x00,
         0x00,

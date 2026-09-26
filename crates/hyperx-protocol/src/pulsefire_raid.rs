@@ -4,6 +4,9 @@ use hyperx_core::{
 };
 use thiserror::Error;
 
+// Shared interface-1 feature framing, despite the historical DIRECT_* names:
+// descriptor payload is 263 bytes; all API offsets include the report ID byte.
+// Direct RGB, profile and macro packets therefore all use 264-byte buffers.
 pub const DIRECT_REPORT_ID: u8 = 0x07;
 pub const DIRECT_REPORT_LENGTH: usize = 264;
 const DIRECT_START: u8 = 0x0A;
@@ -32,6 +35,9 @@ const CONFIRMED_MACRO_HEADER: [u8; 10] =
     [0x07, 0x05, 0x04, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
 const MACRO_TARGET_OFFSET: usize = 3;
 const MACRO_PLAYBACK_OFFSET: usize = 8;
+// Evidence limit: 14 transitions is the largest captured timeline, NOT a
+// measured hardware capacity. 9999 ms is Legacy's editor bound; the wire delay
+// has 15 bits. Neither limit should be enlarged just because the buffer fits.
 pub const MAX_CAPTURE_BACKED_MACRO_EVENTS: usize = 14;
 pub const MAX_MACRO_DELAY_MS: u16 = 9_999;
 
@@ -70,6 +76,8 @@ const MACRO_TARGETS: &[MacroTargetEncoding] = &[
         },
     },
 ];
+// 50-DPI wire units are capture-backed; 200 is Legacy's observed minimum,
+// while 16000 is the documented sensor maximum and a captured stage value.
 const DPI_UNIT: u32 = 50;
 const MIN_DPI: u32 = 200;
 const MAX_DPI: u32 = 16_000;
@@ -138,6 +146,8 @@ impl PulsefireRaidControl {
     }
 
     const fn profile_offset(self) -> usize {
+        // Four-byte records follow the observed profile order, not numerical
+        // side-button order: the manual names Button 7 before Button 6 here.
         match self {
             Self::LeftClick => 0x7C,
             Self::RightClick => 0x80,
@@ -368,6 +378,9 @@ pub enum DpiAxis {
 }
 
 impl PerformanceProfile {
+    /// Identify the captured image envelope while retaining all opaque bytes.
+    /// Field decoders validate their own layouts; parsing is not write approval
+    /// and deliberately allows unknown field values to be inspected offline.
     pub fn parse(report: &[u8]) -> Result<Self, PerformanceProfileError> {
         let report: [u8; DIRECT_REPORT_LENGTH] = report
             .try_into()
@@ -377,6 +390,9 @@ impl PerformanceProfile {
             return Err(PerformanceProfileError::WrongReportId(report[0]));
         }
 
+        // 01/81 distinguish full write/read-response images. The independent
+        // byte-2 section selects onboard (01) or volatile runtime (04); 04 is
+        // not a fourth hardware profile or the number of DPI stages.
         let kind = match report[1] {
             PROFILE_WRITE_OPCODE => ProfileImageKind::HostWrite,
             PROFILE_READ_RESPONSE_OPCODE => ProfileImageKind::DeviceReadResponse,
@@ -405,6 +421,9 @@ impl PerformanceProfile {
     }
 
     pub fn polling_rate(&self) -> Result<PollingRate, PerformanceProfileError> {
+        // Captured interval in milliseconds, not a Hz enum or bitmask:
+        // 1/2/4/8 ms correspond to 1000/500/250/125 Hz. Other intervals remain
+        // unsupported even if 1000 / interval could produce a plausible rate.
         match self.report[POLLING_INTERVAL_OFFSET] {
             0x01 => Ok(PollingRate::Hz1000),
             0x02 => Ok(PollingRate::Hz500),
@@ -416,8 +435,8 @@ impl PerformanceProfile {
 
     /// Patch the confirmed polling interval byte in an existing profile image.
     ///
-    /// This is deliberately an offline operation. The device driver does not
-    /// expose a profile write while the surrounding transaction is unknown.
+    /// This is an offline patch. The driver owns the confirmed runtime
+    /// read/modify/write transaction and the separate explicit onboard save.
     pub fn set_polling_rate(&mut self, polling_rate: PollingRate) {
         self.report[POLLING_INTERVAL_OFFSET] = match polling_rate {
             PollingRate::Hz1000 => 0x01,
@@ -429,12 +448,16 @@ impl PerformanceProfile {
 
     /// Decode the enabled DPI stages and the active zero-based stage index.
     ///
-    /// This is deliberately read-only. The device driver does not expose a
-    /// profile write while the surrounding transaction remains unknown.
+    /// This only decodes the image; it performs no I/O. Layout checks below do
+    /// not impose write-time DPI range validation, so unusual read values can
+    /// still be inspected instead of being silently clamped.
     pub fn dpi_profile(&self) -> Result<DpiProfile, PerformanceProfileError> {
         let mut stages = Vec::with_capacity(DPI_STAGE_ENABLED_OFFSETS.len());
         let mut found_disabled_stage = false;
 
+        // Legacy Add/Remove captures establish a contiguous enabled prefix.
+        // A hole is an unknown layout, not an instruction to compress/reindex
+        // the later stages and possibly select a different physical DPI level.
         for (index, enabled_offset) in DPI_STAGE_ENABLED_OFFSETS.iter().copied().enumerate() {
             match self.report[enabled_offset] {
                 0x00 => found_disabled_stage = true,
@@ -461,6 +484,8 @@ impl PerformanceProfile {
             return Err(PerformanceProfileError::NoEnabledDpiStages);
         }
 
+        // Captured UI levels 1/2/3 are wire indexes 00/01/02. Conversion to
+        // one-based labels belongs to clients; it must not alter the image.
         let active_stage = usize::from(self.report[ACTIVE_DPI_STAGE_OFFSET]);
         if active_stage >= stages.len() {
             return Err(PerformanceProfileError::InvalidActiveDpiStage {
@@ -494,6 +519,8 @@ impl PerformanceProfile {
             });
         }
 
+        // Finish every range/axis check before mutation: a bad later stage
+        // must not leave earlier stages partially patched in this setter.
         for (index, stage) in dpi_profile.stages.iter().enumerate() {
             validate_dpi(index, DpiAxis::X, stage.x)?;
             validate_dpi(index, DpiAxis::Y, stage.y)?;
@@ -507,6 +534,9 @@ impl PerformanceProfile {
                 self.report[DPI_STAGE_COLOR_OFFSETS[index]..DPI_STAGE_COLOR_OFFSETS[index] + 3]
                     .copy_from_slice(&stage.color.bytes());
             } else {
+                // Removing stage 5 cleared X, Y, enabled and RGB together.
+                // Replay that shape for unused trailing slots, not just the
+                // enable bit; retain every field outside these known offsets.
                 self.report[DPI_X_OFFSETS[index]..DPI_X_OFFSETS[index] + 2].fill(0);
                 self.report[DPI_Y_OFFSETS[index]..DPI_Y_OFFSETS[index] + 2].fill(0);
                 self.report[DPI_STAGE_ENABLED_OFFSETS[index]] = 0x00;
@@ -541,6 +571,8 @@ impl PerformanceProfile {
             return false;
         };
         let offset = control.profile_offset();
+        // 53 is a reference, and its last byte must match this captured slot
+        // (03 for Button 4, 04 for Button 5). It contains no playback or events.
         self.report[offset..offset + BUTTON_RECORD_LENGTH] == [0x53, 0x00, 0x00, target]
     }
 
@@ -555,6 +587,9 @@ impl PerformanceProfile {
         binding: &ButtonBinding,
     ) -> Result<(), PerformanceProfileError> {
         if control.is_primary_click() {
+            // Legacy swaps both primary records atomically and disallows two
+            // Left or two Right assignments. An individual patch could create
+            // that uncaptured intermediate state; use the coupled API instead.
             return Err(PerformanceProfileError::PrimaryButtonPairRequiresAtomicUpdate(control));
         }
 
@@ -595,6 +630,8 @@ impl PerformanceProfile {
 
     /// Patch both primary-click records as one capture-backed state change.
     pub fn set_primary_button_layout(&mut self, layout: PrimaryButtonLayout) {
+        // Repeated Standard/Swapped captures moved these complete records
+        // between slots, including Right's 02 trailer. Do not swap only F0/F2.
         let (left, right) = match layout {
             PrimaryButtonLayout::Standard => ([0x02, 0xF0, 0x00, 0x00], [0x02, 0xF2, 0x00, 0x02]),
             PrimaryButtonLayout::Swapped => ([0x02, 0xF2, 0x00, 0x02], [0x02, 0xF0, 0x00, 0x00]),
@@ -609,7 +646,8 @@ impl PerformanceProfile {
     /// and onboard profile sections.
     ///
     /// Unknown onboard bytes are deliberately retained from the destination
-    /// image. All source fields are validated before either image is changed.
+    /// image. Source structure/bindings are checked first; numeric DPI checks
+    /// currently happen inside set_dpi_profile, after the polling patch.
     pub fn copy_confirmed_runtime_settings_from(
         &mut self,
         runtime: &Self,
@@ -624,20 +662,26 @@ impl PerformanceProfile {
         runtime.validate_confirmed_runtime_settings()?;
         let polling_rate = runtime.polling_rate()?;
         let dpi_profile = runtime.dpi_profile()?;
+        // TODO: prevalidate numeric DPI here/before the save transaction. An
+        // out-of-range source currently fails in set_dpi_profile after polling
+        // has changed, so this method is not fully atomic on invalid input.
         self.set_polling_rate(polling_rate);
         self.set_dpi_profile(&dpi_profile)?;
         for control in PulsefireRaidControl::ALL {
             let offset = control.profile_offset();
+            // Copy the actual captured record, not a decode/encode round-trip:
+            // this preserves zero-trailer aliases and exact macro references.
             self.report[offset..offset + BUTTON_RECORD_LENGTH]
                 .copy_from_slice(&runtime.report[offset..offset + BUTTON_RECORD_LENGTH]);
         }
         Ok(())
     }
 
-    /// Validate every field that the capture-backed onboard save will copy.
+    /// Validate polling, DPI-stage layout and captured button records for save.
     ///
     /// Callers can use this before beginning the persistent transaction so an
-    /// unknown runtime record fails without touching onboard memory.
+    /// unknown runtime record fails without touching onboard memory. Numeric
+    /// DPI range checks are not yet part of this gate (see TODO below).
     pub fn validate_confirmed_runtime_settings(&self) -> Result<(), PerformanceProfileError> {
         if self.section != ProfileSection::Runtime {
             return Err(PerformanceProfileError::ExpectedRuntimeSettingsSource(
@@ -645,6 +689,9 @@ impl PerformanceProfile {
             ));
         }
         self.polling_rate()?;
+        // TODO: validate each decoded X/Y with validate_dpi before onboard
+        // selection. dpi_profile checks flags/indexes, not 200..=16000 values;
+        // the later copy/setter can currently reject these only after selection.
         self.dpi_profile()?;
         self.primary_button_layout()?;
         for control in PulsefireRaidControl::ALL {
@@ -652,6 +699,8 @@ impl PerformanceProfile {
                 continue;
             }
             if self.has_confirmed_macro_reference(control) {
+                // A known reference is valid here, but the driver must require
+                // the separately supplied definition before saving that slot.
                 continue;
             }
             self.button_binding(control)?;
@@ -662,6 +711,8 @@ impl PerformanceProfile {
     /// Produce the confirmed host-write form without transmitting it.
     pub fn to_write_report(&self) -> [u8; DIRECT_REPORT_LENGTH] {
         let mut report = self.report;
+        // Captured read -> write images change 81 to 01 only. In particular,
+        // this does not switch sections, zero unknown bytes or normalize aliases.
         report[1] = PROFILE_WRITE_OPCODE;
         report
     }
@@ -701,6 +752,10 @@ impl PulsefireRaidMacro {
         let mut offset = CONFIRMED_MACRO_HEADER.len();
 
         for event in events {
+            // Recorded-timing capture: [state | delay-high, delay-low, input].
+            // Bit 7 is down/up; the remaining 15 bits store the delay AFTER
+            // this transition. It is not a little-endian timestamp or key hold
+            // duration. The validated bound keeps the delay out of state bit 7.
             let [delay_high, delay_low] = event.delay_ms.to_be_bytes();
             let state = match event.state {
                 PulsefireRaidMacroState::Pressed => 0x80,
@@ -746,6 +801,9 @@ impl PulsefireRaidMacro {
         for (offset, (&actual, &expected)) in
             report.iter().zip(CONFIRMED_MACRO_HEADER.iter()).enumerate()
         {
+            // Only target and playback vary within the captured 10-byte header.
+            // All other bytes, including zeros, stay strict: their arbitrary
+            // values have no established meaning or safe send path.
             if offset == MACRO_TARGET_OFFSET
                 || (MACRO_PLAYBACK_OFFSET..MACRO_PLAYBACK_OFFSET + 2).contains(&offset)
             {
@@ -764,6 +822,9 @@ impl PulsefireRaidMacro {
             report[MACRO_PLAYBACK_OFFSET],
             report[MACRO_PLAYBACK_OFFSET + 1],
         ];
+        // Same exact pairs as macro_playback_bytes and the complete Button 4
+        // fixtures: 0000 means Toggle, not Disabled; FFFF means Hold, not error.
+        // Target-specific support is still checked after recognizing the pair.
         let playback = match mode {
             [0x00, 0x01] => MacroPlayback::Once,
             [0x00, 0x00] => MacroPlayback::ToggleRepeat,
@@ -777,6 +838,9 @@ impl PulsefireRaidMacro {
         while offset + 3 <= report.len() {
             let record = &report[offset..offset + 3];
             if record == [0, 0, 0] {
+                // All-zero triplet begins the captured zero-filled tail, not a
+                // "wait" event. Zero-delay transitions still have an input code.
+                // Reject later nonzero bytes instead of discarding hidden events.
                 if let Some((padding_offset, &actual)) = report[offset..]
                     .iter()
                     .enumerate()
@@ -791,6 +855,7 @@ impl PulsefireRaidMacro {
                 break;
             }
 
+            // Remove only the pressed bit before decoding the big-endian delay.
             let delay_ms = u16::from_be_bytes([record[0] & 0x7F, record[1]]);
             let state = if record[0] & 0x80 != 0 {
                 PulsefireRaidMacroState::Pressed
@@ -850,6 +915,8 @@ impl PulsefireRaidMacro {
     }
 
     pub fn is_bound_in(&self, profile: &PerformanceProfile) -> bool {
+        // Reference equality only: the image cannot tell whether its current
+        // timeline/playback matches this object's separately supplied definition.
         profile.has_confirmed_macro_reference(self.control())
     }
 
@@ -866,6 +933,8 @@ impl PulsefireRaidMacro {
             PulsefireRaidMacroError::UnconfirmedOnboardControl(self.control),
         )?;
         if !capabilities.supports_onboard(self.playback) {
+            // Shared runtime framing is not evidence of persistent repeat mode.
+            // Only captured Play Once variants may change section 04 -> 01.
             return Err(PulsefireRaidMacroError::UnconfirmedOnboardPlayback(
                 self.playback,
             ));
@@ -890,6 +959,9 @@ fn validate_macro_playback(
 }
 
 const fn macro_playback_bytes(playback: MacroPlayback) -> [u8; 2] {
+    // Exact Button 4 Legacy mode pairs at offsets 08/09 (2026-09-26 fixtures).
+    // 0001/0000/FFFF are fixed Once/Toggle/Hold patterns, not an arbitrary
+    // little-endian repeat count; internal counter semantics remain unknown.
     match playback {
         MacroPlayback::Once => [0x00, 0x01],
         MacroPlayback::ToggleRepeat => [0x00, 0x00],
@@ -911,6 +983,9 @@ fn validate_macro_events(
         });
     }
 
+    // Keep each input's state independently so overlapping downs form chords.
+    // Duplicate downs, unmatched ups or held inputs at the end are rejected
+    // rather than guessing releases and risking stuck keys during playback.
     let mut held = Vec::new();
     for (index, event) in events.iter().enumerate() {
         if event.delay_ms > capabilities.max_delay_ms {
@@ -956,6 +1031,8 @@ fn macro_input_code(input: PulsefireRaidMacroInput) -> Result<u8, PulsefireRaidM
         PulsefireRaidMacroInput::Keyboard(usage) => {
             Err(PulsefireRaidMacroError::UnsupportedKeyboardUsage(usage.0))
         }
+        // Recorded macro capture uses vendor B7/B8/B9 for primary mouse inputs,
+        // not mouse usage IDs, button bitmasks, or the ordinary binding records.
         PulsefireRaidMacroInput::MouseButton(PulsefireRaidMacroMouseButton::Left) => Ok(0xB7),
         PulsefireRaidMacroInput::MouseButton(PulsefireRaidMacroMouseButton::Right) => Ok(0xB8),
         PulsefireRaidMacroInput::MouseButton(PulsefireRaidMacroMouseButton::Middle) => Ok(0xB9),
@@ -963,6 +1040,9 @@ fn macro_input_code(input: PulsefireRaidMacroInput) -> Result<u8, PulsefireRaidM
 }
 
 fn macro_input_from_code(code: u8) -> Result<PulsefireRaidMacroInput, PulsefireRaidMacroError> {
+    // Macro input namespace: B7/B8/B9 are captured Left/Right/Middle transitions,
+    // whereas letters/modifiers use Keyboard usages. Do not use the ordinary
+    // Multimedia decoder here (its B7 denotes Stop in a different record family).
     match code {
         0xB7 => Ok(PulsefireRaidMacroInput::MouseButton(
             PulsefireRaidMacroMouseButton::Left,
@@ -981,14 +1061,21 @@ fn macro_input_from_code(code: u8) -> Result<PulsefireRaidMacroInput, PulsefireR
 }
 
 const fn is_supported_macro_keyboard_usage(usage: KeyboardUsage) -> bool {
+    // Keyboard/Keypad range plus modifier usages; keep the vendor mouse codes
+    // B7/B8/B9 disjoint. The driver's named-key write set is narrower than this
+    // read range; not every numeric usage here has a separate hardware test.
     matches!(usage.0, 0x04..=0xA4 | 0xE0..=0xE7)
 }
 
 fn read_dpi(report: &[u8; DIRECT_REPORT_LENGTH], offset: usize) -> u32 {
+    // Stage 5's 01 40 = 320 * 50 = 16000 proved a big-endian 16-bit value.
+    // Earlier 800/900/1000 edits changed only low bytes, obscuring the width.
     u32::from(u16::from_be_bytes([report[offset], report[offset + 1]])) * DPI_UNIT
 }
 
 fn read_color(report: &[u8; DIRECT_REPORT_LENGTH], offset: usize) -> RgbColor {
+    // Isolated DPI-stage color edits confirmed RGB order, not BGR or a palette
+    // index. These stage-indicator colors are separate from wheel/logo lighting.
     RgbColor::new(report[offset], report[offset + 1], report[offset + 2])
 }
 
@@ -1011,6 +1098,8 @@ fn validate_dpi(stage: usize, axis: DpiAxis, dpi: u32) -> Result<(), Performance
 }
 
 fn write_dpi(report: &mut [u8; DIRECT_REPORT_LENGTH], offset: usize, dpi: u32) {
+    // Caller already checked range and divisibility by 50. Otherwise integer
+    // division here would silently round down a requested physical resolution.
     let encoded = u16::try_from(dpi / DPI_UNIT)
         .expect("validated Pulsefire Raid DPI always fits in u16")
         .to_be_bytes();
@@ -1129,6 +1218,8 @@ fn encode_button_binding(
     let record = match binding {
         ButtonBinding::Disabled => [0x00, 0x00, 0x00, 0x00],
         ButtonBinding::Keyboard(KeyboardUsage(usage)) => {
+            // Usage 0 would encode the exact Disabled record; values above FF
+            // cannot fit this captured one-byte field. Do not truncate either.
             let usage = u8::try_from(*usage)
                 .ok()
                 .filter(|usage| *usage != 0)
@@ -1172,6 +1263,9 @@ fn encode_button_binding(
             WindowsShortcut::Undo => [0x23, 0xE0, 0x1D, 0x00],
         },
         ButtonBinding::Macro(_) => {
+            // A generic macro ID/playback cannot construct a hardware timeline
+            // or select an evidenced target. Use PulsefireRaidMacro and bind its
+            // validated definition rather than fabricating a 53 reference here.
             return Err(PerformanceProfileError::UnconfirmedButtonBinding(
                 binding.clone(),
             ));
@@ -1187,6 +1281,9 @@ fn encode_button_binding(
 /// by OpenRGB. It does not write onboard memory and must be periodically resent
 /// if the caller wants the direct color to remain active.
 pub fn encode_direct_rgb(wheel: RgbColor, logo: RgbColor) -> [u8; DIRECT_REPORT_LENGTH] {
+    // OpenRGB's exact direct-mode layout: RGB triplets at 02 and 05, bracketed
+    // by 0A/A0 markers. These are not the onboard snapshot offsets (08/0B).
+    // The driver maintains volatile color with keepalive, not an onboard save.
     let mut report = [0_u8; DIRECT_REPORT_LENGTH];
     report[0] = DIRECT_REPORT_ID;
     report[1] = DIRECT_START;
@@ -1225,6 +1322,9 @@ pub fn encode_onboard_profile_read_prelude() -> [u8; DIRECT_REPORT_LENGTH] {
 }
 
 fn encode_profile_access_prelude(section: ProfileSection) -> [u8; DIRECT_REPORT_LENGTH] {
+    // Captured section selector 07 03 {01|04} 64. The final 64 is a fixed
+    // observed byte with unknown standalone meaning, not a configurable delay,
+    // packet length or count. Keep it separate from the driver's actual waits.
     let mut report = [0_u8; DIRECT_REPORT_LENGTH];
     report[..4].copy_from_slice(&[
         DIRECT_REPORT_ID,
@@ -1250,6 +1350,9 @@ pub fn encode_onboard_static_lighting_reports(
 ) -> [[u8; DIRECT_REPORT_LENGTH]; ONBOARD_AUXILIARY_COUNT] {
     let mut reports = [[0_u8; DIRECT_REPORT_LENGTH]; ONBOARD_AUXILIARY_COUNT];
     for (index, report) in reports.iter_mut().enumerate() {
+        // Solid saves always send all three indexed reports in 00/01/02 order.
+        // Index 00 holds wheel/logo colors; 01/02 remain zero-filled. Their
+        // purpose for other effects is unknown, so do not omit or repurpose them.
         report[..4].copy_from_slice(&[
             DIRECT_REPORT_ID,
             ONBOARD_AUXILIARY_OPCODE,
@@ -1265,8 +1368,10 @@ pub fn encode_onboard_static_lighting_reports(
     reports
 }
 
-/// Encode the fixed feature-report request observed before runtime reads.
+/// Encode the fixed feature-report request observed before profile reads.
 pub fn encode_profile_read_request() -> [u8; DIRECT_REPORT_LENGTH] {
+    // SET_REPORT 07 81 (otherwise zeros) precedes GET_REPORT. It contains no
+    // section byte: the preceding 07 03 selector chooses runtime or onboard.
     let mut report = [0_u8; DIRECT_REPORT_LENGTH];
     report[..2].copy_from_slice(&[DIRECT_REPORT_ID, PROFILE_READ_RESPONSE_OPCODE]);
     report

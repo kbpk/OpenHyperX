@@ -1527,6 +1527,34 @@ and native Windows, and both builds. The native executable ran the offline
 commands successfully and discovery still listed all seven Raid HID collections
 with release `1124`. The support matrix and device state remain unchanged.
 
+### Protocol comment audit and numeric DPI prevalidation gap
+
+On 2026-09-26, the production Raid codecs and the driver's session/save/ACK
+path were audited for missing rationale. Comments now distinguish captured
+constants, byte order/units, zero-based indexes, evidence bounds, strict padding,
+runtime/onboard separation and preservation behavior. Old comments saying no
+runtime profile writer existed were corrected. No new command, packet value,
+capability or device write was introduced.
+
+The audit also found a real validation gap, reproduced with a temporary offline
+diagnostic test: set the first enabled stage's X field to zero in the existing
+button-profile fixture and polling to `08` (125 Hz).
+`validate_confirmed_runtime_settings()` accepts this source because
+`dpi_profile()` validates flags/indexes but does not enforce numeric DPI bounds.
+Copying it into an onboard image then returns `DpiOutOfRange { dpi: 0, ... }`,
+but polling in that in-memory destination has already changed from 1000 to
+125 Hz. The diagnostic passed and was removed rather than retaining a regression
+test that requires the bug to remain.
+
+In the driver, the source check precedes onboard selection, but the failing
+copy comes after selection, three auxiliary lighting reports and the onboard
+read. Those reports can therefore be sent before an invalid source DPI is
+rejected. No such transaction was run on the physical mouse during this audit;
+existing positive hardware captures used valid DPI values. TODO: validate each
+source X/Y value before selecting onboard and before mutating the destination,
+then add rejection-before-any-onboard-I/O and unchanged-destination regression
+tests. The comments-only change does not fix this gap.
+
 ## NGENUITY Legacy `.hxp` preset format
 
 On 2026-09-18, an exported `Base Settings.hxp` from NGENUITY Legacy `5.38.0.0`
