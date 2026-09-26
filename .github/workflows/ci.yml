@@ -51,6 +51,8 @@ jobs:
         run: |
           ./target/debug/hyperx-cli --version
           ./target/debug/hyperx-cli devices
+          ./target/debug/hyperx-tui --demo --check
+          ./target/debug/hyperx-tui --demo --render
 
   windows:
     name: Windows tests, build and CLI smoke test
@@ -72,6 +74,8 @@ jobs:
         run: |
           .\target\debug\hyperx-cli.exe --version
           .\target\debug\hyperx-cli.exe devices
+          .\target\debug\hyperx-tui.exe --demo --check
+          .\target\debug\hyperx-tui.exe --demo --render
 
   macos:
     name: macOS ${{ matrix.arch }} tests, build and CLI smoke test
@@ -100,3 +104,5 @@ jobs:
         run: |
           ./target/debug/hyperx-cli --version
           ./target/debug/hyperx-cli devices
+          ./target/debug/hyperx-tui --demo --check
+          ./target/debug/hyperx-tui --demo --render

@@ -44,6 +44,14 @@ if (-not $SkipDeviceDiscovery) {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
+$tui = Join-Path (Get-Location) "target\$target\debug\hyperx-tui.exe"
+& $tui --version
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $tui --demo --check
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $tui --demo --render
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 # Explicitly opt in: normal CI/build checks never mutate a physical device.
 if ($VerifySoftwareProfilePolling) {
     & (Join-Path $PSScriptRoot 'verify-software-profile-windows.ps1') -ConfirmRuntimeWrites

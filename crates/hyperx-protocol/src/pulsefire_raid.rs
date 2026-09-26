@@ -1113,7 +1113,7 @@ fn validate_dpi(stage: usize, axis: DpiAxis, dpi: u32) -> Result<(), Performance
             dpi,
         });
     }
-    if dpi % DPI_UNIT != 0 {
+    if !dpi.is_multiple_of(DPI_UNIT) {
         return Err(PerformanceProfileError::DpiNotStepAligned {
             stage: stage + 1,
             axis,

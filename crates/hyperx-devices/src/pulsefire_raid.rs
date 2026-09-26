@@ -7,13 +7,14 @@ use hyperx_core::{
     PrimaryButtonLayout, RgbColor, UsbId, WindowsShortcut,
 };
 use hyperx_hid::{HidError, HidTransport};
+pub use hyperx_protocol::pulsefire_raid::PulsefireRaidControl;
 use hyperx_protocol::pulsefire_raid::{
     encode_direct_rgb, encode_onboard_profile_read_prelude, encode_onboard_static_lighting_reports,
     encode_profile_read_request, encode_runtime_profile_read_prelude,
     encode_vendor_session_start_reports, PerformanceProfile, PerformanceProfileError,
-    ProfileImageKind, ProfileSection, PulsefireRaidControl, PulsefireRaidMacro,
-    PulsefireRaidMacroError, PulsefireRaidMacroEvent, PulsefireRaidMacroInput,
-    PulsefireRaidMacroMouseButton, PulsefireRaidMacroState, DIRECT_REPORT_ID, DIRECT_REPORT_LENGTH,
+    ProfileImageKind, ProfileSection, PulsefireRaidMacro, PulsefireRaidMacroError,
+    PulsefireRaidMacroEvent, PulsefireRaidMacroInput, PulsefireRaidMacroMouseButton,
+    PulsefireRaidMacroState, DIRECT_REPORT_ID, DIRECT_REPORT_LENGTH,
 };
 use thiserror::Error;
 

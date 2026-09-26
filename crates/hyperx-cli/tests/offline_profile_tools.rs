@@ -314,3 +314,82 @@ fn inspection_distinguishes_parsing_success_from_device_support_without_hid() {
             .success());
     }
 }
+
+#[test]
+fn explicit_macro_resolution_imports_a_timeline_into_a_new_offline_file() {
+    let source = "name = 'Captured'\ndevice = 'pulsefire-raid'\npartial = true\n[polling]\nhz = 1000\n[[unresolved_button_assignments]]\nsource_id = 'runtime:button5'\n";
+    let files = Files::new(source);
+    let macro_file =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/macros/ab-20ms.toml");
+    let args = [
+        "profile",
+        "resolve-macro",
+        path(&files.input),
+        path(&files.output),
+        "--source-id",
+        "runtime:button5",
+        "--control",
+        "button5",
+        "--macro-id",
+        "ab",
+        "--macro-file",
+        path(&macro_file),
+    ];
+    let output = text(cli(&args));
+    assert!(output.contains("no HID device was discovered or opened"));
+    let profile: SoftwareProfile =
+        toml::from_str(&fs::read_to_string(&files.output).unwrap()).unwrap();
+    assert!(profile.unresolved_button_assignments.is_empty());
+    assert_eq!(profile.macros[0].definition.events.len(), 4);
+    assert_eq!(
+        profile.buttons["button5"],
+        hyperx_core::SoftwareButtonBinding::Macro { id: "ab".into() }
+    );
+    assert_eq!(fs::read_to_string(&files.input).unwrap(), source);
+    assert!(cli(&["profile", "validate", path(&files.output)])
+        .status
+        .success());
+    assert!(!cli(&args).status.success()); // Existing output never overwritten.
+}
+
+#[test]
+fn resolution_rejects_unsupported_targets_and_omission_is_explicit_and_offline() {
+    let source = "name = 'Captured'\ndevice = 'pulsefire-raid'\npartial = true\n[polling]\nhz = 1000\n[[unresolved_button_assignments]]\nsource_id = 'runtime:button5'\n";
+    let files = Files::new(source);
+    let macro_file =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/macros/ab-toggle-20ms.toml");
+    for target in ["button4", "button5", "dpi", "unknown"] {
+        let output = cli(&[
+            "profile",
+            "resolve-macro",
+            path(&files.input),
+            path(&files.output),
+            "--source-id",
+            "runtime:button5",
+            "--control",
+            target,
+            "--macro-id",
+            "repeat",
+            "--macro-file",
+            path(&macro_file),
+        ]);
+        assert!(!output.status.success());
+        assert!(!files.output.exists());
+        let message = String::from_utf8(output.stderr).unwrap();
+        assert!(!message.contains("no supported") && !message.contains("failed to open Pulsefire"));
+    }
+    let output = text(cli(&[
+        "profile",
+        "omit-unresolved",
+        path(&files.input),
+        path(&files.output),
+        "--source-id",
+        "runtime:button5",
+    ]));
+    assert!(output.contains("no HID device was discovered or opened"));
+    let profile: SoftwareProfile =
+        toml::from_str(&fs::read_to_string(&files.output).unwrap()).unwrap();
+    assert!(profile.unresolved_button_assignments.is_empty());
+    assert!(profile.buttons.is_empty() && profile.macros.is_empty());
+    assert_eq!(fs::read_to_string(&files.input).unwrap(), source);
+}

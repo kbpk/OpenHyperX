@@ -275,6 +275,34 @@ and may be lost on reserialization; partial/unresolved markers are TOML fields.
 Nothing is applied or saved onboard, and historical captured values must not be
 presented as a fresh read or as device recovery. Keep exports outside Git too.
 
+## Offline editing and unresolved assignments
+
+`hyperx-app` now shares bounded readers, encoding validation, safe new-file saves
+and typed section editing between CLI and the [offline TUI](tui.md). Resolution
+does not invent a macro or use a source ID as a vendor slot. Supply an existing
+library ID, or explicitly import a standalone timeline under a fresh ID:
+
+```text
+hyperx-cli profile resolve-macro captured.toml resolved.toml --source-id runtime:button5 --control button5 --macro-id ab --macro-file examples/macros/ab-20ms.toml
+hyperx-cli profile omit-unresolved captured.toml omitted.toml --source-id runtime:button5
+```
+
+Without `--macro-file`, `--macro-id` must identify exactly one definition already
+in the profile. Resolution validates the target/timeline but preserves other
+unresolved entries and unrelated fields. It rejects duplicate/empty IDs, an
+already supplied binding and a known captured source being assigned to a
+different physical target. Legacy opaque physical targets remain an explicit
+operator choice. Omission removes only the exact provenance entry, not any
+already explicit binding; absent bindings preserve current device state.
+Neither command modifies the input, overwrites output, opens HID, applies a
+profile or saves onboard. Inspect/diff/validate the new file separately.
+
+TUI edits can retain unsupported-but-parseable drafts marked NOT READY; offline
+file save is intentionally separate from apply readiness. Missing fields are
+omissions, never default values. TOML comments/formatting are not preserved by
+reserialization; typed source/partial/unresolved fields remain. There is still
+no OpenHyperX root `format_version`.
+
 ## Runtime safety and persistence
 
 Every path requires a usable baseline layout, enabled DPI in range and confirmed

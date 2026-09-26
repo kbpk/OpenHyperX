@@ -3,12 +3,12 @@
 ## Goals
 
 The core design separates device behavior from USB transport and presentation.
-A future Tauri UI must not know paths, report IDs or packet layouts. Adding a
+A TUI or future Tauri UI must not know HID paths, report IDs or packet layouts. Adding a
 mouse should normally mean adding one driver and registry entry, not changing
 the CLI or GUI.
 
 ```text
-CLI now / Tauri later
+CLI + offline TUI now / Tauri later
         |
         v
 public device API (hyperx-core)
@@ -133,6 +133,20 @@ observed response and does not infer a cause or prove the device's actual state.
 
 ## Crate responsibilities
 
+### `hyperx-app`
+
+Shared offline application operations for CLI/TUI/future GUI: bounded profile
+and macro-file parsing, safe new-file serialization, section edits, file-session
+baseline/diff state, model metadata and separate offline readiness. Explicit
+macro resolution/omission never guesses Legacy physical targets or timeline
+contents. It delegates target gates to the existing model validator and refuses
+implicit ID/control overwrites. Invalid/partial drafts remain inspectable.
+Typed value edits validate the requested field against model metadata while
+preserving other sections, unread values and unresolved provenance; UI controls
+never need to rebuild a profile or guess missing defaults.
+This is not yet a hardware session facade; existing CLI device handlers continue
+to use the model driver. The app layer exposes no discovery/HID/send API.
+
 Offline software-profile comparison belongs to `hyperx-core`: it produces
 separate setting/provenance changes and matches macro IDs while preserving event
 order/timings. It accepts partial files for inspection without granting a write
@@ -218,6 +232,20 @@ another conditional in the CLI or driver.
 
 Parses commands, selects devices and renders results. It contains no vendor
 packet constants.
+
+### `hyperx-tui`
+
+Ratatui/Crossterm presentation and terminal events only. It depends on the
+shared app/core, not protocol or transport. Performance/Lighting have direct
+file controls, including model-bounded DPI sliders and exact inputs, while
+advanced typed TOML editors remain available in all five views. Mouse targets
+come from the visible frame and are isolated by modals; mouse/terminal modes
+are restored on exit. Macro events retain chords and every timing. Unknown device settings
+are not represented as defaults. New-file save, resolve, omission and validation
+all use the shared app API. Diff/dirty state is against a FILE baseline, not a
+live mouse read; Save to mouse is unavailable. TestBackend plus real executable
+headless modes exercise the UI without a terminal or hardware. Future connected
+control must preserve driver evidence gates and add explicit write intent.
 
 ## Device API direction
 

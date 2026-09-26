@@ -19,32 +19,22 @@ pub(super) fn export_capture(input: &Path, output: &Path, report: NonZeroUsize) 
     // Serialize before creating the destination. No partial TOML on a parse,
     // selection, device-layout or serialization error; never overwrite a file.
     // Capture paths may be private, so retain only report/line provenance here.
-    let mut encoded = format!(
-        "# OpenHyperX offline Pulsefire Raid runtime RX export.\n# Selected report {} (source line {}); interface {}.\n# Model identity is an input assumption, not established by raw bytes.\n",
-        report, record.line,
-        record.interface.map_or_else(|| "not supplied".into(), |value| value.to_string())
-    );
-    for warning in &exported.warnings {
-        encoded.push_str(&format!("# Warning: {warning}\n"));
-    }
-    encoded.push('\n');
-    encoded.push_str(&toml::to_string_pretty(&exported.profile)?);
-    let mut destination = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(output)
-        .with_context(|| {
-            format!(
-                "cannot create {}; destination must be a new file (existing files are never overwritten)",
-                output.display()
-            )
-        })?;
-    destination.write_all(encoded.as_bytes()).with_context(|| {
+    let mut comments = vec![
+        "OpenHyperX offline Pulsefire Raid runtime RX export.".into(),
         format!(
-            "failed to write {}; an incomplete output may remain, inspect it before use",
-            output.display()
-        )
-    })?;
+            "Selected report {} (source line {}); interface {}.",
+            report,
+            record.line,
+            record
+                .interface
+                .map_or_else(|| "not supplied".into(), |value| value.to_string())
+        ),
+        "Model identity is an input assumption, not established by raw bytes.".into(),
+    ];
+    for warning in &exported.warnings {
+        comments.push(format!("Warning: {warning}"));
+    }
+    hyperx_app::save_profile_new(output, &exported.profile, &comments)?;
     println!(
         "Exported report {} (line {}) into {}.",
         report,
@@ -195,13 +185,14 @@ pub(super) fn inspect(path: &Path) -> Result<()> {
                 .map_or_else(|| "<not available>".into(), |id| format!("{id:?}"))
         );
     }
-    match PulsefireRaidSoftwareProfile::new(&profile) {
-        Ok(validated) => {
+    let readiness = hyperx_app::validate_profile(&profile);
+    match readiness.error {
+        None => {
             println!("Offline device validation: passed for supplied fields only; not a hardware check or an apply plan.");
-            for warning in validated.warnings() { println!("Warning: {warning}"); }
+            for warning in readiness.warnings { println!("Warning: {warning}"); }
             println!("Composed runtime apply remains experimentally unverified after an empty hardware readback; passing offline validation is not permission to resume hardware testing.");
         }
-        Err(error) => println!("Offline device validation: NOT READY: {error}. Inspection still succeeded; use profile validate for a failing exit status."),
+        Some(error) => println!("Offline device validation: NOT READY: {error}. Inspection still succeeded; use profile validate for a failing exit status."),
     }
     println!("Inspection was offline; no HID device was discovered or opened, no reports were replayed, and no files were changed.");
     Ok(())

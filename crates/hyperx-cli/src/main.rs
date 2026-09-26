@@ -108,6 +108,27 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum ProfileCommand {
+    /// Resolve one explicitly named assignment offline into a confirmed macro target.
+    ResolveMacro {
+        file: PathBuf,
+        output: PathBuf,
+        #[arg(long)]
+        source_id: String,
+        #[arg(long)]
+        control: String,
+        #[arg(long)]
+        macro_id: String,
+        /// Import a separate timeline under a fresh ID; otherwise use this profile's library.
+        #[arg(long)]
+        macro_file: Option<PathBuf>,
+    },
+    /// Explicitly omit one unresolved source assignment in a new offline profile.
+    OmitUnresolved {
+        file: PathBuf,
+        output: PathBuf,
+        #[arg(long)]
+        source_id: String,
+    },
     /// Inspect an OpenHyperX TOML file offline, including omissions and macro timelines.
     #[command(name = "inspect")]
     InspectSoftware { file: PathBuf },
@@ -690,10 +711,7 @@ fn load_button_macro(
 }
 
 fn load_macro_definition(path: &Path) -> Result<MacroDefinition> {
-    let source = fs::read_to_string(path)
-        .with_context(|| format!("failed to read macro file {}", path.display()))?;
-    toml::from_str(&source)
-        .with_context(|| format!("failed to parse macro file {}", path.display()))
+    hyperx_app::load_macro(path)
 }
 
 fn main() -> Result<()> {
@@ -737,6 +755,42 @@ const MAX_NGENUITY_LEGACY_PRESET_BYTES: u64 = 16 * 1024 * 1024;
 
 fn profile(command: ProfileCommand) -> Result<()> {
     match command {
+        ProfileCommand::ResolveMacro {
+            file,
+            output,
+            source_id,
+            control,
+            macro_id,
+            macro_file,
+        } => {
+            let source = hyperx_app::load_profile(&file)?;
+            let imported = macro_file
+                .as_deref()
+                .map(hyperx_app::load_macro)
+                .transpose()?;
+            let edited = hyperx_app::resolve_macro_assignment(
+                &source, &source_id, &control, &macro_id, imported,
+            )?;
+            hyperx_app::save_profile_new(&output, &edited, &[])?;
+            println!(
+                "Resolved {source_id:?} into {control} -> macro {macro_id:?}; saved new file {}.",
+                output.display()
+            );
+            println!("{} unresolved assignment(s) remain. Offline: no HID device was discovered or opened; no settings were applied or saved onboard.", edited.unresolved_button_assignments.len());
+            Ok(())
+        }
+        ProfileCommand::OmitUnresolved {
+            file,
+            output,
+            source_id,
+        } => {
+            let source = hyperx_app::load_profile(&file)?;
+            let edited = hyperx_app::omit_unresolved_assignment(&source, &source_id)?;
+            hyperx_app::save_profile_new(&output, &edited, &[])?;
+            println!("Explicitly omitted unresolved entry {source_id:?}; saved new file {}. Omitted controls preserve device state; existing explicit bindings remain unchanged.", output.display());
+            println!("Offline: no HID device was discovered or opened; no settings were applied or saved onboard.");
+            Ok(())
+        }
         ProfileCommand::InspectSoftware { file } => profile_tools::inspect(&file),
         ProfileCommand::ExportCapture {
             file,
@@ -956,22 +1010,7 @@ fn load_software_profile(path: &Path) -> Result<(SoftwareProfile, PulsefireRaidS
 }
 
 fn load_software_profile_file(path: &Path) -> Result<SoftwareProfile> {
-    // Read through a bounded handle rather than an unchecked metadata/read pair.
-    // Profiles may contain macro timelines; avoid unbounded allocations even
-    // when a file grows between opening and reading it.
-    use std::io::Read;
-    const MAX_PROFILE_BYTES: u64 = 1024 * 1024;
-    let file = fs::File::open(path)
-        .with_context(|| format!("failed to open software profile {}", path.display()))?;
-    let mut source = String::new();
-    file.take(MAX_PROFILE_BYTES + 1)
-        .read_to_string(&mut source)
-        .with_context(|| format!("failed to read software profile {}", path.display()))?;
-    if source.len() as u64 > MAX_PROFILE_BYTES {
-        return Err(anyhow!("software profile exceeds the 1 MiB limit"));
-    }
-    toml::from_str(&source)
-        .with_context(|| format!("failed to parse software profile {}", path.display()))
+    hyperx_app::load_profile(path)
 }
 
 fn print_software_profile_preview(preview: &PulsefireRaidProfilePreview) {

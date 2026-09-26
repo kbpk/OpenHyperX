@@ -43,6 +43,12 @@ impl FromStr for RgbColor {
             return Err(ColorParseError::InvalidLength);
         }
 
+        // Validate ASCII before byte slicing: a six-byte Unicode string can
+        // otherwise split a UTF-8 codepoint and panic in an interactive field.
+        if !hex.bytes().all(|value| value.is_ascii_hexdigit()) {
+            return Err(ColorParseError::InvalidHex);
+        }
+
         let red = u8::from_str_radix(&hex[0..2], 16).map_err(|_| ColorParseError::InvalidHex)?;
         let green = u8::from_str_radix(&hex[2..4], 16).map_err(|_| ColorParseError::InvalidHex)?;
         let blue = u8::from_str_radix(&hex[4..6], 16).map_err(|_| ColorParseError::InvalidHex)?;
@@ -88,6 +94,13 @@ mod tests {
         assert_eq!("FF8000".parse(), Ok(RgbColor::new(0xFF, 0x80, 0x00)));
         assert_eq!("#00ff7F".parse(), Ok(RgbColor::new(0x00, 0xFF, 0x7F)));
         assert_eq!(RgbColor::new(0x01, 0xA2, 0x0F).to_string(), "#01A20F");
+    }
+
+    #[test]
+    fn unicode_colors_return_errors_without_splitting_utf8_codepoints() {
+        for input in ["€€", "#€€", "ąabcd", "ab😀", "#中abc"] {
+            assert!(input.parse::<RgbColor>().is_err());
+        }
     }
 
     #[test]

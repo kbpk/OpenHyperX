@@ -57,15 +57,59 @@ their confidence level are recorded in [docs/research.md](docs/research.md).
 
 ```text
 crates/
+  hyperx-app/       shared offline profile operations for all clients
   hyperx-core/      platform-independent models and capabilities
   hyperx-hid/       HID discovery and transport boundary
   hyperx-protocol/  packet formatting, decoding and wire tracing
   hyperx-devices/   per-model descriptors and future drivers
   hyperx-cli/       command-line application
+  hyperx-tui/       offline terminal profile editor (Ratatui)
 ```
 
 See [docs/architecture.md](docs/architecture.md) for dependency and safety
 boundaries.
+
+## Offline TUI
+
+Rust 1.88+ is required. `hyperx-tui` uses Ratatui 0.30.2 with Crossterm 0.29.
+It currently edits **files only**, not a live mouse. Run it in an interactive
+terminal (Windows Terminal / PowerShell on Windows):
+
+```powershell
+& '.\target\x86_64-pc-windows-msvc\debug\hyperx-tui.exe' --demo
+& '.\target\x86_64-pc-windows-msvc\debug\hyperx-tui.exe' '.\my-profile.toml'
+```
+
+For native Windows Cargo builds without an explicit target, binaries are under
+`target\debug` instead. On Linux/macOS use `cargo run --bin hyperx-tui -- --demo`.
+Demo settings are visibly labeled, never presented as detected device state.
+No input file starts an empty, partial Raid-targeted draft, not default mouse
+settings. The views are Performance, Buttons, Macros, Lighting and Profiles.
+
+Click tabs and action buttons, drag DPI sliders or click a DPI number for exact
+input. Performance provides stage add/remove, active selection, stage colors,
+polling choices and the primary-button layout. Lighting has independent Solid
+color fields for wheel/logo. These controls edit the offline draft without TOML.
+The wheel over a DPI bar adjusts one step; elsewhere it scrolls the view.
+Use `Tab` or `1`–`5` to switch views, `e` to edit the current section's advanced TOML,
+`a` for the complete document, `v` for offline validation and `d` for the file
+diff. Inside the editor, `Ctrl+S` accepts the draft and `Esc` cancels. Outside
+it, `s` saves to a **new** path, `o` opens a file, `m` imports a macro timeline,
+`r` resolves an explicit unknown assignment and `x` deliberately omits one.
+`q` exits, with confirmation for unsaved document changes. Unknown values stay
+unknown; invalid-but-parseable drafts remain editable and are clearly NOT READY.
+Save to mouse is unavailable; neither demo nor normal TUI opens/enumerates HID.
+
+Headless executable checks require neither a terminal nor a mouse:
+
+```text
+hyperx-tui --demo --check
+hyperx-tui --demo --render
+hyperx-tui my-profile.toml --render --width 120 --height 40
+```
+
+See [TUI controls and limits](docs/tui.md). Real-time device control and the
+Tauri GUI remain later milestones, after hardware communication is stable.
 
 ## Build and run on Windows from WSL
 
@@ -459,9 +503,13 @@ publishing them.
    path plus atomic primary-click swaps are implemented; repeat modes, longer
    macros and non-Solid firmware lighting remain capture-gated.
 5. **Software profiles (first iteration implemented):** offline validation,
-   current-state preview and confirmed runtime apply; onboard persistence stays
+   current-state preview and experimental runtime apply (currently blocked on
+   an empty native readback); onboard persistence stays
    separate and explicit.
-6. **GUI:** Tauri client using only the public core API.
+6. **TUI (offline implemented):** shared application-layer profile editing,
+   validation, diff and explicit unresolved-assignment handling. Hardware controls
+   remain unavailable until confirmed separately.
+7. **GUI:** Tauri client using the same shared application/core API.
 
 See [docs/reverse-engineering.md](docs/reverse-engineering.md) for the capture
 workflow and [docs/adding-device.md](docs/adding-device.md) for registry rules.

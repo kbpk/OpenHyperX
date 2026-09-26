@@ -72,7 +72,7 @@ impl DpiCapabilities {
                 maximum: self.maximum,
             });
         }
-        if self.step == 0 || (dpi - self.minimum) % self.step != 0 {
+        if self.step == 0 || !(dpi - self.minimum).is_multiple_of(self.step) {
             return Err(DpiValidationError::NotStepAligned {
                 dpi,
                 minimum: self.minimum,

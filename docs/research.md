@@ -1764,6 +1764,64 @@ aggregate used `-SkipDeviceDiscovery`, no hardware-test flag, executable export
 integration tests and TOML-inspection smoke checks. No HID was enumerated/opened
 and no device report was sent during this work.
 
+### Shared offline profiles and terminal UI (2026-09-27)
+
+`hyperx-app` provides bounded TOML readers, typed transactional section edits,
+offline model validation, semantic file baselines and exclusive new-file saves.
+CLI capture export/inspection reuse these operations. Explicit macro resolution
+requires an actual definition and target, preserves unrelated unresolved entries
+and rejects implicit binding/library overwrites or moving a known runtime source
+to another physical control. Explicit omission clears only the chosen diagnostic,
+not an already supplied binding. Neither operation touches hardware.
+
+`hyperx-tui` adds Performance, Buttons, Macros, Lighting and Profiles views,
+section/full TOML editing, macro import, resolution/omission, validation and file
+diff. Demo/file data and omissions are labeled, never presented as a live read or
+defaults. Unsupported drafts remain inspectable and savable to a new file; apply
+and onboard save are unavailable. The client uses the shared app API, not vendor
+report details. This is an initial typed editor, not a recorder or slider UI.
+
+The user requested latest stable Ratatui: [0.30.2](https://docs.rs/ratatui/0.30.2/ratatui/)
+with Crossterm 0.29.0. Workspace MSRV is now Rust 1.88 and Serde is 1.0.228 to
+resolve the new dependency graph. No packet formats or Legacy schema changed.
+All 224 unit/executable tests and workspace builds pass on Linux and native
+Windows; Linux fmt and Clippy (`-D warnings`) pass. The aggregated native check
+used `-SkipDeviceDiscovery` and no hardware-test flag; TUI `--check`/`--render`
+also passed. An interactive Linux PTY smoke test switched tabs, opened/cancelled
+the editor and exited with the original terminal settings restored. Interactive
+Windows console behavior still needs an operator smoke test; macOS execution
+is configured in CI, not verified locally. No device enumeration, HID open or
+vendor reports occurred. The earlier empty hardware readback and current physical
+state remain unresolved; offline UI does not constitute recovery.
+
+### Mouse-enabled offline TUI forms (2026-09-27)
+
+Performance now uses direct model-bounded DPI sliders, exact numeric/color
+inputs, explicit stage add/last-remove/activation, polling choices and the
+coupled primary layout. Lighting offers independent declared Solid-zone fields.
+Controls call typed file-edit operations in `hyperx-app`, validate the edited
+field and preserve unrelated settings, partial/unresolved markers and source
+provenance. Missing values are not defaulted; editing DPI explicitly links X/Y.
+Removing an active last level requires selecting another active level first.
+Advanced TOML editors remain for all sections, including bindings/timelines.
+
+Mouse capture supports visible tab/action/field clicks, DPI drag/step-wheel,
+viewport scrolling, Unicode cursor positioning and modal accept/cancel/discard.
+Modal and resize boundaries clear stale/underlying hit targets. Mouse and paste
+modes are disabled on exit. A six-byte non-ASCII RGB input now returns a parser
+error rather than panicking at a UTF-8 byte boundary. No vendor packet changed.
+
+All 238 unit/executable tests and workspace builds pass on Linux and native
+Windows; Linux fmt and Clippy (`-D warnings`) pass. The native aggregate used
+`-SkipDeviceDiscovery` with no hardware-test flag; headless TUI check/render
+also passed. A Linux PTY smoke test fed real terminal mouse events to drag
+demo DPI from 200 to 16000, click Lighting, enter a zone color, accept, then quit
+with explicit draft discard. It emitted mouse-disable sequences and restored
+the original terminal settings. This edited demo FILE data, not the device;
+no HID was enumerated/opened or report sent. Native Windows physical-console
+mouse behavior still needs an operator smoke test. The existing runtime-read
+failure and unknown hardware state are not affected by these offline changes.
+
 ## Unknowns and required evidence
 
 | Area | Current state | Required next experiment |
