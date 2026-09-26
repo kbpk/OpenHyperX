@@ -101,7 +101,10 @@ pub struct NamedMacro {
     pub definition: MacroDefinition,
 }
 
-/// Source assignment retained until its physical control is decoded.
+/// Source assignment retained until its physical control or definition is known.
+/// Legacy imports retain opaque source IDs; capture exports use explicit
+/// diagnostic labels such as `runtime:button5` for an unreadable macro timeline.
+/// These labels are provenance, never vendor slot IDs or executable bindings.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct UnresolvedButtonAssignment {

@@ -7,6 +7,7 @@ mod device;
 mod lighting;
 mod performance;
 mod profile;
+mod profile_diff;
 
 pub use button::{
     ButtonBinding, KeyState, KeyboardMacroEvent, KeyboardUsage, KeyboardUsageParseError,
@@ -28,4 +29,8 @@ pub use profile::{
     NamedMacro, SoftwareButtonBinding, SoftwareDpiProfile, SoftwareLightingMode,
     SoftwareLightingProfile, SoftwarePollingProfile, SoftwareProfile, SoftwareProfileSource,
     UnresolvedButtonAssignment,
+};
+pub use profile_diff::{
+    diff_software_profiles, SoftwareProfileDiff, SoftwareProfileDiffError,
+    SoftwareProfileFieldChange,
 };

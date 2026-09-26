@@ -8,8 +8,10 @@ pub mod pulsefire_raid;
 use hyperx_core::{DeviceDescriptor, UsbId};
 
 pub use pulsefire_raid::{
-    PulsefireRaid, PulsefireRaidError, PulsefireRaidOnboardMacros, PulsefireRaidProfileChange,
-    PulsefireRaidProfileError, PulsefireRaidProfilePreview, PulsefireRaidRuntimeAssignment,
+    export_pulsefire_raid_capture, PulsefireRaid, PulsefireRaidCaptureExport,
+    PulsefireRaidCaptureExportError, PulsefireRaidError, PulsefireRaidOnboardMacros,
+    PulsefireRaidProfileByteDiff, PulsefireRaidProfileChange, PulsefireRaidProfileError,
+    PulsefireRaidProfilePreview, PulsefireRaidProfileReadbackDiff, PulsefireRaidRuntimeAssignment,
     PulsefireRaidSoftwareProfile, PULSEFIRE_RAID, PULSEFIRE_RAID_ACKNOWLEDGEMENT_INTERFACE,
     PULSEFIRE_RAID_DPI,
 };

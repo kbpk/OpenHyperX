@@ -4,6 +4,9 @@ use hyperx_core::{
 };
 use thiserror::Error;
 
+mod inspection;
+pub use inspection::{inspect_captured_report, RaidReportInspection};
+
 // Shared interface-1 feature framing, despite the historical DIRECT_* names:
 // descriptor payload is 263 bytes; all API offsets include the report ID byte.
 // Direct RGB, profile and macro packets therefore all use 264-byte buffers.
@@ -128,6 +131,23 @@ impl PulsefireRaidControl {
         Self::WheelTiltLeft,
         Self::WheelTiltRight,
     ];
+
+    /// Stable public profile/control ID, distinct from vendor slots/offsets.
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::LeftClick => "left-click",
+            Self::RightClick => "right-click",
+            Self::MiddleClick => "wheel-click",
+            Self::Button4 => "button4",
+            Self::Button5 => "button5",
+            Self::Button6 => "button6",
+            Self::Button7 => "button7",
+            Self::Button8 => "button8",
+            Self::Dpi => "dpi",
+            Self::WheelTiltLeft => "wheel-tilt-left",
+            Self::WheelTiltRight => "wheel-tilt-right",
+        }
+    }
 
     pub const fn name(self) -> &'static str {
         match self {
@@ -677,11 +697,13 @@ impl PerformanceProfile {
         Ok(())
     }
 
-    /// Validate polling, DPI layout/values and captured button records for save.
+    /// Validate polling, DPI layout/values and captured button records for writes.
     ///
-    /// Callers can use this before beginning the persistent transaction so an
-    /// unknown record or out-of-range enabled DPI fails without touching
-    /// onboard memory. Inspection through dpi_profile remains permissive.
+    /// Validate the unmodified baseline before any runtime patch or macro upload,
+    /// and before entering an onboard transaction. Also validate each final
+    /// runtime write image. Unknown records and out-of-range enabled DPI must
+    /// not be carried into a full-image write, even when changing another field.
+    /// Inspection through dpi_profile remains permissive.
     pub fn validate_confirmed_runtime_settings(&self) -> Result<(), PerformanceProfileError> {
         if self.section != ProfileSection::Runtime {
             return Err(PerformanceProfileError::ExpectedRuntimeSettingsSource(

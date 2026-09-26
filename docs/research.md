@@ -1690,6 +1690,80 @@ and both workspace builds pass. The last Windows check used
 `-SkipDeviceDiscovery` with no hardware-test switch: no HID device was opened
 and no additional vendor reports were sent.
 
+### Offline write guards and failure diagnostics (2026-09-26)
+
+Review of the failed run found a separate safety gap, not an established cause
+of that failure: older individual runtime setters accepted a valid read envelope
+without checking every setting in its body. Polling, primary-layout or binding
+updates could patch an otherwise empty image, and macro uploads preceded the
+shared profile-write check. All individual DPI/polling/button setters now validate
+the unmodified baseline using the same full validator as software-profile apply
+and onboard save. Macro-reference images are validated before definition uploads;
+the shared runtime write path checks the final image too. Inspection remains
+permissive. No opcode, timing, selector or hardware recovery behavior changed.
+
+Mock regressions cover ten mutation variants against eleven unusable snapshots,
+truncated/wrong-kind/wrong-section reads, injected read timeouts and failed/short
+selector/request writes. Macro-definition and reference failures stop without
+retry; multi-step apply failures stop remaining writes/readback/RGB. The mock
+records failed and unexpected TX attempts so stopping is checked explicitly,
+not inferred from an empty script. Readback errors now expose exact expected/
+actual byte differences including opaque offsets and flag an empty response body.
+These changes do not establish a fix for the native read failure or verify the
+current mouse state. No physical device was accessed during this work.
+Verification: all 170 unit/executable tests and workspace builds pass on Linux
+and native Windows; Linux fmt and Clippy (`-D warnings`) pass. Windows used
+`scripts/check-windows.ps1 -SkipDeviceDiscovery` without a hardware-test switch.
+
+### Offline profile diff and trace inspection (2026-09-26)
+
+OpenHyperX TOML `profile diff` is now separate from Legacy `.hxp` comparison.
+The reusable core comparator distinguishes settings/provenance, matches macro
+IDs, preserves event order and every timing, and does not interpret omissions
+as resets. Partial/unresolved files can be inspected without hardware permission.
+
+`profile inspect-capture` consumes normalized UTF-8 hex or existing `--trace`
+logs without HID access or replay. It recognizes only complete existing Raid
+codecs and exact observed ACK shapes, retaining source line/order/interface/
+direction. Unknown variants remain diagnostic. It reports permissive settings,
+unusable/empty snapshots, macro event streams when actually present, and raw
+diffs between consecutive same-section images. TX acceptance, transaction/ACK
+correlation, timestamps, transfer descriptors and physical persistence are
+not inferred. No new vendor commands, timing or device recovery was introduced.
+
+Offline inspection of the retained failed `apply.log` found all seven reports,
+decoded the original 1000 Hz image and attempted 500 Hz image, identified only
+offsets 01/18 between them, and flagged the final header-only/zero-body response.
+This used the saved file, not a fresh device read. All 185 unit/executable tests
+and workspace builds pass on Linux and native Windows. Linux fmt and Clippy
+(`-D warnings`) pass; the Windows aggregate smoke-tested both new commands on
+repository fixtures with `-SkipDeviceDiscovery` and no hardware-test flag.
+
+### Offline runtime-capture export and TOML inspection (2026-09-26)
+
+`profile export-capture INPUT OUTPUT --report N` now converts one explicitly
+selected, complete runtime RX image through the model driver's existing
+baseline validator. It exports only confirmed performance/ordinary mappings,
+marks the TOML partial and records unreadable macro references as unresolved
+diagnostics. It does not infer macro definitions/playback or lighting from
+adjacent packets, preserve opaque image bytes, overwrite files or send HID.
+`profile inspect` prints TOML settings, omissions, provenance and complete macro
+event/delay timelines; offline driver-readiness is separate from parsing success.
+No new vendor protocol facts or device recovery are claimed.
+
+The retained failed `apply.log` report 3 (source line 20) was exported offline
+outside Git: the historical 1000 Hz baseline, four stages and ordinary bindings
+were retained; Button 5's macro remained unresolved and blocked validation.
+Lighting and macro timelines were omitted, not replaced by defaults. Selecting
+report 7 (the empty response) failed without creating a destination. This was
+not a fresh read or restoration, and current hardware state remains unverified.
+
+All 195 unit/executable tests and workspace builds pass on Linux and native
+Windows. Linux fmt, Clippy (`-D warnings`) and whitespace checks pass. The native
+aggregate used `-SkipDeviceDiscovery`, no hardware-test flag, executable export
+integration tests and TOML-inspection smoke checks. No HID was enumerated/opened
+and no device report was sent during this work.
+
 ## Unknowns and required evidence
 
 | Area | Current state | Required next experiment |

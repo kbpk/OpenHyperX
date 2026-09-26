@@ -232,6 +232,37 @@ These checks do not open HID or change the mouse. `--onboard` checks encoding
 support only; it does not perform a save or read the currently assigned macro.
 
 Validate and preview an OpenHyperX software profile before applying it.
+Compare two OpenHyperX TOML files entirely offline:
+
+```text
+hyperx-cli profile diff BEFORE.toml AFTER.toml
+hyperx-cli profile inspect PROFILE.toml
+hyperx-cli profile inspect-capture captures/runtime.log
+hyperx-cli profile inspect-capture captures/reports.hex --raw --all-raw
+hyperx-cli profile export-capture captures/runtime.log captured.toml --report 3
+```
+
+Diff separates settings from metadata, includes macro playback, ordered events
+and every delay, and treats omitted fields as absent rather than device resets.
+It is a file comparison, not an apply plan or device-support validation.
+Capture inspection accepts UTF-8 hex reports or OpenHyperX `--trace` text logs,
+decodes known Raid packet families, flags empty snapshots and reports raw image
+changes. Unknown packets remain uninterpreted. It never opens HID, replays
+packets, changes files or parses binary `.pcapng`. See
+[offline tooling](docs/profile-format.md#offline-comparison-and-capture-inspection).
+
+`inspect` summarizes supplied settings, omissions, unresolved assignments and
+macro timelines, with a separate offline device-readiness result. It can inspect
+files that cannot be applied; use `validate` for an exit-status readiness gate.
+`export-capture` creates a new, explicitly partial TOML from the selected
+one-based report number shown by `inspect-capture`, never a guessed latest image.
+Only a complete, usable runtime RX image is accepted; host writes, onboard
+images, unknown directions and empty/malformed snapshots are refused. DPI,
+polling and confirmed mappings are exported; lighting and macro timelines are
+not inferred. Macro references become unresolved entries that block apply.
+Existing destination files are never overwritten. Export never applies settings
+or saves onboard, and a historical snapshot is not the mouse's current state.
+
 Whole-profile apply is not yet hardware-validated: its first polling-only test
 stopped on an empty runtime readback, and subsequent reads remain unusable.
 Do not continue mutable tests until physical reconnect and a valid baseline

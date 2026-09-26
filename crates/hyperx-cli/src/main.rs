@@ -10,9 +10,10 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use hyperx_core::{
-    ButtonBinding, DeviceDescriptor, DpiProfile, HidInterfaceInfo, KeyboardUsage, MacroDefinition,
-    MouseFunction, MultimediaFunction, PollingRate, PrimaryButtonLayout, RgbColor,
-    SoftwareLightingEffect, SoftwareLightingProgram, SoftwareProfile, UsbId, WindowsShortcut,
+    diff_software_profiles, ButtonBinding, DeviceDescriptor, DpiProfile, HidInterfaceInfo,
+    KeyboardUsage, MacroDefinition, MouseFunction, MultimediaFunction, PollingRate,
+    PrimaryButtonLayout, RgbColor, SoftwareLightingEffect, SoftwareLightingProgram,
+    SoftwareProfile, UsbId, WindowsShortcut,
 };
 use hyperx_devices::{
     find_supported_device, PulsefireRaid, PulsefireRaidOnboardMacros, PulsefireRaidProfilePreview,
@@ -21,7 +22,7 @@ use hyperx_devices::{
 };
 use hyperx_hid::{HidApiDiscovery, HidApiTransport, HidDiscovery, HidTransport};
 use hyperx_protocol::{
-    capture::{diff_captures, parse_hex_capture},
+    capture::{diff_captures, parse_hex_capture, parse_report_log, CapturedReport},
     format_hex,
     hid_descriptor::parse_report_layouts,
     ngenuity_legacy::{
@@ -29,9 +30,14 @@ use hyperx_protocol::{
         parse_ngenuity_legacy_preset, NgenuityContainer, NgenuityInputAction, NgenuityMacro,
         NgenuityMacroItem, NgenuityMouseButton, NgenuityPreset,
     },
-    pulsefire_raid::{PerformanceProfile, PulsefireRaidControl},
+    pulsefire_raid::{
+        inspect_captured_report, PerformanceProfile, ProfileSection, PulsefireRaidControl,
+        RaidReportInspection,
+    },
 };
 use tracing_subscriber::EnvFilter;
+
+mod profile_tools;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -102,6 +108,30 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum ProfileCommand {
+    /// Inspect an OpenHyperX TOML file offline, including omissions and macro timelines.
+    #[command(name = "inspect")]
+    InspectSoftware { file: PathBuf },
+    /// Export one explicitly selected runtime RX snapshot into a new partial TOML.
+    ExportCapture {
+        file: PathBuf,
+        output: PathBuf,
+        /// One-based report number printed by inspect-capture (not a source line).
+        #[arg(long, value_name = "NUMBER")]
+        report: std::num::NonZeroUsize,
+    },
+    /// Compare OpenHyperX TOML files offline, including macro event timings.
+    #[command(name = "diff")]
+    DiffSoftware { before: PathBuf, after: PathBuf },
+    /// Inspect exported hex reports or OpenHyperX --trace logs offline; never replay.
+    InspectCapture {
+        file: PathBuf,
+        /// Show complete raw packets, including unknown reports.
+        #[arg(long)]
+        raw: bool,
+        /// Print all byte differences instead of the first 32 per profile.
+        #[arg(long)]
+        all_raw: bool,
+    },
     /// Validate a software TOML profile without discovering or opening HID.
     Validate { file: PathBuf },
     /// Experimental composed runtime apply; hardware validation is pending.
@@ -707,6 +737,41 @@ const MAX_NGENUITY_LEGACY_PRESET_BYTES: u64 = 16 * 1024 * 1024;
 
 fn profile(command: ProfileCommand) -> Result<()> {
     match command {
+        ProfileCommand::InspectSoftware { file } => profile_tools::inspect(&file),
+        ProfileCommand::ExportCapture {
+            file,
+            output,
+            report,
+        } => profile_tools::export_capture(&file, &output, report),
+        ProfileCommand::DiffSoftware { before, after } => {
+            let diff = diff_software_profiles(
+                &load_software_profile_file(&before)?,
+                &load_software_profile_file(&after)?,
+            )?;
+            for (label, changes) in [
+                ("Settings", diff.settings),
+                ("Metadata / unresolved provenance", diff.metadata),
+            ] {
+                println!("{label}:");
+                if changes.is_empty() {
+                    println!("  No differences.");
+                }
+                for change in changes {
+                    println!(
+                        "  {}: {} -> {}",
+                        change.field,
+                        change.before.as_deref().unwrap_or("<not present>"),
+                        change.after.as_deref().unwrap_or("<not present>")
+                    );
+                }
+            }
+            println!("File comparison only, not device state or a validated apply plan. Omitted setting sections/buttons preserve current device state when applied.");
+            println!("Offline: no HID device was discovered or opened; no reports were replayed.");
+            Ok(())
+        }
+        ProfileCommand::InspectCapture { file, raw, all_raw } => {
+            inspect_capture_file(&file, raw, all_raw)
+        }
         ProfileCommand::Validate { file } => {
             let (profile, settings) = load_software_profile(&file)?;
             println!(
@@ -885,6 +950,12 @@ fn profile(command: ProfileCommand) -> Result<()> {
 }
 
 fn load_software_profile(path: &Path) -> Result<(SoftwareProfile, PulsefireRaidSoftwareProfile)> {
+    let profile = load_software_profile_file(path)?;
+    let validated = PulsefireRaidSoftwareProfile::new(&profile)?;
+    Ok((profile, validated))
+}
+
+fn load_software_profile_file(path: &Path) -> Result<SoftwareProfile> {
     // Read through a bounded handle rather than an unchecked metadata/read pair.
     // Profiles may contain macro timelines; avoid unbounded allocations even
     // when a file grows between opening and reading it.
@@ -899,10 +970,8 @@ fn load_software_profile(path: &Path) -> Result<(SoftwareProfile, PulsefireRaidS
     if source.len() as u64 > MAX_PROFILE_BYTES {
         return Err(anyhow!("software profile exceeds the 1 MiB limit"));
     }
-    let profile: SoftwareProfile = toml::from_str(&source)
-        .with_context(|| format!("failed to parse software profile {}", path.display()))?;
-    let validated = PulsefireRaidSoftwareProfile::new(&profile)?;
-    Ok((profile, validated))
+    toml::from_str(&source)
+        .with_context(|| format!("failed to parse software profile {}", path.display()))
 }
 
 fn print_software_profile_preview(preview: &PulsefireRaidProfilePreview) {
@@ -1596,6 +1665,10 @@ fn info(discovery: &dyn HidDiscovery, show_descriptor: bool) -> Result<()> {
 
 fn print_runtime_profile(profile: &PerformanceProfile) {
     println!("Runtime profile:");
+    print_profile_settings(profile);
+}
+
+fn print_profile_settings(profile: &PerformanceProfile) {
     match profile.polling_rate() {
         Ok(polling_rate) => println!("  Polling rate: {} Hz", polling_rate.hz()),
         Err(error) => println!("  Polling rate: <decode error: {error}>"),
@@ -1609,6 +1682,98 @@ fn print_runtime_profile(profile: &PerformanceProfile) {
 
     println!("  Buttons:");
     print_button_profile(profile, "    ");
+}
+
+fn load_report_log(path: &Path) -> Result<hyperx_protocol::capture::ParsedReportLog> {
+    use std::io::Read;
+    const MAX_CAPTURE_BYTES: u64 = 16 * 1024 * 1024;
+    let file = fs::File::open(path)
+        .with_context(|| format!("failed to open capture {}", path.display()))?;
+    let mut source = String::new();
+    file.take(MAX_CAPTURE_BYTES + 1)
+        .read_to_string(&mut source)
+        .context("failed to read capture; use UTF-8 text, not binary pcapng")?;
+    if source.len() as u64 > MAX_CAPTURE_BYTES {
+        return Err(anyhow!("capture exceeds the 16 MiB limit"));
+    }
+    Ok(parse_report_log(&source)?)
+}
+
+fn inspect_capture_file(path: &Path, raw: bool, all_raw: bool) -> Result<()> {
+    let log = load_report_log(path)?;
+    println!("Offline Pulsefire Raid interpretation: {:?}; {} report(s), {} ignored console/comment line(s).", log.format, log.records.len(), log.ignored_lines);
+    println!("Assumes reports belong to Pulsefire Raid. Raw bytes/collection numbers alone do not establish model or physical-device identity. TX logs show attempted sends, not proof of acceptance; ACK patterns do not prove persistence.");
+    let mut previous_runtime: Option<PerformanceProfile> = None;
+    let mut previous_onboard: Option<PerformanceProfile> = None;
+    for (index, record) in log.records.iter().enumerate() {
+        println!(
+            "Report {} (line {}): {} iface={} length={}",
+            index + 1,
+            record.line,
+            record.report.direction.map_or_else(
+                || "direction unknown".into(),
+                |direction| direction.to_string()
+            ),
+            record
+                .interface
+                .map_or_else(|| "unknown".into(), |interface| interface.to_string()),
+            record.report.bytes.len()
+        );
+        if raw {
+            println!("  Raw: {}", format_hex(&record.report.bytes));
+        }
+        match inspect_captured_report(record) {
+            RaidReportInspection::Profile(profile) => {
+                println!("  Profile image: {:?} {:?}", profile.section(), profile.kind());
+                let empty = profile.as_bytes()[3..].iter().all(|byte| *byte == 0);
+                if empty {
+                    println!("  WARNING: empty body after the report header; not a usable settings snapshot. Do not write, retry or infer restored state from this response.");
+                } else {
+                    if profile.section() == ProfileSection::Runtime {
+                        if let Err(error) = profile.validate_confirmed_runtime_settings() {
+                            println!("  WARNING: not a safe runtime write baseline: {error}");
+                        }
+                    }
+                    print_profile_settings(&profile);
+                }
+                let previous = match profile.section() { ProfileSection::Runtime => &mut previous_runtime, ProfileSection::Onboard => &mut previous_onboard };
+                if let Some(before) = previous.as_ref() {
+                    let captured = |image: &PerformanceProfile| CapturedReport { direction: None, bytes: image.as_bytes().to_vec() };
+                    let changes = diff_captures(&[captured(before)], &[captured(&profile)]);
+                    let changes = changes.first().map_or(&[][..], |diff| diff.changes.as_slice());
+                    println!("  Raw diff against previous {:?} image: {} byte(s), including envelope/opcode; not transaction/readback correlation.", profile.section(), changes.len());
+                    let limit = if all_raw { changes.len() } else { 32 };
+                    for change in changes.iter().take(limit) {
+                        println!("    0x{:04X}: {} -> {}", change.offset,
+                            change.before.map_or_else(|| "--".into(), |byte| format!("0x{byte:02X}")),
+                            change.after.map_or_else(|| "--".into(), |byte| format!("0x{byte:02X}")));
+                    }
+                    if changes.len() > limit { println!("    {} more byte(s); use --all-raw.", changes.len() - limit); }
+                }
+                *previous = Some(*profile);
+            }
+            RaidReportInspection::ProfileSelector(section) => println!("  Confirmed {section:?} profile selector."),
+            RaidReportInspection::ProfileReadRequest => println!("  Confirmed profile read request; section comes from the preceding selector."),
+            RaidReportInspection::VendorSessionPhase(phase) => println!("  Confirmed fixed volatile vendor-session phase {phase}; not a reset/firmware operation."),
+            RaidReportInspection::DirectRgb { wheel, logo } => println!("  Volatile direct RGB: wheel={wheel}, logo={logo}; needs keepalive, not onboard persistence."),
+            RaidReportInspection::OnboardSolidSnapshot { index, colors } => {
+                println!("  Confirmed onboard Solid auxiliary snapshot index {index}; not proof of a committed save.");
+                if let Some((wheel, logo)) = colors { println!("  wheel={wheel}, logo={logo}"); }
+            }
+            RaidReportInspection::RuntimeMacro(definition) => {
+                println!("  Runtime macro for {}: playback={}, {} event(s)", definition.control().name(), definition.playback(), definition.events().len());
+                for (index, event) in definition.events().iter().enumerate() {
+                    println!("    Event {}: {:?} {:?}; delay {} ms", index + 1, event.state, event.input, event.delay_ms);
+                }
+                println!("  Definition is observed in this packet, not recovered from a profile reference or proof of physical playback.");
+            }
+            RaidReportInspection::Acknowledgement { opcode } => println!("  Observed acknowledgement pattern for opcode 0x{opcode:02X}; not correlated with a pending transaction."),
+            RaidReportInspection::InvalidKnownReport(reason) => println!("  WARNING: unrecognized/invalid variant of a known packet family: {reason}"),
+            RaidReportInspection::Unknown => println!("  Unknown/unhandled packet or non-configuration collection; not interpreted. Use --raw to inspect complete bytes."),
+        }
+    }
+    println!("Inspection was offline; no HID device was discovered or opened, no reports were replayed, and no files were changed.");
+    Ok(())
 }
 
 fn print_button_profile(profile: &PerformanceProfile, indent: &str) {

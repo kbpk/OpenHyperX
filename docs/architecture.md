@@ -96,7 +96,7 @@ or unrelated Legacy startup profile writes are replayed.
 Portable profiles in `hyperx-core` contain optional performance, named binding,
 coupled primary-layout, macro-library and lighting sections. No field contains
 USB reports. Omitted sections mean preserve, not reset. Source provenance and
-unresolved Legacy assignment IDs are never treated as configuration commands.
+unresolved Legacy/capture assignment IDs are never treated as configuration commands.
 
 `PulsefireRaidSoftwareProfile::new` in the model driver validates all supplied
 values/references offline. Its private fields preserve the evidence gate for
@@ -108,6 +108,14 @@ binding records; a valid header with an empty body is not a usable snapshot.
 Conservative one-second host pacing separates writes, but its hardware behavior
 and the minimum necessary interval remain unverified after a failed native run.
 
+The same baseline validator now gates every individual runtime-profile setter:
+DPI, polling, ordinary bindings, the primary pair and macros. Validation happens
+before patching the source image, not just before sending the result; otherwise
+replacing an invalid field could hide a bad read. A macro-reference image is
+also validated before uploading its definition. The shared full-image write
+method validates again as defense in depth. Read-only inspection deliberately
+remains permissive so unusual snapshots can still be investigated.
+
 The plan composes existing captured operations, one profile write per changed
 setting family/assignment. Unknown bytes and omitted fields remain intact. A
 macro definition precedes its reference, even if the reference matches already:
@@ -118,7 +126,34 @@ selects onboard memory. The CLI handles optional bounded foreground keepalive;
 RGB's stored effect may return afterward. Persistence remains a separate,
 explicit, acknowledged save API.
 
+Readback mismatches carry typed byte differences (offset including report ID,
+expected value, actual value) and an explicit empty-body flag. The CLI error
+renders all differences in hex, including opaque fields; this describes the
+observed response and does not infer a cause or prove the device's actual state.
+
 ## Crate responsibilities
+
+Offline software-profile comparison belongs to `hyperx-core`: it produces
+separate setting/provenance changes and matches macro IDs while preserving event
+order/timings. It accepts partial files for inspection without granting a write
+capability. CLI file parsing uses the bounded profile reader but does not require
+the device driver's apply validator for a diff.
+
+The protocol crate's text-capture reader preserves line/order/interface/direction
+from hex/trace input and its Raid inspector recognizes existing complete codecs.
+No transport handle is involved. CLI rendering labels unknown variants and
+empty bodies, and compares successive same-section images without claiming
+transaction correlation, successful TX, ACK completion or power-cycle persistence.
+Neither tool contains a replay path; real captures stay outside Git.
+
+The model driver owns the offline conversion of a single selected runtime RX
+image to a portable partial profile. It reuses complete baseline validation and
+stable public control IDs; the CLI only selects a report, renders warnings and
+creates a new TOML file. It does not correlate nearby macro/RGB packets or infer
+unreadable state. Macro references become non-executable unresolved assignments
+that use the existing apply gate. TOML inspection is parse-first, with a separate
+driver-readiness result, so unsupported/unresolved files remain inspectable
+without opening transport or granting permission to apply them.
 
 ### `hyperx-core`
 
@@ -139,7 +174,10 @@ It is deliberately separate from hardware-level `CapabilitySet`.
 
 Owns enumeration and the `HidTransport` trait. The trait covers feature
 reports, output reports and timed reads. `MockHidTransport` scripts expected TX
-and queued RX reports for tests without hardware.
+and queued RX reports for tests without hardware. It can inject short feature
+writes and read/write errors, and records every feature TX attempt, including
+unexpected/failed ones. Tests must inspect that history when asserting that a
+failure stopped further I/O; merely consuming the queued script is insufficient.
 
 The real opened-device adapter, reconnect policy and Windows-specific errors
 belong here. Device drivers select an exact HID collection and must not open

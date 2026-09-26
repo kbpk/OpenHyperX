@@ -151,15 +151,137 @@ The Raid driver supports these optional sections:
   read, so an omitted zone cannot safely be preserved. Black means off. Other
   effects and partial one-zone lighting are rejected in this profile path.
 
-Unresolved Legacy assignments block validation/application. Explicitly resolve
+Unresolved Legacy/capture assignments block validation/application. Explicitly resolve
 them into named controls or remove the entries to request only known fields;
 opaque IDs are never interpreted as physical buttons. Partial profiles without
 unresolved assignments can apply their explicitly supplied settings.
+
+## Offline comparison and capture inspection
+
+```text
+hyperx-cli profile diff BEFORE.toml AFTER.toml
+hyperx-cli profile inspect PROFILE.toml
+hyperx-cli profile inspect-capture reports.hex
+hyperx-cli profile inspect-capture runtime.log --raw --all-raw
+hyperx-cli profile export-capture runtime.log captured.toml --report 3
+```
+
+`diff` compares OpenHyperX TOML files, distinct from `diff-ngenuity-legacy` for
+`.hxp`. Settings and metadata are reported separately. DPI values/colors,
+explicit active selection, polling, primary layout, bindings and lighting
+zones are compared. Macro IDs are stable comparison keys: library/table order
+is ignored, event order, event type/input, playback and every `delay_ms` are not.
+Known keyboard aliases compare by HID usage; unknown names stay distinct.
+Duplicate or empty macro IDs are rejected instead of dropping a definition.
+
+`<not present>` means absent in that file, not disabled, black, a default or a
+device reset. Omitted setting sections/buttons preserve current state on apply;
+removing an event changes the macro timeline. Names, source metadata, partial
+flags, unresolved assignment IDs and unconfirmed source-active values are
+provenance, not hardware instructions. Partial/unresolved profiles can be
+compared even when they cannot be applied. Comparison is not capability
+validation, a device-state read, an apply plan or a guarantee that either file
+can be applied. Files retain the same 1 MiB bounded UTF-8/TOML reader.
+
+`inspect-capture` accepts a 16 MiB maximum UTF-8 text file containing either
+one complete hex report per line (optional TX/RX, comments) or an OpenHyperX
+`--trace` log. UTF-8 BOM, CRLF and ANSI console colors are supported. Trace
+mode preserves source line/order/direction/interface, ignores unrelated console
+lines and rejects malformed raw-report lines or mismatched declared report IDs.
+Hex exports have unknown interface/direction where not supplied; neither is
+invented. Timestamps and USB transfer descriptors are not inferred from text.
+Binary `.pcapng`, UTF-16 PowerShell exports and arbitrary Wireshark columns are
+not supported; export normalized UTF-8 reports first.
+
+Known Raid packet families are recognized only using complete confirmed codec
+layouts: runtime/onboard profile images, selectors/read requests, the fixed
+volatile session phases, direct two-zone RGB, indexed Solid save snapshots,
+runtime macros and exact observed acknowledgement patterns. Macro inspection
+shows individual transitions and delays. Profile references alone never reveal
+macro events/modes. Unknown, unsupported or malformed variants remain diagnostic
+and never enter a send path. Current standalone rainbow and onboard macro
+definition decoding are not added by this tool.
+
+Profile settings are decoded permissively for investigation, but invalid runtime
+baselines and empty bodies are marked clearly. Byte diffs compare successive
+images within the same section and include envelope/opcode and opaque bytes;
+this is NOT automatic write/readback correlation. By default the first 32
+changed offsets are printed; `--all-raw` shows all, and `--raw` prints full
+packets. Raw bytes/collection indexes do not establish physical-device identity;
+the caller must supply isolated Raid reports. TX trace lines show attempted
+sends, not transport success. ACK shapes prove neither transaction success nor
+persistence. A detected empty snapshot does not diagnose the hardware failure.
+Inspection/compare never discover/open HID, replay reports or change files.
+Capture logs can contain macro keystrokes; keep real logs outside Git.
+
+### Inspect a TOML profile
+
+`inspect` uses the bounded TOML reader without requiring apply readiness. It
+prints polling, DPI axes/colors and zero-based stage selection, primary layout,
+each supplied binding, lighting zones, omissions and unresolved source entries.
+Macros are shown in their original event order with down/up transitions,
+individual delays and a cumulative timeline; zero-delay events allow chords.
+`delay_ms` is after the event, including after the final event. Cumulative times
+describe the file, not measured physical playback.
+
+The final device-validation result is separate from successful inspection.
+Parseable unsupported devices/settings, empty profiles, duplicate macro IDs
+and unresolved imports can be displayed with `NOT READY`; inspection returns
+success because the file was inspected, not because it can be applied. Malformed
+TOML, unknown schema fields and files exceeding 1 MiB fail. Use `profile validate`
+for a nonzero status on a profile that is not ready. Neither command checks
+hardware state or guarantees the experimental composed-apply flow works.
+
+### Export one runtime RX snapshot
+
+Run `inspect-capture` first and explicitly choose `--report NUMBER`, a positive
+one-based report index (not a source line or Wireshark frame). Export never
+chooses a latest/best image automatically or falls back if the chosen image is
+invalid. It requires explicit RX metadata, a complete runtime device-read
+response and the existing full-baseline validator. Host-write/onboard images,
+other collections, empty bodies and unknown/invalid settings are refused before
+the destination is created. Isolated normalized `RX` lines may omit interface
+metadata; they remain an explicit caller assertion that these are Raid reports,
+not proof of model identity. Directionless hex cannot be exported.
+
+The new TOML has `partial = true` and includes confirmed DPI stages/colors,
+active selection, polling, the atomic primary pair and ordinary bindings.
+Independent X/Y values are retained faithfully for inspection, but current
+device validation still rejects those writes. Lighting remains absent, not
+black/off: this profile image cannot recover current wheel/logo colors/effects.
+Opaque vendor bytes are omitted; the file is not an exact image backup.
+
+Macro references cannot reveal their definitions. Export omits the executable
+binding and retains an `unresolved_button_assignments` diagnostic entry:
+
+```toml
+[[unresolved_button_assignments]]
+source_id = "runtime:button5"
+```
+
+This exporter-generated label identifies the omitted public control, not a
+vendor slot or an invented executable macro ID. Apply/validate remain blocked
+until you provide a real macro definition and binding and remove its resolved
+diagnostic entry, or explicitly remove the entry to preserve the omitted control.
+Nearby macro uploads, ACKs or RGB packets are not used to guess missing state.
+
+Export serializes and validates its selected image before using `create_new`
+for the output; it never overwrites an existing file, including the input itself.
+An I/O failure during writing may leave an incomplete new file and reports that
+fact. Report index, source line and available interface are retained in comments
+along with warnings, without private capture paths. There is no invented source
+format version or root `format_version`. Comments are not executable settings
+and may be lost on reserialization; partial/unresolved markers are TOML fields.
+Nothing is applied or saved onboard, and historical captured values must not be
+presented as a fresh read or as device recovery. Keep exports outside Git too.
 
 ## Runtime safety and persistence
 
 Every path requires a usable baseline layout, enabled DPI in range and confirmed
 binding records; a valid header with an empty body blocks even RGB-only apply.
+Individual DPI, polling and button setters use the same full-baseline gate,
+including before macro uploads. They will not "repair" an invalid snapshot by
+overwriting the requested field. Read-only `info` remains available for inspection.
 The driver plans and validates **all** steps against a fresh snapshot before
 the first mutation. Existing capture-backed operations run in deterministic
 order: polling, DPI, primary layout, individual assignments, then direct RGB.
@@ -173,6 +295,10 @@ requested macro uploads its definition immediately before its profile reference.
 After profile writes, a complete runtime-image readback must match the planned
 image before RGB is sent. This verifies profile bytes, **not** unreadable macro
 timelines, physical playback, LED output or power-cycle persistence.
+On mismatch, the error lists every changed report offset with expected/actual
+hex values, including unknown fields, and identifies an all-zero body explicitly.
+For example: `0x0018 expected=0x01 actual=0x00`. These are observations, not a
+diagnosis or a claim that the profile was restored.
 
 Multi-setting apply is not atomic. It stops on the first error; earlier changes
 may remain. There is no automatic retry or blind rollback. Inspect trace/state

@@ -30,6 +30,15 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $binary profile validate examples/profiles/pulsefire-raid.toml
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+& $binary profile inspect examples/profiles/pulsefire-raid.toml
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+& $binary profile diff examples/profiles/pulsefire-raid.toml examples/profiles/pulsefire-raid.toml
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+& $binary profile inspect-capture crates/hyperx-protocol/tests/fixtures/button4-ab-toggle.hex
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 if (-not $SkipDeviceDiscovery) {
     & $binary devices
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

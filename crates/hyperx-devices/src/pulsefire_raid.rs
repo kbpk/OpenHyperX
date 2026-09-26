@@ -17,12 +17,16 @@ use hyperx_protocol::pulsefire_raid::{
 };
 use thiserror::Error;
 
+mod capture_export;
 #[cfg(test)]
 mod runtime_safety_tests;
 mod software_profile;
+pub use capture_export::{
+    export_pulsefire_raid_capture, PulsefireRaidCaptureExport, PulsefireRaidCaptureExportError,
+};
 pub use software_profile::{
-    PulsefireRaidProfileChange, PulsefireRaidProfileError, PulsefireRaidProfilePreview,
-    PulsefireRaidSoftwareProfile,
+    PulsefireRaidProfileByteDiff, PulsefireRaidProfileChange, PulsefireRaidProfileError,
+    PulsefireRaidProfilePreview, PulsefireRaidProfileReadbackDiff, PulsefireRaidSoftwareProfile,
 };
 
 const PROFILE_PRELUDE_DELAY: Duration = Duration::from_millis(65);

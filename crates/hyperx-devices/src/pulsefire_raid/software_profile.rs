@@ -1,6 +1,6 @@
 //! Software-profile application composes existing captured runtime operations.
 //! It never selects onboard memory and never installs a background service.
-use std::{collections::BTreeSet, time::Duration};
+use std::{collections::BTreeSet, fmt, time::Duration};
 
 use hyperx_core::{
     SoftwareButtonBinding, SoftwareDpiProfile, SoftwareLightingMode, SoftwareProfile,
@@ -38,8 +38,63 @@ pub enum PulsefireRaidProfileError {
         #[source]
         source: PulsefireRaidError,
     },
-    #[error("runtime readback differs from the planned image; no RGB was sent and no automatic retry or rollback was attempted")]
-    ReadbackMismatch,
+    #[error("runtime readback differs from the planned image: {0}; no RGB was sent and no automatic retry or rollback was attempted")]
+    ReadbackMismatch(PulsefireRaidProfileReadbackDiff),
+}
+
+/// Raw offsets include the report ID at offset zero. Differences preserve the
+/// actual read without normalizing aliases, empty settings or opaque fields.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PulsefireRaidProfileByteDiff {
+    pub offset: usize,
+    pub expected: u8,
+    pub actual: u8,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PulsefireRaidProfileReadbackDiff {
+    pub empty_body: bool,
+    pub bytes: Vec<PulsefireRaidProfileByteDiff>,
+}
+
+impl PulsefireRaidProfileReadbackDiff {
+    fn between(expected: &PerformanceProfile, actual: &PerformanceProfile) -> Self {
+        Self {
+            // The envelope was already parsed. This flag describes bytes, not
+            // the cause of the failed read or the device's physical state.
+            empty_body: actual.as_bytes()[3..].iter().all(|byte| *byte == 0),
+            bytes: expected
+                .as_bytes()
+                .iter()
+                .zip(actual.as_bytes())
+                .enumerate()
+                .filter_map(|(offset, (&expected, &actual))| {
+                    (expected != actual).then_some(PulsefireRaidProfileByteDiff {
+                        offset,
+                        expected,
+                        actual,
+                    })
+                })
+                .collect(),
+        }
+    }
+}
+
+impl fmt::Display for PulsefireRaidProfileReadbackDiff {
+    fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.empty_body {
+            output.write_str("empty body after the report header; ")?;
+        }
+        write!(output, "{} differing byte(s)", self.bytes.len())?;
+        for byte in &self.bytes {
+            write!(
+                output,
+                "; 0x{:04X} expected=0x{:02X} actual=0x{:02X}",
+                byte.offset, byte.expected, byte.actual
+            )?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -61,14 +116,14 @@ fn invalid(message: impl Into<String>) -> PulsefireRaidProfileError {
 
 impl PulsefireRaidSoftwareProfile {
     /// Validate every supplied value, timeline and reference before HID I/O.
-    /// Unresolved Legacy assignments require explicit human resolution, rather
+    /// Unresolved Legacy/capture assignments require explicit human resolution, rather
     /// than silently dropping requested bindings during an otherwise valid apply.
     pub fn new(profile: &SoftwareProfile) -> Result<Self, PulsefireRaidProfileError> {
         if profile.device != PULSEFIRE_RAID.id {
             return Err(invalid(format!("unsupported device {:?}", profile.device)));
         }
         if !profile.unresolved_button_assignments.is_empty() {
-            return Err(invalid("unresolved Legacy button assignments remain; resolve them into [buttons] or explicitly remove them before applying"));
+            return Err(invalid("unresolved button assignments remain (Legacy source targets or unreadable capture macros); resolve them into [buttons] or explicitly remove them to preserve omitted controls before applying"));
         }
         let mut warnings = Vec::new();
         if profile.partial {
@@ -346,17 +401,12 @@ impl PulsefireRaidSoftwareProfile {
 }
 
 fn control_by_id(id: &str) -> Option<PulsefireRaidControl> {
-    Some(match id {
-        "wheel-click" => PulsefireRaidControl::MiddleClick,
-        "button4" => PulsefireRaidControl::Button4,
-        "button5" => PulsefireRaidControl::Button5,
-        "button6" => PulsefireRaidControl::Button6,
-        "button7" => PulsefireRaidControl::Button7,
-        "button8" => PulsefireRaidControl::Button8,
-        "dpi" => PulsefireRaidControl::Dpi,
-        "wheel-tilt-left" => PulsefireRaidControl::WheelTiltLeft,
-        "wheel-tilt-right" => PulsefireRaidControl::WheelTiltRight,
-        _ => return None,
+    PulsefireRaidControl::ALL.into_iter().find(|control| {
+        control.id() == id
+            && !matches!(
+                control,
+                PulsefireRaidControl::LeftClick | PulsefireRaidControl::RightClick
+            )
     })
 }
 
@@ -464,7 +514,9 @@ impl<T: HidTransport> PulsefireRaid<T> {
                     source,
                 })?;
             if actual != plan.expected {
-                return Err(PulsefireRaidProfileError::ReadbackMismatch);
+                return Err(PulsefireRaidProfileError::ReadbackMismatch(
+                    PulsefireRaidProfileReadbackDiff::between(&plan.expected, &actual),
+                ));
             }
         }
         if let Some((wheel, logo)) = settings.lighting {
@@ -593,7 +645,7 @@ mod tests {
         assert!(PulsefireRaidSoftwareProfile::new(&profile)
             .unwrap_err()
             .to_string()
-            .contains("unresolved Legacy"));
+            .contains("unresolved button assignments"));
         profile = SoftwareProfile {
             polling: None,
             ..input()
@@ -907,11 +959,25 @@ mod tests {
         empty_readback[..3].copy_from_slice(&[7, 0x81, 4]);
         expect_read(&mut mock, empty_readback);
         let mut device = PulsefireRaid::new(mock).unwrap();
-        assert!(matches!(
-            device.apply_software_profile_with_wait(&settings, |_| {}),
-            Err(PulsefireRaidProfileError::ReadbackMismatch)
-        ));
-        device.into_transport().assert_drained();
+        let error = device
+            .apply_software_profile_with_wait(&settings, |_| {})
+            .unwrap_err();
+        let PulsefireRaidProfileError::ReadbackMismatch(ref diff) = error else {
+            panic!("expected readback mismatch, got {error}");
+        };
+        assert!(diff.empty_body);
+        assert!(diff.bytes.contains(&PulsefireRaidProfileByteDiff {
+            offset: 0x18,
+            expected: 1,
+            actual: 0,
+        }));
+        assert!(error
+            .to_string()
+            .contains("empty body after the report header"));
+        let mock = device.into_transport();
+        assert_eq!(mock.feature_reports_sent().len(), 5);
+        assert_eq!(mock.feature_read_attempts(), 2);
+        mock.assert_drained();
     }
 
     #[test]
@@ -962,8 +1028,11 @@ mod tests {
         let settings = PulsefireRaidSoftwareProfile::new(&profile).unwrap();
         let mut mock = MockHidTransport::new(1);
         expect_read(&mut mock, baseline());
-        // No TX expectation remains: the mock returns a transport error on the
-        // first macro upload. Any subsequent write would change the error stage.
+        let definition = settings.assignments[0].encoded_macro().unwrap().unwrap();
+        mock.expect_feature_report_result(
+            definition.as_bytes().to_vec(),
+            Err(HidError::Transport("injected macro upload failure".into())),
+        );
         let mut device = PulsefireRaid::new(mock).unwrap();
         let error = device
             .apply_software_profile_with_wait(&settings, |_| {})
@@ -971,6 +1040,144 @@ mod tests {
         assert!(
             matches!(error, PulsefireRaidProfileError::ApplyStep { ref step, .. } if step == "Button 4")
         );
-        device.into_transport().assert_drained();
+        let mock = device.into_transport();
+        assert_eq!(mock.feature_reports_sent().len(), 3);
+        assert_eq!(mock.feature_read_attempts(), 1);
+        mock.assert_drained();
+    }
+
+    #[test]
+    fn readback_diff_keeps_exact_offsets_and_expected_actual_values_including_opaque_bytes() {
+        let expected = PerformanceProfile::parse(&baseline()).unwrap();
+        let mut raw = baseline();
+        raw[0x18] = 1;
+        raw[0xB0] = 0xAA; // Unknown bytes must be compared too.
+        let actual = PerformanceProfile::parse(&raw).unwrap();
+        let diff = PulsefireRaidProfileReadbackDiff::between(&expected, &actual);
+        assert!(!diff.empty_body);
+        assert_eq!(
+            diff.bytes,
+            [
+                PulsefireRaidProfileByteDiff {
+                    offset: 0x18,
+                    expected: 2,
+                    actual: 1
+                },
+                PulsefireRaidProfileByteDiff {
+                    offset: 0xB0,
+                    expected: 0xED,
+                    actual: 0xAA
+                },
+            ]
+        );
+        assert_eq!(
+            diff.to_string(),
+            "2 differing byte(s); 0x0018 expected=0x02 actual=0x01; 0x00B0 expected=0xED actual=0xAA"
+        );
+        assert!(
+            PulsefireRaidProfileReadbackDiff::between(&expected, &expected)
+                .bytes
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn late_profile_write_failure_stops_remaining_steps_readback_and_rgb() {
+        let mut profile = input();
+        profile
+            .buttons
+            .insert("button6".into(), SoftwareButtonBinding::Disabled {});
+        profile
+            .buttons
+            .insert("button7".into(), SoftwareButtonBinding::Disabled {});
+        profile.lighting = Some(SoftwareLightingProfile {
+            mode: SoftwareLightingMode::Solid,
+            zones: [
+                ("wheel".into(), RgbColor::BLACK),
+                ("logo".into(), RgbColor::BLACK),
+            ]
+            .into(),
+        });
+        let settings = PulsefireRaidSoftwareProfile::new(&profile).unwrap();
+        let mut polling_write = baseline();
+        polling_write[1] = 1;
+        polling_write[0x18] = 1;
+        let mut button_write = polling_write;
+        button_write[0x94..0x98].fill(0); // Button 6 Disabled
+        for short_write in [false, true] {
+            let mut mock = MockHidTransport::new(1);
+            expect_read(&mut mock, baseline());
+            mock.expect_feature_report(polling_write);
+            mock.expect_feature_report_result(
+                button_write,
+                if short_write {
+                    Ok(DIRECT_REPORT_LENGTH - 1)
+                } else {
+                    Err(HidError::Transport(
+                        "injected late profile write failure".into(),
+                    ))
+                },
+            );
+            let mut device = PulsefireRaid::new(mock).unwrap();
+            let error = device
+                .apply_software_profile_with_wait(&settings, |_| {})
+                .unwrap_err();
+            assert!(
+                matches!(error, PulsefireRaidProfileError::ApplyStep { ref step, .. } if step == "Button 6")
+            );
+            assert!(error.to_string().contains("earlier changes may remain"));
+            let mock = device.into_transport();
+            assert_eq!(mock.feature_reports_sent().len(), 4);
+            assert_eq!(mock.feature_read_attempts(), 1);
+            mock.assert_drained();
+        }
+    }
+
+    #[test]
+    fn failed_or_invalid_readback_stops_before_rgb_without_retry() {
+        let mut profile = input();
+        profile.lighting = Some(SoftwareLightingProfile {
+            mode: SoftwareLightingMode::Solid,
+            zones: [
+                ("wheel".into(), RgbColor::BLACK),
+                ("logo".into(), RgbColor::BLACK),
+            ]
+            .into(),
+        });
+        let settings = PulsefireRaidSoftwareProfile::new(&profile).unwrap();
+        let mut onboard = baseline();
+        onboard[2] = 1;
+        let mut wrong_kind = baseline();
+        wrong_kind[1] = 1;
+        for response in [
+            Err(HidError::Transport("injected readback timeout".into())),
+            Ok(vec![7, 0x81, 4]),
+            Ok(onboard.to_vec()),
+            Ok(wrong_kind.to_vec()),
+        ] {
+            let mut mock = MockHidTransport::new(1);
+            expect_read(&mut mock, baseline());
+            let mut write = baseline();
+            write[1] = 1;
+            write[0x18] = 1;
+            mock.expect_feature_report(write);
+            mock.expect_feature_report(encode_runtime_profile_read_prelude());
+            mock.expect_feature_report(encode_profile_read_request());
+            match response {
+                Ok(report) => mock.queue_feature_response(report),
+                Err(error) => mock.queue_feature_error(error),
+            }
+            let mut device = PulsefireRaid::new(mock).unwrap();
+            let error = device
+                .apply_software_profile_with_wait(&settings, |_| {})
+                .unwrap_err();
+            assert!(
+                matches!(error, PulsefireRaidProfileError::ApplyStep { ref step, .. } if step == "readback")
+            );
+            let mock = device.into_transport();
+            assert_eq!(mock.feature_reports_sent().len(), 5);
+            assert_eq!(mock.feature_read_attempts(), 2);
+            mock.assert_drained();
+        }
     }
 }

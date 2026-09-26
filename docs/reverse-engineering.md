@@ -192,6 +192,40 @@ The command reports changed report numbers, lengths, directions and byte
 offsets. It intentionally does not parse `.pcapng`; export only the relevant
 payloads first.
 
+Inspect one normalized capture or an existing OpenHyperX trace log offline:
+
+```text
+hyperx-cli profile inspect-capture captures/reports.hex
+hyperx-cli profile inspect-capture captures/runtime.log --raw --all-raw
+```
+
+This recognizes only existing complete Raid codecs, displays macro transitions
+and individual delays, decodes profile settings and flags empty bodies. Source
+line/order and available trace interface/direction are retained. Successive
+same-section images are compared byte by byte, including envelope and opaque
+fields; a file's TX/RX ordering alone is not an acknowledged transaction or
+evidence of persistence. Unknown reports remain uninterpreted. No reports are
+replayed and no HID device is opened. Inputs must be UTF-8 text (up to 16 MiB),
+not binary `.pcapng`; timestamps/USB transfer types are not reconstructed.
+See [profile tooling](profile-format.md#offline-comparison-and-capture-inspection)
+for limitations and privacy precautions.
+
+To retain confirmed settings from one captured runtime read:
+
+```text
+hyperx-cli profile export-capture captures/runtime.log captured.toml --report 3
+hyperx-cli profile inspect captured.toml
+```
+
+Select the positive report number displayed by `inspect-capture`, not a source
+line/frame number. Only a complete usable runtime RX image is accepted; no
+latest-image guessing, empty-image fallback, host-write or onboard export.
+The destination must not exist. This offline partial export retains performance
+and ordinary mappings, but never invents lighting or macro timelines from
+references or adjacent uploads. Unreadable macros remain unresolved and block
+apply. Exports are potentially sensitive historical data, not a live backup;
+keep them outside Git. No reports are replayed or settings applied/saved.
+
 ## Experiment matrix
 
 - DPI: `800→900`, `900→1000`, `1000→1600`

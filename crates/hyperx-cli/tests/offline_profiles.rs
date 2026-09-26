@@ -82,7 +82,7 @@ fn invalid_profiles_fail_before_discovery_in_validate_apply_and_dry_run() {
         ("format_version = 1\n[polling]\nhz = 1000\n", "unknown field"),
         ("[buttons.button4]\ntype = 'disabled'\nkey = 'a'\n", "unknown field"),
         ("[lighting]\nmode = 'rainbow'\n[lighting.zones]\nwheel = '#FF0000'\nlogo = '#000000'\n", "unknown variant"),
-        ("[[unresolved_button_assignments]]\nsource_id = 'opaque'\n[polling]\nhz = 1000\n", "unresolved Legacy"),
+        ("[[unresolved_button_assignments]]\nsource_id = 'opaque'\n[polling]\nhz = 1000\n", "unresolved button assignments"),
         ("[polling]\nhz = 1000\n[[macros]]\nid = 'a'\nname = 'A'\nplayback = 'once'\nextra = 1\nevents = []\n", "unknown field"),
         ("[polling]\nhz = 1000\n[[macros]]\nid = 'a'\nname = 'A'\nplayback = 'once'\n[[macros.events]]\ntype = 'key-down'\nkey = 'a'\ndelay_ms = 20\nextra = 1\n", "unknown field"),
     ] {
@@ -138,4 +138,208 @@ fn profile_reader_rejects_oversized_files_before_discovery() {
     assert!(String::from_utf8(output.stderr)
         .unwrap()
         .contains("1 MiB limit"));
+}
+
+#[test]
+fn software_diff_reports_settings_macro_timing_and_omissions_without_hardware() {
+    let before = ProfileFile::new(include_str!(
+        "../../../examples/profiles/pulsefire-raid.toml"
+    ));
+    let mut after_profile: hyperx_core::SoftwareProfile = toml::from_str(include_str!(
+        "../../../examples/profiles/pulsefire-raid.toml"
+    ))
+    .unwrap();
+    after_profile.name = "Changed".into();
+    after_profile.polling = None;
+    after_profile.dpi.as_mut().unwrap().stages[0].x = 900;
+    after_profile.dpi.as_mut().unwrap().stages[0].color = hyperx_core::RgbColor::new(0, 255, 0);
+    after_profile.primary_buttons = Some(hyperx_core::PrimaryButtonLayout::Swapped);
+    after_profile.buttons.insert(
+        "button4".into(),
+        hyperx_core::SoftwareButtonBinding::Disabled {},
+    );
+    after_profile
+        .lighting
+        .as_mut()
+        .unwrap()
+        .zones
+        .insert("logo".into(), hyperx_core::RgbColor::new(255, 0, 0));
+    after_profile.macros[0].definition.playback = hyperx_core::MacroPlayback::ToggleRepeat;
+    after_profile.macros[0].definition.events[0] = hyperx_core::MacroEvent::KeyDown {
+        key: "a".into(),
+        delay_ms: 37,
+    };
+    let after = ProfileFile::new(&toml::to_string(&after_profile).unwrap());
+    let output = cli(&[
+        "profile",
+        "diff",
+        before.0.to_str().unwrap(),
+        after.0.to_str().unwrap(),
+    ]);
+    assert!(output.status.success(), "{output:?}");
+    let text = String::from_utf8(output.stdout).unwrap();
+    for fragment in [
+        "polling.hz: 1000 -> <not present>",
+        "dpi.stages[1].x: 800 -> 900",
+        "dpi.stages[1].color:",
+        "primary_buttons: Standard -> Swapped",
+        "buttons[\"button4\"]",
+        "lighting.zones[\"logo\"]",
+        "macros[\"ab\"].events[1].delay_ms: 20 -> 37",
+        "macros[\"ab\"].playback: once -> toggle-repeat",
+        "Metadata / unresolved provenance:",
+        "not device state or a validated apply plan",
+        "no HID device was discovered or opened",
+    ] {
+        assert!(text.contains(fragment), "missing {fragment}: {text}");
+    }
+    let identical = cli(&[
+        "profile",
+        "diff",
+        before.0.to_str().unwrap(),
+        before.0.to_str().unwrap(),
+    ]);
+    assert!(identical.status.success());
+    assert_eq!(
+        String::from_utf8(identical.stdout)
+            .unwrap()
+            .matches("No differences.")
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn software_diff_accepts_unresolved_imports_but_rejects_ambiguous_ids_and_bad_toml() {
+    let source = "name = 'Legacy'\ndevice = 'pulsefire-raid'\npartial = true\n[[unresolved_button_assignments]]\nsource_id = 'opaque'\nmacro_source_id = 'unknown'\n";
+    let before = ProfileFile::new(source);
+    let after = ProfileFile::new(&source.replace("opaque", "changed"));
+    let output = cli(&[
+        "profile",
+        "diff",
+        before.0.to_str().unwrap(),
+        after.0.to_str().unwrap(),
+    ]);
+    assert!(output.status.success(), "{output:?}");
+    assert!(String::from_utf8(output.stdout)
+        .unwrap()
+        .contains("unresolved_button_assignments[1].source_id"));
+    for invalid in [
+        "name = 'Bad'\ndevice = 'pulsefire-raid'\nformat_version = 1\n",
+        "name = 'Bad'\ndevice = 'pulsefire-raid'\n[[macros]]\nid = 'duplicate'\nname = 'A'\nplayback = 'once'\nevents = []\n[[macros]]\nid = 'duplicate'\nname = 'B'\nplayback = 'once'\nevents = []\n",
+    ] {
+        let file = ProfileFile::new(invalid);
+        assert!(!cli(&["profile", "diff", before.0.to_str().unwrap(), file.0.to_str().unwrap()]).status.success());
+    }
+    let large = ProfileFile::new(&" ".repeat(1024 * 1024 + 1));
+    let error = cli(&[
+        "profile",
+        "diff",
+        before.0.to_str().unwrap(),
+        large.0.to_str().unwrap(),
+    ]);
+    assert!(!error.status.success());
+    assert!(String::from_utf8(error.stderr)
+        .unwrap()
+        .contains("1 MiB limit"));
+}
+
+#[test]
+fn capture_inspection_decodes_a_complete_read_write_empty_readback_trace_without_replay() {
+    use hyperx_protocol::{format_hex, pulsefire_raid::*};
+    let mut response = [0; DIRECT_REPORT_LENGTH];
+    response[..3].copy_from_slice(&[7, 0x81, 4]);
+    response[0x18] = 1;
+    response[0x19..0x1B].copy_from_slice(&[0, 16]);
+    response[0x25..0x27].copy_from_slice(&[0, 16]);
+    response[0x32] = 1;
+    let mut profile = PerformanceProfile::parse(&response).unwrap();
+    profile.set_primary_button_layout(hyperx_core::PrimaryButtonLayout::Standard);
+    response = *profile.as_bytes();
+    let mut write = profile.to_write_report();
+    write[0x18] = 2;
+    let mut empty = [0; DIRECT_REPORT_LENGTH];
+    empty[..3].copy_from_slice(&[7, 0x81, 4]);
+    let mut log = "\u{feff}TRACE enumerated collection\r\n".to_owned();
+    for (direction, bytes) in [
+        ("TX", encode_runtime_profile_read_prelude()),
+        ("TX", encode_profile_read_request()),
+        ("RX", response),
+        ("TX", write),
+        ("TX", encode_runtime_profile_read_prelude()),
+        ("TX", encode_profile_read_request()),
+        ("RX", empty),
+    ] {
+        log.push_str(&format!("\u{1b}[35mTRACE\u{1b}[0m raw HID report direction=\"{direction}\" interface=1 report_id=0x07 bytes={}\r\n", format_hex(&bytes)));
+    }
+    log.push_str("Error: original write failed\r\n");
+    let file = ProfileFile::new(&log);
+    let output = cli(&[
+        "profile",
+        "inspect-capture",
+        file.0.to_str().unwrap(),
+        "--all-raw",
+    ]);
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    for fragment in [
+        "7 report(s)",
+        "2 ignored",
+        "Confirmed Runtime profile selector",
+        "1000 Hz",
+        "500 Hz",
+        "empty body after the report header",
+        "0x0018: 0x02 -> 0x00",
+        "no reports were replayed",
+    ] {
+        assert!(stdout.contains(fragment), "missing {fragment}: {stdout}");
+    }
+    assert_eq!(fs::read_to_string(&file.0).unwrap(), log);
+}
+
+#[test]
+fn capture_inspection_supports_golden_hex_unknown_packets_and_invalid_input() {
+    let file = ProfileFile::new(include_str!(
+        "../../hyperx-protocol/tests/fixtures/button4-ab-toggle.hex"
+    ));
+    let output = cli(&[
+        "profile",
+        "inspect-capture",
+        file.0.to_str().unwrap(),
+        "--raw",
+    ]);
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("playback=toggle-repeat, 4 event(s)"));
+    assert!(stdout.contains("delay 20 ms"));
+    assert!(stdout.contains("Raw: 07 05 04 03"));
+    let unknown = ProfileFile::new("TX 07 FE FF 12\n");
+    let output = cli(&[
+        "profile",
+        "inspect-capture",
+        unknown.0.to_str().unwrap(),
+        "--raw",
+    ]);
+    assert!(output.status.success());
+    assert!(String::from_utf8(output.stdout)
+        .unwrap()
+        .contains("Unknown/unhandled packet"));
+    for invalid in [
+        "# no reports\n",
+        "TX 07 ZZ\n",
+        "TRACE raw HID report direction=TX interface=1 report_id=0x08 bytes=07 81\n",
+    ] {
+        let file = ProfileFile::new(invalid);
+        assert!(
+            !cli(&["profile", "inspect-capture", file.0.to_str().unwrap()])
+                .status
+                .success()
+        );
+    }
+    let large = ProfileFile::new(&" ".repeat(16 * 1024 * 1024 + 1));
+    let output = cli(&["profile", "inspect-capture", large.0.to_str().unwrap()]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8(output.stderr)
+        .unwrap()
+        .contains("16 MiB limit"));
 }
