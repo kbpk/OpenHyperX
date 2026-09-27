@@ -14,6 +14,7 @@ directory:
 ```powershell
 & '.\target\x86_64-pc-windows-msvc\debug\hyperx-tui.exe' --demo
 & '.\target\x86_64-pc-windows-msvc\debug\hyperx-tui.exe' '.\my-profile.toml'
+& '.\target\x86_64-pc-windows-msvc\debug\hyperx-tui.exe' --demo --view macros
 ```
 
 If launching directly from WSL would give the Windows executable redirected
@@ -23,7 +24,9 @@ streams rather than hanging. Linux/macOS can run their native executable.
 `--demo` loads the repository example with a DEMO DATA badge. A file loads FILE
 DRAFT settings, not live state. No arguments create an empty partial target
 profile with no DPI/polling/binding/lighting defaults. Suggested size is 100x30;
-small windows display a resize notice instead of panicking.
+small windows display a resize notice instead of panicking. `--view` selects
+performance, buttons, macros, lighting or profiles on startup and in `--render`;
+it cannot be combined with validation-only `--check`.
 
 ## Mouse and direct controls
 
@@ -81,6 +84,143 @@ dialog open and preserves the document; cancel discards only that input. Changes
 take effect in the draft immediately after a successful control edit; `s` or
 Save NEW writes a new file. This is **not live configuration or Save to mouse**.
 
+## Macro library and timeline
+
+In Macros, click New or press Insert/`n` to create a local draft with a fresh
+file-library ID. Existing definitions and unresolved references reserve IDs;
+creating a macro never silently resolves or assigns one. Click a library row
+or select it with Up/Down and Enter/F2 to edit. Delete asks for confirmation and
+refuses a definition still referenced by a button or unresolved source.
+
+The editor has its own draft, separate from the profile document. F2 edits the
+name; F3 cycles Play Once, Toggle Repeat and Hold Repeat. Insert appends an
+unconfigured Key down event. Select a row to set its type (F4), named key or
+mouse input (F5/Enter), and delay after that event (F6). Input search requires
+an explicit selection and acceptance; it never chooses a key merely because
+the search matches. Delete removes a row; F7/F8 or Shift+Up/Down reorders it.
+The corresponding buttons and input/row selections also support mouse clicks.
+The wheel scrolls event selection, input choices or the validation report.
+
+A Shift+A chord, for example, is Key down `left-shift`, Key down `a`, Key up
+`a`, Key up `left-shift`. Zero delay after the first down keeps Shift held when
+A goes down; every event can have a different delay. The editor shows file
+delays, not measured playback. No key presses are recorded or simulated.
+
+Enter accepts a name/input/delay field **into the local macro draft**. Ctrl+S
+from the timeline accepts the entire macro into the profile document. Replacing
+a changed, referenced definition requires confirmation listing affected
+references; cancellation retains the local draft. Esc closes an unchanged
+macro or asks before discarding a changed/new draft. Field cancellation does
+not discard the surrounding timeline. Identity is immutable; stale or duplicate
+source definitions cannot be silently replaced. The editor needs at least
+45x18 cells; smaller windows keep the draft and show a resize notice.
+
+Library editing deliberately allows empty, unbalanced or unsupported drafts,
+subject to file size/name checks. File delays are unsigned integers 0–65535 ms;
+they are not clamped to the target encoder's limits. F9 checks the local
+timeline against each implemented macro target without committing it. Raid's
+current encoding supports at most 14 events and 9999 ms per delay: runtime
+Once/Toggle/Hold on Button 4, runtime Once on Button 5, and onboard Once on both.
+These are capture-backed implementation limits, not proven hardware maxima.
+Unknown imported key aliases and longer timelines are preserved. Acceptance
+into the library does not imply device readiness; assigning a library macro
+through Buttons separately checks its target. No macro action accesses USB.
+
+After accepting a macro, `s` / Save NEW still writes the document to a new file.
+Editing a referenced macro changes those FILE references' definition, not the
+live mouse or its onboard memory.
+
+## Profile files without TOML
+
+In Profiles, F2 / Browse opens a file browser at the opened/saved file's parent
+directory (or the process working directory for an unnamed/demo draft). F3 /
+Name edits only the profile name; it never renames a filesystem entry, changes
+device settings or clears imported provenance. Explicit names must be nonblank,
+at most 128 UTF-8 bytes and contain no control characters. Even a profile for an
+unknown model can be renamed and retained as an unsupported file draft.
+
+F4 / Copy NEW chooses a directory and a new filename, initially
+`<source-stem>-copy.toml` or `profile-copy.toml`. It copies the **current draft**,
+including unsaved edits, macro definitions and unresolved/source fields. The
+original file stays untouched. After a successful copy, the new file becomes
+the document's path and clean file baseline; copying is not a device backup.
+
+The browser lists directories first, then `.toml` files (case-insensitive
+extension), without recursively scanning or parsing their contents. Click a row
+or use arrows/PageUp/PageDown/Home/End to preview. Enter opens a directory or,
+in Browse mode, reads the selected file through the bounded app parser. Right
+enters directories; Left/Backspace or Up goes to the parent. F5 refreshes. `p`
+optionally accepts an absolute directory or one relative to the displayed
+directory. Symlink entries and special files are skipped. Directory scans stop
+after 4096 entries and show a warning if incomplete; smaller directories can be
+chosen. Paths are retained as OS paths, not reconstructed from display labels.
+
+In Copy NEW mode, F2 / NEW filename (or `s`) opens the filename field. Enter
+creates exclusively in the selected directory. Use one `.toml` filename, not
+a path; directory separators, drive/stream syntax and control characters are
+rejected. A destination that already exists, even if created after browsing,
+is never overwritten. A failed save keeps the field, draft and old baseline.
+Esc cancels a field first, then the browser. The browser needs at least 45x15
+cells; shrinking keeps its state and blocks hidden mouse targets.
+
+Opening a new file when the current document is dirty asks for consent only
+after the selected file was successfully read and parsed. `n` / Esc keeps the
+current document and returns to the browser; `y` adopts that parsed snapshot.
+Bad TOML, unreadable, non-UTF-8 or over-1-MiB files never discard current edits.
+The existing global `o` / `s` path prompts remain available as advanced shortcuts.
+F5 / Unresolved opens the explicit source/target/library selector below. The
+advanced `r` / `x` prompts remain available as alternatives.
+
+## Unresolved source selector
+
+In Profiles, F5 / Unresolved lists the exact unresolved entries from the FILE.
+No entries means only that this file contains none; nothing was read from USB.
+Click a row or use arrows to preview; typing/pasting filters the list without
+selecting a result. Enter moves through Source → Target → Library macro →
+Confirmation. Each step requires an explicit choice. There are no default
+targets, auto-selected matching IDs or fabricated macro timelines.
+
+Targets and rejection reasons come from `hyperx-app`. A normalized
+`runtime:button5` diagnostic is locked to Button 5. Opaque Legacy source IDs
+have no inferred physical target; `macro_source_id` is a provenance hint, not
+an instruction to choose a same-named library definition. Targets with an
+existing supplied binding cannot be overwritten during resolution. The library
+list checks the real selected timeline and playback against the chosen target;
+blocked choices remain visible. If no definition exists, close the selector
+and create/import the real timeline in Macros before trying again. Unknown
+device models do not gain invented targets. F1 shows the complete selected
+reason in a scrollable report; it is informational, never a commit.
+
+At the final summary, `y` / Ctrl+S confirms a FILE edit: one macro reference
+is assigned to the chosen control and exactly one unresolved entry is removed.
+The library, other settings and other source/provenance entries are retained.
+Enter does not confirm. The source and chosen definition are checked again
+before acceptance; changed or ambiguous IDs and newly supplied bindings are
+rejected without losing the document. Passing this isolated target preflight
+does not repair unrelated unsupported fields or prove hardware playback.
+
+Delete / Omit from the source list opens a **different** confirmation. `y`
+removes only that exact unresolved provenance entry: it does not disable/reset
+a button, delete an existing supplied binding, remove a macro or change the
+mouse. Duplicate source IDs cannot be resolved or omitted by selecting their
+row number; inspect the advanced file editor instead. `n` / Esc returns from
+a confirmation, and Esc steps back through the chooser until closing it. No
+preview changes the file document. Use `s` / Copy NEW afterward to save a new
+file. Minimum chooser size is 45x16; resize preserves selection and isolates
+mouse targets. Arrows/Page keys and the wheel scroll reports and choices.
+
+To practice without a mouse, open the explicitly **synthetic** example (not an
+actual capture or device backup):
+
+```powershell
+& '.\target\x86_64-pc-windows-msvc\debug\hyperx-tui.exe' '.\examples\profiles\pulsefire-raid-unresolved.toml' --view profiles
+```
+
+Choose F5, `runtime:button5`, Button 5 and the `ab` library entry; confirm only
+after reviewing the summary. Its other opaque entry stays unresolved until
+separately resolved or deliberately omitted. No DPI/polling/RGB defaults are
+invented and no settings are sent to the mouse.
+
 ## Keys
 
 | Key | Action |
@@ -98,6 +238,25 @@ Save NEW writes a new file. This is **not live configuration or Save to mouse**.
 | Type/paste, Ctrl+A in binding selector | filter labels/canonical named keys; select search text |
 | Up/Down, PageUp/PageDown, Home/End in binding selector | preview a choice |
 | Enter / Ctrl+S in binding selector | explicitly accept selected semantic binding |
+| Up/Down, Home/End in Macros | select library definition |
+| Enter / F2, Insert / n, Delete in Macros | edit, create, remove library definition |
+| F2 / F3 in macro timeline | edit name / cycle playback |
+| Insert / Delete in macro timeline | append unconfigured event / remove selected event |
+| F4 / F5 (Enter) / F6 in macro timeline | cycle event type / choose input / edit delay |
+| F7 / F8 or Shift+Up/Down in macro timeline | move event up / down |
+| F9 in macro timeline | inspect target encoding readiness of the local draft |
+| Ctrl+S / Esc in macro timeline | accept entire macro / close or confirm discard |
+| Enter / Esc in macro field | accept field into local macro draft / cancel field |
+| F2 / F3 / F4 in Profiles | browse files / rename draft / copy draft to NEW file |
+| F5 in Profiles | open unresolved source/target/library selector |
+| Type/paste, arrows/click, Enter in source selector | filter, preview, advance explicit choice |
+| Delete in source list | review provenance-only omission |
+| F1 in source selector | complete scrollable reason; Esc returns |
+| y / Ctrl+S in source confirmation | accept one file resolution/omission, not save/apply |
+| n / Esc in source confirmation | return without modifying the document |
+| Enter / Right in file browser | open selection / enter selected directory |
+| Left / Backspace, F5, p in file browser | parent directory, refresh, optional directory prompt |
+| F2 / s in Copy NEW browser | enter a new `.toml` filename in the chosen directory |
 | Up/Down, PageUp/PageDown, Home | scroll view |
 | e | edit this tab's typed TOML section |
 | a | edit the full profile, including name/source/unresolved entries |
@@ -129,17 +288,17 @@ and all ordered transitions/timings. Lighting edits `[lighting]` with explicit
 wheel/logo Solid colors; the other runtime software effects are not silently
 converted into profile Solid or firmware modes. Profiles edits the whole file.
 
-Performance, Buttons and Lighting have direct controls; `e` and `a` retain the
-advanced typed TOML editors. Macro timelines still use those editors, not a
-macro recorder or interactive timeline table. Unknown fields and malformed TOML fail before modifying the
+All five views have direct controls; `e` and `a`
+retain the advanced typed TOML editors. A global macro recorder is not provided.
+Unknown fields and malformed TOML fail before modifying the
 document; the editor retains text and the error for correction. A parseable
 but unsupported value may remain in a draft with NOT READY status. Sections
 missing from the replacement text are removed from the FILE, not disabled or
 reset on hardware. Unrelated sections/provenance remain intact.
 
 Macro events are separate down/up actions followed by individual delays. A
-zero delay between key-down actions expresses a chord. The view shows cumulative
-file timings, not measured hardware playback. Limits come from target-specific
+zero delay between key-down actions expresses a chord. The library preview shows
+total file timing, not measured hardware playback. Limits come from target-specific
 implemented encodings, not assumed hardware maxima.
 
 `m` accepts this prompt, using the existing standalone macro TOML format:
@@ -185,6 +344,8 @@ Input, section edits, macro imports and serialized profiles are bounded to
 ```text
 hyperx-tui --demo --check
 hyperx-tui --demo --render --width 120 --height 40
+hyperx-tui --demo --render --view macros --width 120 --height 40
+hyperx-tui --demo --render --view profiles --width 120 --height 40
 hyperx-tui captured.toml --render
 ```
 
@@ -197,6 +358,12 @@ modal isolation, resized/scrolled hit targets, direct numeric/color input,
 transactional edits, explicit resolution/omission,
 semantic binding previews/acceptance, searchable keys, target-rejected macros,
 Disabled versus omission, coupled primary protection and preserved aliases,
+macro library identity/reference guards, chord construction, independent
+delays, timeline reordering, field/draft cancellation and local target checks,
+lazy/bounded directory browsing, parse-before-discard, Unicode/OS filenames,
+metadata-only rename and race-safe new-copy behavior,
+explicit source/target/library previews, confirmation and provenance-only
+omission, ambiguous/stale source/definition guards and full rejection reports,
 dirty-state confirmation and save failures. Linux/Windows/macOS CI runs both
 headless executable checks in addition to workspace tests.
 

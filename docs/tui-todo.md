@@ -22,15 +22,16 @@ must reuse `hyperx-app`; completing GUI work must not remove terminal features.
 
 ## Macros
 
-- [ ] Timeline table: ordered down/up events, per-event delays, add/remove/reorder.
-- [ ] Explicit chord construction and Once/Toggle/Hold playback selection.
-- [ ] Named-library management with confirmation before replacing referenced definitions.
-- [ ] Keep editing limits separate from claims about the hardware maximum.
+- [x] Timeline table: ordered down/up events, per-event delays, add/remove/reorder.
+- [x] Explicit chord construction and Once/Toggle/Hold playback selection.
+- [x] Named-library management with confirmation before replacing referenced definitions.
+- [x] Keep editing limits separate from claims about the hardware maximum.
 - [ ] Investigate recording separately: terminal events do not reliably expose all key releases.
 
 ## Profiles
 
-- [ ] File picker/list, naming, duplicate and explicit unresolved-entry controls without TOML.
+- [x] Bounded file browser, direct draft naming and safe NEW-file copying.
+- [x] Explicit unresolved-entry selectors without TOML, with distinct resolve/omit confirmation.
 - [ ] Better diff presentation and a validation summary linked to the offending field.
 - [ ] Deliberate safe overwrite workflow with recovery; current Save NEW stays the default.
 - [ ] Session recovery/undo without guessing missing device settings or stripping provenance.

@@ -139,7 +139,10 @@ Shared offline application operations for CLI/TUI/GUI: bounded profile
 and macro-file parsing, safe new-file serialization, section edits, file-session
 baseline/diff state, model metadata and separate offline readiness. Explicit
 macro resolution/omission never guesses Legacy physical targets or timeline
-contents. It delegates target gates to the existing model validator and refuses
+content. `macro_resolution_targets` shares target identity/overwrite/encoding
+gates with actual offline resolution; target legality alone does not validate
+playback or reconstruct a definition. Rejected model controls stay inspectable.
+It delegates timeline gates to the existing model validator and refuses
 implicit ID/control overwrites. Invalid/partial drafts remain inspectable.
 Typed value edits validate the requested field against model metadata while
 preserving other sections, unread values and unresolved provenance; UI controls
@@ -246,7 +249,17 @@ shared app/core, not protocol or transport. Performance/Lighting have direct
 file controls, including model-bounded DPI sliders and exact inputs, while
 advanced typed TOML editors remain available in all five views. Mouse targets
 come from the visible frame and are isolated by modals; mouse/terminal modes
-are restored on exit. Macro events retain chords and every timing. Unknown device settings
+are restored on exit. The interactive macro editor keeps a separate local
+timeline draft; explicit field acceptance is distinct from committing the
+definition through the shared library API. Referenced replacements need consent,
+referenced deletion is blocked, and target preflight never commits or executes
+events. The profile browser performs bounded, nonrecursive filesystem listing,
+never parses files during navigation, and parses an explicit file selection
+before asking to discard unsaved changes. Direct rename uses the shared app
+metadata edit; new-file copying uses `ProfileDocument::save_as` with exclusive
+creation and updates the file baseline only after a successful write.
+Macro events retain chords and every timing, including unsupported
+file drafts. Unknown device settings
 are not represented as defaults. New-file save, resolve, omission and validation
 all use the shared app API. Diff/dirty state is against a FILE baseline, not a
 live mouse read; Save to mouse is unavailable. TestBackend plus real executable

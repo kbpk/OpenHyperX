@@ -96,6 +96,19 @@ color fields for wheel/logo. These controls edit the offline draft without TOML.
 Buttons has a clickable physical-control table and a target-aware binding picker,
 including searchable keys and existing library macros; Enter/Accept commits the
 selection to the file draft. Primary clicks remain a coupled layout.
+Macros has a named library and interactive timeline editor: separate key/mouse
+down/up events, individual delays, reorder controls and Once/Toggle/Hold selection.
+Enter accepts one field; Ctrl+S accepts the local macro into the file draft,
+with confirmation before replacing a referenced definition. F9 checks target
+encoding readiness without accepting or sending the draft. No recorder is used.
+Profiles has a file browser (F2), name field (F3) and Copy NEW workflow (F4).
+Browse by mouse/keyboard, then choose a new `.toml` filename; existing files
+are never overwritten. Copying retains the whole draft and leaves its source
+file untouched. Bad files are rejected before asking to discard current edits.
+F5 opens unresolved-source selectors: explicit source, legal target and real
+library macro, then confirmation. Delete offers provenance-only omission,
+never Disabled/reset; F1 displays complete rejection reasons. Try the synthetic
+`examples/profiles/pulsefire-raid-unresolved.toml` without a connected mouse.
 The wheel over a DPI bar adjusts one step; elsewhere it scrolls the view.
 Use `Tab` or `1`–`5` to switch views, `e` to edit the current section's advanced TOML,
 `a` for the complete document, `v` for offline validation and `d` for the file
@@ -111,10 +124,13 @@ Headless executable checks require neither a terminal nor a mouse:
 ```text
 hyperx-tui --demo --check
 hyperx-tui --demo --render
+hyperx-tui --demo --render --view macros
+hyperx-tui --demo --render --view profiles
 hyperx-tui my-profile.toml --render --width 120 --height 40
 ```
 
 See [TUI controls and limits](docs/tui.md) and the [TUI backlog](docs/tui-todo.md).
+Use `--view macros` in interactive mode to open the library directly.
 Real-time device control remains blocked until hardware communication is stable.
 
 ## Offline GUI
