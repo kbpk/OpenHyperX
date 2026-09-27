@@ -7,6 +7,26 @@ A TUI or Tauri UI must not know HID paths, report IDs or packet layouts. Adding 
 mouse should normally mean adding one driver and registry entry, not changing
 the CLI or GUI.
 
+**2026-09-27 safety suspension:** descriptor-only CLI `info` no longer constructs
+the model driver or queries runtime settings. The CLI's runtime and save/ACK
+openers reject access before discovery, so DPI, polling, live buttons and all
+profile apply/save/probe paths cannot send the query. Direct RGB uses a distinct
+opener and no runtime selector/request. Offline operations retain their codecs
+and mocks. This is a host safety block, not a protocol fix: the low-level driver
+still contains the capture-backed sequence for research/tests, and must not be
+used by a connected client until its cold-device side effects are established.
+An explicitly consented isolated `07 03 04 64` SET later reproduced physical
+loss of mouse operation without request `81` or GET; USB reconnect recovered it.
+This selector must be treated as potentially disruptive profile activation,
+not a passive addressing step. The empty-runtime activation mechanism and
+safe preparation remain unproven; separate lab probes do not lift the gate.
+An operator-confirmed cold Legacy launch then used the same two `07 07`
+startup packets yet read an all-zero runtime body. Legacy subsequently uploaded
+a macro definition and a populated runtime image, and the operator confirmed
+normal input/lighting. The startup ACK is therefore not proof of a usable
+runtime baseline. Historical successful warm-session reads below must not be
+generalized to cold-device bootstrap.
+
 ```text
 CLI device operations / offline TUI + Tauri via hyperx-app
         |
@@ -113,8 +133,10 @@ DPI, polling, ordinary bindings, the primary pair and macros. Validation happens
 before patching the source image, not just before sending the result; otherwise
 replacing an invalid field could hide a bad read. A macro-reference image is
 also validated before uploading its definition. The shared full-image write
-method validates again as defense in depth. Read-only inspection deliberately
-remains permissive so unusual snapshots can still be investigated.
+method validates again as defense in depth. Offline snapshot inspection remains
+permissive so unusual captured images can still be investigated. Live CLI
+inspection no longer runs the vendor query: baseline validation after a read is
+too late to prevent its side effects.
 
 The plan composes existing captured operations, one profile write per changed
 setting family/assignment. Unknown bytes and omitted fields remain intact. A

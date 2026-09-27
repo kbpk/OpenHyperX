@@ -1,6 +1,6 @@
 # Pulsefire Raid research
 
-Last updated: 2026-09-26.
+Last updated: 2026-09-27.
 
 This document separates manufacturer facts, public implementation evidence,
 local observations and hypotheses. Do not promote a hypothesis into a device
@@ -1670,7 +1670,7 @@ A later independent read also returned that empty body. With explicit operator
 approval, the existing fixed non-persistent vendor startup and runtime ACK probe
 both acknowledged successfully, but another read remained empty. Therefore ACK
 success does NOT establish usable profile data. Hardware operations stopped;
-the operator is remote and cannot physically reconnect or check the mouse now.
+at that time the remote operator could not physically reconnect/check the mouse.
 The actual runtime polling outcome and physical behavior remain unverified;
 do not claim that the original setting was restored.
 
@@ -1679,16 +1679,530 @@ RGB-only, before mutations. A conservative one-second host wait was added
 between successful runtime steps to avoid tight back-to-back writes/reads, but
 it has NOT been hardware-tested and is not a proven fix or decoded timing bound.
 Do not auto-retry writes or relax readback comparison to accept an empty image.
-TODO: physical USB reconnect, compare a fresh usable runtime image against the
-saved baseline, then investigate one isolated acknowledged write/read sequence
-with capture and verified pacing. If the baseline is still empty, stop without
-further mutable commands.
+TODO: obtain a usable runtime image and compare it against the saved baseline,
+then investigate one isolated acknowledged write/read sequence with capture and
+verified pacing. The physical reconnect check below still returned an empty
+image, so further mutable commands remain blocked. Do not obtain that baseline
+by retrying the existing query: the later physical-failure report below suspends
+the query itself, pending a separately established safe access method.
 
 Final offline verification after the safety regressions: 158 unit/executable
 tests pass on both Linux and native Windows; Linux fmt/Clippy (`-D warnings`)
 and both workspace builds pass. The last Windows check used
 `-SkipDeviceDiscovery` with no hardware-test switch: no HID device was opened
 and no additional vendor reports were sent.
+
+### Physical reconnect: behavior recovered, profile read still empty (2026-09-27)
+
+The operator unplugged/replugged the mouse, reported that it works, and saw the
+logo return to blue after previously unlit LEDs. This is consistent with the
+previously verified onboard Solid state, but does not independently establish
+all settings, polling, or current vendor-session state.
+
+With the operator confirming Legacy/OpenRGB closed, one native Windows
+`hyperx-cli --trace info` invocation ran at 21:25 local time. A process check
+also found no competing NGENUITY/OpenRGB writer. The same VID/PID, release
+`0x1124`, seven HID collections and configuration collection
+`interface=1, usage_page=0xFF01, usage=0x0001` were present. The 24-byte report
+descriptor still declared report ID `0x07` and a 264-byte hidapi feature buffer.
+
+Trace shows only the two confirmed runtime read requests (`07 03 04 64 ...`
+and `07 81 00 ...`), followed by one 264-byte RX containing `07 81 04` and
+261 zero bytes. No profile/RGB write, vendor-session initializer, ACK probe,
+onboard save or retry was requested. The host wrapper rejected the empty body
+and stopped before treating it as a comparable, usable baseline. The CLI's
+displayed Disabled bindings are zero-image decoding results, not evidence that
+physical buttons were disabled. Polling and DPI cannot be established from
+this response, and restoration of the pre-failure state is still unverified.
+
+Physical reconnect therefore recovered reported normal operation/lighting but
+did not restore a usable runtime read through our existing sequence. This does
+not establish the cause, a timing fix, or the safety of whole-profile apply.
+Further hardware writes remain blocked; investigate the read/session difference
+against existing Legacy startup captures before proposing another isolated
+capture or any state-changing test. No blind restoration or factory reset.
+
+### Physical failure after query and offline safety suspension (2026-09-27)
+
+After that `info` invocation the operator explicitly reported **no lighting,
+cursor movement or clicks**. This supersedes the earlier uncertainty about
+physical behavior: the empty response is not merely a CLI display problem.
+The operator was asked to unplug for five seconds and reconnect without
+starting our CLI or Legacy. No further live query, selector, initializer,
+write or software recovery was attempted. The operator subsequently confirmed
+that this physical reconnect restored normal mouse operation ("wróciła do
+życia"). This is physical recovery evidence, not a new usable vendor readback,
+confirmation of every setting, or permission to remove the runtime safety gate.
+
+Offline reanalysis used the existing startup, repeated-launch, tray-close and
+successful OpenHyperX playback captures; there was no new USB recording. Raw
+GET_REPORT bytes were extracted from the USBPcap frame payload: tshark's normal
+`usb.data_fragment` output omitted that response despite `usb.data_len=264`,
+so absence from that field alone would not prove an absent response.
+
+Both Legacy startup sequences match our complete zero-filled 264-byte runtime
+selector and read-request packets, not just their prefixes. Their GET_REPORT
+setups use feature report `0x0307`, interface 1 and length 264. The two complete
+RX images (frames 30 and 3112, respectively) match every byte of the saved
+pre-failure baseline, including 1000 Hz and primary mappings. Their SHA-256 is
+`2961479b0f409fd00e4085ccb94c573ba7868507f0f8bd8bb75733ad6745b0d4`.
+
+| Capture | Selector → request | Request → GET_REPORT |
+| --- | --- | --- |
+| `openhyperx-ngenuity-legacy-startup-ack-20260926.pcapng` | 67.670 ms | 105.288 ms |
+| `pulsefire-raid-legacy-ack-lifecycle-repeat-20260926-02-launch-legacy.pcapng` | 67.529 ms | 105.042 ms |
+| retained driver host waits | 65 ms | 110 ms |
+
+In both launches the usable GET response precedes Legacy's macro upload and
+full runtime write, so those later writes cannot explain that earlier response.
+Tray closure again selects onboard with `07 03 01 64` (frame 1171) and its ACK
+(1173), without a profile-image write. The original failed polling TX also
+matches the old baseline with only opcode `81→01` and interval `01→02` changed;
+the following RX is zero-bodied. These observations do not establish a new
+delay, a malformed encoder, or a safe recovery packet.
+
+**Strong hypothesis, not isolated proof:** the runtime selector may activate
+the runtime image instead of merely choosing an address to inspect. Selecting
+an empty runtime would explain lost input/lighting and recovery after a physical
+reconnect. We have not isolated selector `03` from request `81` and must not
+claim which packet causes the physical failure or why runtime became empty.
+Earlier “read-only” wording incorrectly equated no image write with no side
+effects; that safety claim is withdrawn.
+
+With operator approval, the CLI now makes `info` identity/standard-descriptor
+only and blocks runtime DPI, polling, live button commands, composed apply
+(including dry-run), ACK probes and onboard save before discovery/opening.
+There is no override or automatic retry/recovery. Direct RGB has a separate
+explicit write path which sends neither query packet; it is not used to recover
+the mouse or retested during this incident. Codecs/driver and packet/mock tests
+are retained for offline research; low-level driver use is not a safe live path.
+Offline TUI/GUI and Legacy file tools remain available.
+The four runtime lab wrappers also stop unconditionally before invoking any
+executable, elevation or capture, protecting users with an older native binary.
+`check-windows.ps1 -VerifySoftwareProfilePolling` refuses the hardware opt-in;
+its normal offline build/test path remains usable. Native PowerShell AST checks
+confirmed each lab wrapper's first statement is a terminating `throw`, and all
+five changed scripts parse, without executing the lab scripts.
+
+Regression coverage proves descriptor-only info sends no vendor reports, both
+gated openers refuse even an injected discovery implementation, and the actual
+CLI rejects 22 valid live-command variants with tracing enabled but without HID
+enumeration or raw reports. Validation of bad inputs remains offline and
+retains its specific errors. This is a preventive host block, not a protocol
+fix, persistence test or proof of hardware recovery.
+
+Verification of the suspension: Linux `cargo fmt --all -- --check`, workspace
+Clippy (`-D warnings`), all-target tests and build pass. Native Windows workspace
+tests/build and CLI/TUI/GUI offline executable smokes pass through
+`scripts/check-windows.ps1 -SkipDeviceDiscovery -Gui`. No hardware-test switch
+was enabled. The rebuilt native executable includes the gate; descriptor-only
+info was verified with a mock, not another live-device invocation. There was
+no additional HID discovery/opening or vendor traffic during this fix.
+
+### Isolating GET_REPORT from the runtime query (2026-09-27)
+
+The next experiment is deliberately narrower than the failing query: one
+GET_REPORT for feature ID `07` / 264 bytes, with no SET_REPORT prelude. A hidden
+Windows-only lab command requires explicit `--unsafe`, the exact known Raid
+identity/release/collection and descriptor. It returns raw evidence rather than
+decoding a current profile. Mock tests require one GET and zero TX, including
+empty/opaque responses and errors; errors never trigger initialization or
+retry. CLI argument tests reject missing consent and arbitrary send/report-ID
+options. The normal runtime safety gate stays in place.
+
+`capture-passive-feature-windows.ps1` records a fresh identity-resolved,
+five-second capture and bounds the exact CLI child process to three seconds.
+It refuses competing writers, overwrites and older binaries lacking the lab
+command. This is an explicitly approved diagnostic, not a recovery procedure
+or a claim that GET_REPORT alone is safe. Hardware results must be recorded
+separately after wire-level inspection and operator behavior confirmation.
+
+The operator authorized this exact probe with Legacy/OpenRGB closed. Capture
+`openhyperx-passive-get-20260927-a.pcapng` (31,374 bytes, retained outside Git)
+contains 638 frames, all at bus 1 / freshly resolved address 25, and the injected
+device descriptor confirms `0951:16E4`, release `1124`. Inspection of every
+control setup found **one GET_REPORT and zero SET_REPORT**, no other class
+requests. Frame 637 is `A1 01 07 03 01 00 08 01`; frame 638 responds at
+`2026-09-27 20:09:47.916004 UTC` (22:09 local), 0.704 ms later, status success,
+264 bytes: `07 FF FF FF` followed by 260 zero bytes. Response SHA-256:
+`68df6bb78d51368ce1f104a8bf46dd946b30e27b26e942e608a34e45815edf1a`.
+These bytes match the CLI RX trace. This is an **unknown response**, not a
+runtime/onboard image, invalid polling value or confirmed error opcode.
+
+After this single GET the operator confirmed cursor, primary clicks and
+lighting still worked without changes. No reconnect, further report, retry,
+initialization or profile write was performed. Thus GET alone did not reproduce
+the physical failure in this one cold-session observation; that does not prove
+general safety or identify the effect of either preceding SET packet. The
+normal runtime gate remains active. A later isolated experiment must separate
+the captured `81` read-request from the `03` selector, with fresh operator
+consent; do not send the complete old query or remove the gate.
+
+The wrapper returned exit 1 even though the CLI printed its completed response.
+An offline reproduction using only `lab raid-feature-get --help` showed
+Windows PowerShell 5.1's redirected `Start-Process` result had `HasExited=True`
+but `ExitCode=$null` after both waits. The wrapper now retains the process
+handle before waiting and explicitly refuses a missing exit code. This host
+fix is verified without USB; the hardware probe is not repeated to test it.
+
+### Isolated read-request without profile selection (2026-09-27)
+
+The next authorized experiment separates `81` from `03`: the Windows lab
+command `raid-read-request-get --unsafe` sends the existing exact 264-byte
+`07 81` + zero-fill request, waits 110 ms and reads report `07` once, without
+selecting either profile or starting a session. Both retained Legacy launch
+captures confirm those request bytes, but do not establish their standalone
+side effects. Identity/release/collection and exact descriptor guards remain
+the same as the passive probe. Raw RX is not treated as a current profile.
+
+Golden/mock tests require exactly that one TX and one GET, with the wait between
+them. Failed/short TX aborts before GET; failed/short RX never selects,
+initializes, retries, restores or persists. Actual executable tests reject
+missing consent and arbitrary payload/selector/delay options before discovery.
+The capture wrapper accepts exactly one of `-ConfirmPassiveGet` and
+`-ConfirmReadRequestGet`, preserving the chosen consent through elevation.
+Hardware results are recorded below only after reviewing the complete capture
+and physical behavior. Normal runtime access remains blocked.
+
+The authorized probe completed with native CLI/wrapper exit 0, and no automatic
+retry or restoration. `openhyperx-read-request-get-20260927-a.pcapng` is 4,944
+bytes with 70 control frames, all bus 1 / freshly resolved address 25; injected
+descriptor confirms `0951:16E4`, release `1124`. All class requests were
+inspected: exactly one SET_REPORT and one GET_REPORT, both feature value `0307`,
+interface index 1 and length 264. No `03` selector, startup, ACK probe, full
+settings image, RGB or onboard write appears. Other control traffic is standard
+descriptor/string metadata.
+
+- Frame 67: SET `07 81` + 262 zeros, at `20:41:03.179429 UTC`; frame 68
+  completes successfully 0.409 ms later. Full TX SHA-256:
+  `ca28b6b7f9ba5e6568c3e609831506a57de2b4fd67261dddff4ad80a7f632f81`.
+- Frame 69: GET setup `A1 01 07 03 01 00 08 01`, at `20:41:03.290032 UTC`,
+  110.603 ms after SET submission (110.194 ms after its completion).
+- Frame 70: successful response at `20:41:03.291257 UTC` (22:41 local),
+  1.225 ms after GET, 264 bytes beginning `07 81 01`. Full RX SHA-256:
+  `bb5c75b81a47915d09cf5b08ad2c654770294b2fbb2d066f82841d7789ee0731`.
+
+Offline inspection decodes the response's section byte as **onboard**, not
+runtime: 1000 Hz, active stage 0 / 800 DPI, four enabled stages 800/1600/3200/6400
+and colors `#2B00FF` / `#CD00FF` / `#32FF00` / `#FF0000`. All 11 button records
+decode, including standard left/right, Button 4 Back, Button 5 macro reference,
+two Volume Down bindings, Mute, DPI button keyboard HID usage `0005`, and tilt
+left/right. The macro timeline and current physical lighting are not established
+by these records. The wire TX/RX match the native trace; raw capture/logs remain
+outside Git. This demonstrates a populated onboard response without explicit
+selection in this session, not a working runtime snapshot or permission to
+clone/write it. Physical behavior confirmation is recorded separately below.
+
+The operator then confirmed cursor, primary clicks and lighting still worked
+without changes. No physical reconnect or subsequent vendor report was needed.
+The sanitized two-report fixture is retained in
+`crates/hyperx-protocol/tests/fixtures/read-request-get-onboard.hex`, not the raw
+capture. An actual offline CLI regression verifies it is labeled onboard and
+does not invent a preceding selector/runtime state or macro timeline. Two
+misleading generic inspector messages were corrected: the request carries no
+section byte, and a macro reference lacks its definition in **this profile
+image**, whether onboard or runtime.
+
+Together with the preceding passive GET, this narrows the incident: neither
+GET alone nor this selector-free `81` request/GET reproduced physical failure
+in this session. The `03` runtime selector/session-state hypothesis is stronger,
+but still not isolated proof. No old runtime query, selector or setter is
+unblocked; do not infer a safe initialization/copy from the onboard image.
+
+Verification before the probe: Linux workspace fmt, Clippy (`-D warnings`),
+all-target tests/build and native Windows all-target tests/build plus offline
+CLI/TUI/GUI executable smokes pass. Native PowerShell syntax and absent/both
+consent rejection tests pass without USB. The retained-handle host fix now
+allows the wrapper to complete normally, without repeating the passive probe.
+After adding the fixture and correcting the inspector labels, Linux workspace
+Clippy/tests/build and native Windows CLI all-target tests/build pass again;
+the rebuilt native executable also inspects the fixture offline successfully.
+No further hardware query was used for this regression verification.
+
+### Isolating the runtime selector (2026-09-27)
+
+The next narrowly consented diagnostic sends only the exact repeated
+`07 03 04 64` selector, zero-filled to 264 bytes. Unlike the two preceding
+probes it deliberately selects runtime and may reproduce physical loss of
+cursor/clicks/lighting. The hidden Windows-only `raid-runtime-select-only`
+requires `--unsafe` and the same identity/release/descriptor guards. The
+packet is captured evidence; its standalone behavior is still the experiment,
+not a side-effect-free read-address assumption. No `81`, GET, startup, ACK
+handle, settings image, RGB, persistent save or software recovery is included.
+
+Golden/mock tests require exactly one constant TX, zero feature reads, and
+no following report after a short/failed send. CLI tests reject missing consent,
+arbitrary payload/section/GET/initializer options before discovery. The renamed
+`scripts/capture-raid-lab-windows.ps1` accepts exactly one of its three separate
+consent flags and forwards that same choice through elevation. Successful
+transport completion is printed as a selector TX, never a profile read or ACK.
+If physical behavior fails, stop all hardware work; recovery is an operator
+USB reconnect, not an automatic HID retry. Record results separately below.
+
+The operator explicitly consented to the selector-only probe and possible input
+loss, with writers closed and physical reconnect available. The native CLI and
+wrapper completed with exit 0. Capture
+`openhyperx-runtime-selector-only-20260927-a.pcapng` (4,584 bytes, outside Git)
+contains 68 control frames at bus 1 / freshly resolved address 25. Injected
+descriptor confirms `0951:16E4`, release `1124`. All class requests were
+inspected: **one SET_REPORT and zero GET_REPORT**, no `81`, initializer,
+settings/image write, RGB, onboard write or other class operation. The remaining
+control traffic is standard descriptor/string metadata. No endpoint-`83`
+interrupt payload is captured; the probe did not open an ACK handle, and this
+absence alone does not prove whether the device generated an ACK.
+
+Frame 67 submits `21 09 07 03 01 00 08 01`, full 264-byte payload
+`07 03 04 64` + 260 zero bytes, at `2026-09-27 20:56:53.911423 UTC`
+(22:56 local). Frame 68 completes successfully 0.460 ms later. Full TX SHA-256:
+`1536cb872e0fe1a1f4848524aedef46834b53260ccd20fe37c1ccb17d54295eb`.
+These bytes match the native TX trace and retained Legacy selector. No report
+was issued after this selector to inspect or recover the mouse. Physical
+behavior/reconnect confirmation is recorded separately below; transport
+completion by itself is not success of normal mouse operation.
+
+Verification before the probe: Linux workspace fmt, Clippy (`-D warnings`),
+all-target tests/build pass; native Windows workspace all-target tests/build
+and offline CLI/TUI/GUI executable smokes pass. PowerShell syntax and all five
+invalid consent combinations fail before capture/elevation/HID as required.
+The three lab subcommands retain explicit stable CLI names; normal runtime
+commands remain blocked before discovery. No firmware/bootloader/DFU work.
+
+The operator reported **loss of normal mouse operation after this selector
+alone**, then confirmed that unplugging/replugging restored it. No subsequent
+GET, selector, initializer, settings write or software recovery was performed.
+All live hardware work stopped. This isolates the captured `07 03 04 64` packet
+as sufficient to reproduce the physical failure in this release-1124 session;
+`81` and GET are not required for that failure. It is no longer merely a
+two-packet-query correlation or suspected passive-address-selection hazard.
+
+The mechanism remains a hypothesis: selecting/activating an unusable runtime
+image fits the previously zero-bodied runtime response and preserved populated
+onboard image, but this selector-only test did not read runtime memory. It does
+not establish why runtime is empty, a safe initialization, a firmware defect,
+or general behavior on other revisions/states. Physical recovery is operator
+evidence, not a new vendor readback or validation of every setting.
+
+**Next evidence required, not a replay recipe:** inspect all operations during
+Legacy startup after an operator-confirmed cold USB reconnect, before the first
+runtime selector. A later single capture can start the app automatically without
+editing settings, but needs fresh consent: Legacy can reapply software state.
+Compare its complete ordering/reports with retained startup captures and the
+successful selector-free onboard read. Do not retry the old query, initialize
+blindly, copy an onboard image into runtime, or remove the runtime gate. Macro
+references do not supply their timeline, and unknown bytes/banks must not be
+guessed into a restore command.
+
+### Operator-confirmed cold Legacy startup (2026-09-27)
+
+Following the selector-only failure and recovery, the operator confirmed a
+healthy USB-reconnected mouse with Legacy/OpenRGB still closed, then explicitly
+authorized one automated Legacy launch without settings edits or onboard save.
+Read-only package inspection identified Store Legacy `5.38.0.0`:
+
+- Package: `33C30B79.HyperXNGenuity_5.38.0.0_x64__0a78dr3hq0pvt`.
+- AUMID: `33C30B79.HyperXNGenuity_0a78dr3hq0pvt!App`.
+
+The new `capture-legacy-startup-windows.ps1` wrapper launched this exact package
+once through unelevated Explorer, after an elevated identity-resolving capture
+helper signaled readiness. No OpenHyperX executable, HID query, injected input,
+app closure or recovery command ran. The capture uses a caller-created empty
+readiness sidecar and refuses prior artifacts; the manifest records package,
+readiness and activation timestamps. Unknown versions, competing writers,
+missing consent and malformed readiness files fail before activation/capture.
+
+`openhyperx-legacy-cold-startup-20260927-a.pcapng` (102,612 bytes, outside Git)
+contains 1,456 frames, all bus 1 / freshly resolved address **26**, not the
+previous session's 25. Injected descriptor confirms `0951:16E4`, release `1124`.
+Ready time was `21:15:58.1170011 UTC`, activation requested at
+`21:15:58.6445042 UTC`; last captured frame is `21:16:10.196611 UTC`.
+
+All 128 class requests were reviewed: 127 feature SETs and one GET, each report
+value `0307`, index 1 and length 264. The SETs comprise two session phases, two
+runtime selectors, one read request, one macro definition, one populated runtime
+image and 120 direct RGB reports. No other class/vendor request, interrupt-OUT
+or onboard-save transaction appears. Remaining control setups are injected
+standard descriptor/configuration metadata. All captured USB statuses are
+success; this alone does not establish device behavior.
+
+The important ordering is below. Times are local CEST (UTC+2); all feature
+payloads are 264 bytes, and zero-fill was inspected in full.
+
+| Frame | Local time | Operation |
+| --- | --- | --- |
+| 7 | 23:16:02.242694 | SET `07 07 00` + zeros |
+| 9 | 23:16:02.349881 | SET `07 07 01` + zeros |
+| 11 | 23:16:02.351507 | Endpoint 83 ACK `00 00 07 07 00 00 00 00` |
+| 13 | 23:16:02.661313 | SET `07 03 04 64` + zeros |
+| 17 | 23:16:02.726653 | Direct RGB: both zones black |
+| 21 | 23:16:02.770617 | Same runtime selector again |
+| 25 | 23:16:02.838554 | SET `07 81` + zeros |
+| 29 | 23:16:02.943481 | GET report 07 |
+| 30 | 23:16:02.944631 | RX `07 81 04` + **261 zero bytes** |
+| 31 | 23:16:02.950901 | Macro-definition upload `07 05 04 04 ...` |
+| 35 | 23:16:02.990251 | Populated runtime-image write `07 01 04 ...` |
+| 1449 | 23:16:10.145576 | Standard mouse input: left-button press |
+
+Before the **first** runtime selector, the only class/vendor requests were the
+same two startup packets already retained from the two 2026-09-26 launches.
+They match byte-for-byte, SHA-256
+`e4ca4631e6bef74eb9c726cba73af5a4ad1370e89eb052322a8f7f1a8e4ea5f1`
+and `5c80e106afc864ca0f02efbf61413b40ae249006386a1bbe17ce2f7dc6e32eae`.
+The startup phase gap is 107.187 ms and second-phase-to-first-selector gap
+311.432 ms. The second selector/request/GET gaps are 67.937/104.927 ms;
+GET completion takes 1.150 ms. The startup/selector ACKs and request ACK
+`00 00 07 81 FF 00 00 00` are present despite the unusable runtime body.
+
+The empty runtime RX has SHA-256
+`ac8ce881e360e78b4b3f80f34085a8555be08108e96c9d7892a6fd5e331c2d04`.
+Unlike the two prior startup captures (populated runtime RX SHA
+`2961479b0f409fd00e4085ccb94c573ba7868507f0f8bd8bb75733ad6745b0d4`),
+this capture establishes a cold-device state by operator confirmation. The
+subsequent macro TX SHA is
+`0e85faacb8797e4dece20f155802183d37e04d83485466fdcc9d9b02c756f5b3`;
+the populated image TX SHA is
+`160a620adb7569dffd70cfb00ffbe622bd60a5a0a1b052aa4e78586e3a3b58cc`.
+They are not derived from the empty read. RGB traffic contains two all-black
+reports and 118 wheel-off/logo-blue reports, all with the captured `A0` trailer
+and otherwise zero-filled bodies. Endpoint 83 contains corresponding ACKs;
+endpoint 81 supplies standard mouse input, not a bootstrap command.
+
+The operator was unsure whether they clicked the Connected Products mouse tile
+near capture end. There is exactly one recorded left-button press at
+`23:16:10.145576`, 51.035 ms before the final frame; no release is captured.
+USB cannot establish the clicked UI target or exclude a keyboard/touch input.
+However, the runtime read and image write preceded this press by
+7.200945/7.155325 seconds. That final mouse press cannot have triggered these
+earlier operations. Do not claim the whole recording was an uncontaminated
+no-op or request a repeated launch merely to answer this timing question.
+
+After full capture review, the operator confirmed normal cursor and primary
+clicks, wheel off and blue logo. Legacy remains open; no separate post-write
+readback or reconnect was performed by OpenHyperX. The populated image write
+precedes this physical confirmation, but its exact causal role and whether
+there was a transient input outage are not isolated by this capture.
+
+#### Full-image comparison, offline (2026-09-28)
+
+The captured cold runtime RX (frame 30) and Legacy's subsequent runtime TX
+(frame 35) are retained as two sanitized 264-byte reports in
+`crates/hyperx-protocol/tests/fixtures/cold-legacy-startup-images.hex`. The
+intervening macro definition is **not** published in that fixture because its
+event stream may disclose typed keys. The full packet stays only in the private
+capture; its SHA-256 matches frame 31 of both earlier Legacy launches exactly:
+`0e85faacb8797e4dece20f155802183d37e04d83485466fdcc9d9b02c756f5b3`.
+That identifies a repeated definition packet, not its source or persistence.
+
+Comparing the earlier selector-free onboard RX fixture (at 20:41 UTC) with
+the cold Legacy runtime TX (at 21:16 UTC) over **all 264 bytes** gives 26
+differences: two envelope bytes (`0x01` read/write opcode and `0x02`
+onboard/runtime section), plus exactly these **24 body offsets** (hex):
+
+```text
+24 30 37 38 3E 41 46 48 4A 4D 51 53 57 5B 5D 5E 60 61 63 64 68 78 79 E3
+```
+
+Each listed body byte is zero in the cold Legacy TX and nonzero in the prior
+onboard RX. None is among the codec's confirmed polling, X/Y DPI, active-stage,
+enabled-stage, stage-color or 11 button-record fields. The decoded **known**
+settings match: 1000 Hz; stages 800/1600/3200/6400 DPI with colors
+`#2B00FF/#CD00FF/#32FF00/#FF0000`; stage 0 active; Button 4 Back, Button 5
+macro reference, and every other button binding identical. The byte differences
+are not permission to treat the opaque fields as unimportant, reserved, a
+checksum or safe zero-padding. The earlier onboard image is a retained snapshot,
+not a new post-launch readback.
+
+In the two older warm Legacy launch captures, the populated runtime RX and
+subsequent runtime TX differ only at byte `0x01` (`81` to `01`). By contrast,
+the old warm runtime TX and this cold runtime TX differ at exactly the 24
+body offsets above; the known settings are still identical. The old warm
+runtime RX and earlier onboard RX differ in the section byte plus five body
+offsets (`37 38 78 79 E3`). Thus the cold Legacy image is **not** a literal
+onboard clone, nor a one-byte-opcode rewrite of a previously populated runtime
+read. Its origin (local preset, cache, constructed defaults or combination)
+is not proven. No onboard read occurred during the captured Legacy launch.
+
+Golden offline tests parse the actual cold reports, reject the empty RX as a
+write baseline even after changing its opcode, validate the Legacy TX's known
+fields, compare all decoded settings with the prior onboard fixture, and assert
+the exact 24 opaque byte differences. This guards the evidence against an
+accidental “copy onboard and zero the rest” interpretation. It does **not**
+authorize a new host-write sequence or remove the runtime gate.
+
+#### Cross-capture check of the 24-byte signature (2026-09-28)
+
+A read-only scan of 32 retained, previously identity-filtered USBPcap files
+found 73 complete `07 01/81 01/04` profile images in 29 files. The sampled
+files cover isolated Button 4 multimedia/primary-click changes, macro playback,
+onboard macro saves/restores, two Legacy launches and the cold launch; three
+files had no complete profile image. No USB capture or HID operation was made.
+
+| Observed group | Images | Distinct known-field fingerprints | The 24 offsets above |
+| --- | ---: | ---: | --- |
+| Warm runtime read/write | 61 | 11 | One unchanged nonzero signature |
+| Onboard read/write | 10 | 3 | One unchanged nonzero signature, different from runtime |
+| Cold Legacy runtime read/write | 2 | 2 | All zero at these offsets; RX body wholly empty, TX otherwise populated |
+
+The two stable nonzero signatures differ at `0x37`, `0x38`, `0x78`, `0x79` and
+`0xE3`. Warm runtime has `05 05`, `64 0A`, `3C` there; onboard has `04 04`,
+`01 32`, `D5`. The other 19 listed offsets are nonzero and identical in both
+warm/runtime and onboard images, but zero in the cold runtime image. These
+values survived multiple actual changes to known settings, including different
+button bindings and macro states. Consequently `0xE3` did **not** track the
+full-profile changes in this sample; calling it a whole-image checksum would
+be unsupported. The three fingerprints are descriptive, not legal values or
+an encoder table. Section, startup state and application state remain
+confounded; only release `1124` was sampled, and one cold run cannot establish
+causality.
+
+The earlier populated warm runtime RX and subsequent TX are now retained as a
+second sanitized image-only fixture,
+`crates/hyperx-protocol/tests/fixtures/warm-legacy-startup-images.hex` (macro
+events omitted). Golden tests verify its RX-to-TX opcode-only change and its
+exact contrast with cold TX and the prior onboard RX. The sample-wide counts
+above come from private captures, not from the committed fixtures.
+
+For a possible software-state source, the installed Legacy Store package's
+read-only `LocalState/Master.hxp` (version 40, last modified before the cold
+capture) decodes to the same four DPI values and colors. The older exported
+`Base Settings.hxp` does too. Neither contains a decoded USB runtime image in
+our parser; matching settings and file timestamps do not prove which file,
+cache or defaults produced Legacy's cold write. Two shipped version-36 presets
+remain unsupported by the version-40 parser and were not treated as evidence
+for this device's current state.
+An offline exact-byte search found neither the complete 264-byte warm runtime
+TX nor any 8-byte window of that TX containing at least four nonzero bytes in
+`Master.hxp` or the older exported `.hxp`. This rules out a literal embedded
+copy of this captured packet at those paths, not a structured/encoded source
+from which Legacy might construct the same settings.
+
+**Conclusion:** startup ACKs and captured delays do not establish a usable
+runtime image. In this cold launch Legacy also received an empty runtime, then
+supplied macro data and a complete image. There is no evidence here of an
+additional hidden USB copy/bootstrap command before the first selector. The
+old CLI getter cannot safely select cold runtime merely to discover that it is
+empty. This does not authorize cloning an onboard bank, inventing unknown
+fields, replaying local Legacy state or changing command ordering.
+
+**Next work:** determine the provenance/semantics of the 24 differing bytes
+without treating the three observed signatures as a general section codec.
+Existing captures establish stability under button/macro changes, not meaning;
+an isolated source-state comparison is still missing. Design an explicit,
+fully validated cold-runtime activation
+path only after its required baseline, macro definitions and ordering are
+established. Read/inspect must remain non-activating. Any write experiment needs
+a new exact plan/consent, physical reconnect and no onboard save; normal runtime
+CLI remains blocked. No additional selector, init or diagnostic read is needed
+to preserve the evidence just obtained.
+
+Verification: native PowerShell AST parsing passes for both scripts; offline
+mocked guard checks cover missing consent, invalid sidecar path, nonempty file,
+directory/reparse-point signal, competing writer and unknown package version.
+Mocks prohibit process/job creation, so guard tests issue no USB operation.
+The actual wrapper/capture completed with exit 0 and a reviewed non-header file;
+the changed address and traffic establish real identity resolution and launch.
+`git diff --check` passes. Rust source did not change in this experiment; the
+preceding Linux fmt/Clippy/tests/build and native Windows tests/build remain the
+last Rust verification, not a newly claimed run.
 
 ### Offline write guards and failure diagnostics (2026-09-26)
 

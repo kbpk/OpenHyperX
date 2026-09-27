@@ -9,6 +9,10 @@ param(
     [switch]$InitializeSession
 )
 
+# This probe selects runtime and cannot be treated as harmless inspection.
+# Stop even if an older binary is present, before UAC or capture startup.
+throw 'Runtime hardware verification is suspended for device safety (2026-09-27). No CLI/USB operation was started. See docs/research.md.'
+
 $ErrorActionPreference = 'Stop'
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)

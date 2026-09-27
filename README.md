@@ -3,11 +3,21 @@
 OpenHyperX is an experimental, open-source replacement for HyperX NGENUITY,
 starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
 
-> **Experimental software:** discovery, report-descriptor reads and the
-> capture-backed runtime-profile query are read-only; direct RGB is a confirmed
-> but volatile hardware write. Runtime DPI and polling writes are
-> capture-backed and do not save to onboard memory unless the explicit
-> `profile save-to-mouse --confirm` command is used.
+> **Device-safety suspension (2026-09-27):** the runtime selector
+> `07 03 04 64` alone reproduced loss of mouse operation in the local session;
+> USB unplug/replug restored operation. It is not a passive read-address selector.
+> A cold Legacy launch then read an empty runtime image even after its two
+> startup packets; Legacy supplied a populated image itself. Its image differs
+> from the earlier onboard snapshot in 24 not-yet-explained body bytes, so
+> copying the onboard profile is not an established recovery procedure.
+> `info` now reads only identity and the standard HID descriptor, with no vendor
+> reports. All CLI runtime DPI/polling/buttons access, composed apply (including
+> dry-run), save-ACK probes and onboard save are blocked before HID discovery or
+> opening. There is no unsafe override for these runtime paths. Offline tools,
+> TUI and GUI remain available. Isolated lab probes require separate explicit
+> consent and captures; they do not lift the runtime block (see
+> [reverse-engineering workflow](docs/reverse-engineering.md)).
+> Direct RGB uses a separate volatile write path and is not a recovery command.
 > Firmware update, bootloader and DFU operations are deliberately out of scope.
 > No current command writes firmware.
 
@@ -18,8 +28,7 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
 - Pulsefire Raid recognition (`0951:16E4`)
 - display of every HID collection, usage page, usage and device path
 - optional `-v`, `-vv` and `--trace` diagnostics
-- read-only `info` with raw HID descriptor, current polling rate, DPI stages
-  and button bindings
+- descriptor-only `info`, with no runtime-profile query or vendor reports
 - protocol-independent `HidTransport` plus `MockHidTransport` for packet tests
 - volatile RGB with independent wheel/logo colors and foreground Solid, Cycle,
   Pulse, Breathing, Triggered Fade, Confetti, Sun and Twilight renderers
@@ -42,7 +51,7 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
 - offline NGENUITY Legacy version-40 `.hxp` inspection and partial import to a
   portable OpenHyperX TOML profile
 - offline DPI-stage, polling and button-profile parser/patcher with golden tests
-- software TOML profiles: offline validation, read-only change preview and
+- software TOML profiles: offline validation, change-preview encoder and
   preservation-first runtime apply, with final full-image readback
   (whole-profile apply hardware validation is blocked; see profile docs)
 - capture-backed, acknowledged onboard save for current DPI, polling, all 11
@@ -53,6 +62,11 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
 
 The implementation stops wherever protocol evidence stops. Known facts and
 their confidence level are recorded in [docs/research.md](docs/research.md).
+Runtime features above describe retained codecs, tests and historical hardware
+evidence, not permission to use the currently suspended CLI paths. The query
+itself sends `SET_REPORT`; absence of a profile-write packet does not establish
+side-effect-free behavior on a cold device. Do not run an older executable's
+`info` as a recovery diagnostic.
 
 ## Workspace
 
@@ -189,7 +203,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
   run --target x86_64-pc-windows-msvc --bin hyperx-cli -- --trace devices
 ```
 
-Read the standard HID report descriptor and the current runtime profile:
+Read identity and the standard HID report descriptor, without vendor reports:
 
 ```bash
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
@@ -197,11 +211,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
   run --target x86_64-pc-windows-msvc --bin hyperx-cli -- info --descriptor
 ```
 
-`info` sends only the repeated, capture-backed runtime-profile read sequence;
-it does not send the profile-write packet. Close every NGENUITY variant first
-so two programs do not access the configuration collection concurrently.
+`info` no longer sends the captured runtime query, and does not report current
+polling, DPI or button settings. Close every NGENUITY variant first so two
+programs do not access the configuration collection concurrently.
 
-Read or change runtime DPI stages and polling rate:
+Retained runtime DPI/polling command syntax (currently blocked before HID I/O):
 
 ```bash
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
@@ -365,8 +379,10 @@ or saves onboard, and a historical snapshot is not the mouse's current state.
 
 Whole-profile apply is not yet hardware-validated: its first polling-only test
 stopped on an empty runtime readback, and subsequent reads remain unusable.
-Do not continue mutable tests until physical reconnect and a valid baseline
-read. The older individual-operation evidence does not establish this new flow.
+After reconnect, another query returned an empty image and was followed by
+physical loss of cursor, clicks and lighting. Even the query is now suspended;
+do not retry it to obtain a baseline. The older individual-operation evidence
+does not establish harmless access to a cold device. See docs/research.md.
 
 ```text
 hyperx-cli profile validate examples/profiles/pulsefire-raid.toml
@@ -375,9 +391,9 @@ hyperx-cli profile apply examples/profiles/pulsefire-raid.toml --lighting-durati
 ```
 
 The example changes DPI, bindings and lighting: edit it to your preferences
-first. Close NGENUITY/OpenRGB before accessing the mouse. Validation is offline;
-dry-run reads current state but sends no setting writes. Apply uses confirmed
-runtime operations only, preserving omissions and unknown bytes. It stops on
+first. Close NGENUITY/OpenRGB before accessing the mouse. Validation is offline.
+Dry-run and apply currently stop before opening HID. The retained apply uses
+confirmed runtime operations only, preserving omissions and unknown bytes. It stops on
 error without retries/rollback; earlier changes may remain. Solid RGB needs
 foreground keepalive and reverts afterward. **Apply never saves onboard.** See
 [docs/profile-format.md](docs/profile-format.md) for fields, macro references,

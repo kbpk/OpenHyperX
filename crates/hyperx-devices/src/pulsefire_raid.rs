@@ -444,6 +444,12 @@ impl<T: HidTransport> PulsefireRaid<T> {
 
     /// Read the current volatile performance/button profile.
     ///
+    /// WARNING: this sends two SET_REPORT packets before GET_REPORT. After a
+    /// cold-device query on 2026-09-27 the operator reported loss of cursor,
+    /// clicks and lighting. The CLI currently blocks this path before opening
+    /// HID. Clients must not treat it as passive discovery or safe inspection;
+    /// the exact selector/request side effects remain under investigation.
+    ///
     /// This replays the exact read sequence observed twice in one local
     /// capture and in earlier isolated setting captures. It performs no
     /// profile write and deliberately does not retry an ambiguous failure.

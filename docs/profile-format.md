@@ -305,11 +305,22 @@ no OpenHyperX root `format_version`.
 
 ## Runtime safety and persistence
 
+**Live access suspended (2026-09-27):** all CLI apply variants, save-to-mouse
+and save-ACK probes stop before HID discovery/opening. The same gate covers live
+DPI, polling and button commands, even getters. The captured query itself was
+followed by physical loss of cursor, clicks and lighting; a valid response
+envelope is not evidence of harmless access. `info` is now descriptor-only.
+The following describes the retained implementation, not a safe recovery path.
+Offline validation, inspection, capture export, import/diff and file editors
+remain available. Do not run an older binary's runtime query to check recovery.
+
 Every path requires a usable baseline layout, enabled DPI in range and confirmed
 binding records; a valid header with an empty body blocks even RGB-only apply.
 Individual DPI, polling and button setters use the same full-baseline gate,
 including before macro uploads. They will not "repair" an invalid snapshot by
-overwriting the requested field. Read-only `info` remains available for inspection.
+overwriting the requested field. Descriptor-only `info` remains available, but
+cannot inspect runtime settings. Offline capture inspection can decode a saved
+image without sending the selector/request.
 The driver plans and validates **all** steps against a fresh snapshot before
 the first mutation. Existing capture-backed operations run in deterministic
 order: polling, DPI, primary layout, individual assignments, then direct RGB.

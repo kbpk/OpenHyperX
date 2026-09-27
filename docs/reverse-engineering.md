@@ -3,6 +3,151 @@
 The rule is one deliberate UI change per capture. Keep firmware-update prompts
 closed and do not capture or replay firmware, bootloader or DFU sessions.
 
+**Runtime-query safety incident (2026-09-27):** do not use the old `info`,
+runtime getters, dry-run, ACK probes or save wrappers to test a cold device.
+The selector `07 03 04 64` alone later reproduced physical loss of operation,
+without request `81` or GET; USB reconnect recovered it. These CLI paths are blocked before
+discovery; `info` reads only standard metadata/descriptor. Historical workflows
+below remain as evidence, not current authorization to replay. Analyze existing
+captures offline before designing another explicitly approved hardware test.
+
+## Isolated GET_REPORT-only lab experiment
+
+`lab raid-feature-get --unsafe` is a hidden Windows diagnostic, not an override
+for suspended runtime commands. It opens only Raid `0951:16E4`, release `1124`,
+interface 1 / usage `FF01:0001`, and requires the exact recorded 24-byte feature
+descriptor. It issues one GET_REPORT for ID `07`, buffer length 264, **without
+any preceding SET_REPORT**, selector, initializer, ACK probe or profile write.
+There is no arbitrary report ID, payload, retry or automatic restoration.
+A returned packet is opaque evidence, not a validated current profile; even
+successful HID transport does not prove that physical input is unaffected.
+
+Use only with explicit operator agreement, writers closed and physical USB
+reconnect available. After building the native Windows CLI, the fixed wrapper
+resolves the current address and records a five-second device-only capture:
+
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/capture-raid-lab-windows.ps1")" \
+  -Interface '\\.\USBPcap1' \
+  -OutputPath '%TEMP%\openhyperx-passive-feature-get.pcapng' \
+  -ConfirmPassiveGet
+```
+
+The controller is an example, not a persistent address. The wrapper refuses
+existing output/log files and competing writers, checks command availability
+through help before recording, and bounds the child CLI to three seconds.
+Review the actual capture for exactly one feature GET (`A1 01`, value `0307`,
+index 1, length 264) and **zero feature SET requests**. Retain the raw response,
+including an empty or unrecognized body. tshark's `usb.data_fragment` can omit
+GET responses: use raw frame bytes and the USBPcap header length as needed.
+Then ask the operator about cursor, primary clicks and lighting. On any failure,
+stop; unplug/replug is an operator action, never an excuse to retry the query.
+This experiment alone must not unblock the two-SET runtime query or setters.
+
+## Isolated read-request / GET experiment (no selector)
+
+`lab raid-read-request-get --unsafe` uses the same strict identity/descriptor
+checks but sends exactly one captured `07 81` SET_REPORT, zero-filled to 264
+bytes, waits 110 ms, then requests feature ID `07` once. The request is matched
+byte-for-byte in two Legacy launch captures; its standalone effect without
+the usual selector remains under investigation. There is no `07 03` selector,
+startup, ACK handle, settings/image write or persistence. Unknown/empty RX is
+retained without assuming it belongs to runtime or onboard. A TX error/short
+write stops before waiting or GET; RX failure never triggers another send.
+
+Obtain consent for this precise sequence separately from the passive GET.
+The fixed `capture-raid-lab-windows.ps1` wrapper (formerly
+`capture-passive-feature-windows.ps1`) requires exactly one experiment-specific
+consent flag; GET-only consent never enables a SET or selector:
+
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/capture-raid-lab-windows.ps1")" \
+  -Interface '\\.\USBPcap1' \
+  -OutputPath '%TEMP%\openhyperx-read-request-get.pcapng' \
+  -ConfirmReadRequestGet
+```
+
+Inspect all control requests and raw response before another operator action.
+Require exactly one feature SET (value `0307`, index 1, length 264, full
+`07 81` + zero-fill), followed by one GET with the same framing; no other
+vendor/class request may be silently discarded. Verify target identity, order,
+timing, USB status and physical cursor/click/lighting behavior. Retain failures
+and capture/stdout/stderr logs outside Git. Stop on physical failure; a normal
+transport result is not evidence of safe runtime selection or usable state.
+
+## Isolated runtime selector (potentially disruptive; no GET)
+
+`lab raid-runtime-select-only --unsafe` sends one fixed `07 03 04 64`
+SET_REPORT, zero-filled to 264 bytes, and closes. Exact identity/release and
+descriptor guards still apply. It never sends `81`, GET, startup, a full
+settings image, RGB, firmware or an onboard save. **This can disable cursor,
+clicks and lighting** if selecting runtime activates an unusable image. It is
+not a read-only command or a normal-user runtime override.
+
+Require fresh explicit agreement to this packet and the risk, writers closed,
+normal mouse behavior beforehand, and physical USB reconnect available. Use
+the bounded fixed wrapper with only `-ConfirmRuntimeSelector`:
+
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/capture-raid-lab-windows.ps1")" \
+  -Interface '\\.\USBPcap1' \
+  -OutputPath '%TEMP%\openhyperx-runtime-selector-only.pcapng' \
+  -ConfirmRuntimeSelector
+```
+
+Inspect the whole capture: exactly one class SET (`21 09`, value `0307`, index
+1, length 264), correct constant bytes and zero-fill, **zero GET_REPORT** and
+no other vendor/class operation. The CLI does not open the ACK collection;
+inspect any captured interrupt responses without issuing a probe. Successful
+USB completion does not establish physical behavior, valid state or persistence.
+Ask the operator immediately after review; if input/light fails, stop all
+hardware work and have the operator unplug for five seconds and reconnect.
+Do not query the failed device, initialize, restore by software or repeat this
+selector to investigate it. Any later test needs a new plan and consent.
+
+## Cold-device NGENUITY Legacy startup capture
+
+After the selector-only failure, capture **one launch**, not another OpenHyperX
+query. Obtain explicit consent: the mouse must work after an operator USB
+reconnect, Legacy/OpenRGB must have stayed closed, and Legacy can automatically
+apply software state on launch. Do not change settings, accept update prompts,
+or click Save to mouse. The ordinary runtime safety gate remains in force.
+
+`scripts/capture-legacy-startup-windows.ps1` activates only the locally observed
+Microsoft Store Legacy package `33C30B79.HyperXNGenuity`, version `5.38.0.0`,
+AUMID `33C30B79.HyperXNGenuity_0a78dr3hq0pvt!App`. It must run **unelevated**:
+only the identity-resolving capture helper requests UAC. The helper signals
+recording through a caller-created, empty `.ready.json` sidecar in `%TEMP%`;
+the wrapper refuses stale readiness and existing artifacts. It captures for
+12 seconds, requests one activation, and never invokes our CLI or closes
+Legacy automatically (tray closure can itself select a profile).
+
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$(wslpath -w "$PWD/scripts/capture-legacy-startup-windows.ps1")" \
+  -Interface '\\.\USBPcap1' \
+  -OutputPath '%TEMP%\openhyperx-legacy-cold-startup.pcapng' \
+  -ConfirmLegacyLaunch
+```
+
+Keep the capture, readiness and `.launch.json` manifest outside Git. Inspect
+all target class/vendor requests, responses and interrupt/output reports,
+including every operation preceding the first runtime selector; compare full
+bytes and ordering with retained startup captures. A successful activation or
+nonempty capture alone is not proof of safe mouse behavior. Ask the operator
+about cursor/clicks/lighting before further work. On failure stop; do not issue
+a recovery command. Unknown startup packets are evidence, not replay recipes.
+The two selected profile-image reports from the completed experiment are
+available as `crates/hyperx-protocol/tests/fixtures/cold-legacy-startup-images.hex`;
+the macro event stream is deliberately omitted. Inspect this fixture with
+`hyperx-cli profile inspect-capture` offline, and compare it with the earlier
+`read-request-get-onboard.hex` and `warm-legacy-startup-images.hex`. See
+`docs/research.md` for the full-byte diff and 32-file opaque-signature scan
+and its evidence limits. The files are **not** a bootstrap or replay plan.
+
 ## Capture procedure
 
 1. Record mouse part number, firmware/release value, Windows version, exact

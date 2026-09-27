@@ -704,6 +704,12 @@ impl PerformanceProfile {
     /// runtime write image. Unknown records and out-of-range enabled DPI must
     /// not be carried into a full-image write, even when changing another field.
     /// Inspection through dpi_profile remains permissive.
+    ///
+    /// This is necessary, not sufficient, for a hardware write: the cold Legacy
+    /// startup capture has a populated image whose known settings validate,
+    /// while 24 currently opaque bytes differ from both the previous onboard
+    /// and warm runtime images. Passing this check does not authorize cold
+    /// bootstrap, prove image provenance or lift the CLI runtime safety gate.
     pub fn validate_confirmed_runtime_settings(&self) -> Result<(), PerformanceProfileError> {
         if self.section != ProfileSection::Runtime {
             return Err(PerformanceProfileError::ExpectedRuntimeSettingsSource(
@@ -1337,6 +1343,10 @@ pub fn encode_vendor_session_start_reports() -> [[u8; DIRECT_REPORT_LENGTH]; 2] 
 ///
 /// Its individual fields are not generalized: only the exact locally
 /// repeated `07 03 04 64` report is exposed.
+/// WARNING: selecting runtime is not proven side-effect-free. On 2026-09-27
+/// the query returned an empty image and the operator reported lost cursor,
+/// clicks and lighting. The CLI suspends runtime access before opening HID.
+/// Keep this codec for offline evidence/tests, not automatic discovery/info.
 pub fn encode_runtime_profile_read_prelude() -> [u8; DIRECT_REPORT_LENGTH] {
     encode_profile_access_prelude(ProfileSection::Runtime)
 }
@@ -1395,6 +1405,8 @@ pub fn encode_onboard_static_lighting_reports(
 }
 
 /// Encode the fixed feature-report request observed before profile reads.
+/// This is a SET_REPORT, not a passive GET_REPORT. A captured sequence alone
+/// does not establish harmless operation when the runtime image is empty.
 pub fn encode_profile_read_request() -> [u8; DIRECT_REPORT_LENGTH] {
     // SET_REPORT 07 81 (otherwise zeros) precedes GET_REPORT. It contains no
     // section byte: the preceding 07 03 selector chooses runtime or onboard.

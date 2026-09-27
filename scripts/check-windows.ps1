@@ -1,6 +1,9 @@
 param([switch]$VerifySoftwareProfilePolling, [switch]$SkipDeviceDiscovery, [switch]$Gui)
 
 $ErrorActionPreference = "Stop"
+if ($VerifySoftwareProfilePolling) {
+    throw 'Runtime hardware verification is suspended for device safety (2026-09-27). Use normal offline tests/build; see docs/research.md.'
+}
 $env:CARGO_INCREMENTAL = "0"
 $cargo = Join-Path $env:USERPROFILE ".cargo\bin\cargo.exe"
 $target = "x86_64-pc-windows-msvc"
@@ -45,6 +48,9 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 & $binary profile inspect-capture crates/hyperx-protocol/tests/fixtures/button4-ab-toggle.hex
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+& $binary profile inspect-capture crates/hyperx-protocol/tests/fixtures/cold-legacy-startup-images.hex
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if (-not $SkipDeviceDiscovery) {

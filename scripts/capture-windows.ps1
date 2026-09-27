@@ -19,10 +19,32 @@ param(
     [int]$DurationSeconds = 15,
 
     [Parameter(Mandatory = $true)]
-    [string]$OutputPath
+    [string]$OutputPath,
+
+    # Optional handshake for an unelevated launch wrapper. The caller owns
+    # this empty sidecar; it is not an arbitrary elevated output destination.
+    [string]$ReadyPath
 )
 
 $ErrorActionPreference = "Stop"
+
+$expandedOutputPath = [Environment]::ExpandEnvironmentVariables($OutputPath)
+$fullOutputPath = [IO.Path]::GetFullPath($expandedOutputPath)
+if (Test-Path -LiteralPath $fullOutputPath) {
+    throw "Refusing to overwrite existing capture: $fullOutputPath"
+}
+if ($ReadyPath) {
+    $ReadyPath = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($ReadyPath))
+    if ($ReadyPath -ne "$fullOutputPath.ready.json" -or
+        (Split-Path -Parent $ReadyPath) -ne [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\')) {
+        throw 'ReadyPath must be the exact capture .ready.json sidecar directly under %TEMP%.'
+    }
+    $signal = Get-Item -LiteralPath $ReadyPath
+    if ($signal.PSIsContainer -or $signal.Length -ne 0 -or
+        ($signal.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'ReadyPath must be a caller-created empty regular file; refusing overwrite.'
+    }
+}
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
@@ -48,6 +70,7 @@ if (-not $isAdministrator) {
     else {
         $arguments += @("-DeviceAddress", $DeviceAddress)
     }
+    if ($ReadyPath) { $arguments += @('-ReadyPath', "`"$ReadyPath`"") }
 
     $elevationOptions = @{
         FilePath     = "powershell.exe"
@@ -85,8 +108,7 @@ if ($PSCmdlet.ParameterSetName -eq "Identity") {
         $VendorId, $ProductId, $Interface, $DeviceAddress)
 }
 
-$expandedOutputPath = [Environment]::ExpandEnvironmentVariables($OutputPath)
-$fullOutputPath = [IO.Path]::GetFullPath($expandedOutputPath)
+# Recheck after elevation/discovery in case another capture created it.
 if (Test-Path -LiteralPath $fullOutputPath) {
     throw "Refusing to overwrite existing capture: $fullOutputPath"
 }
@@ -113,6 +135,16 @@ $capture = Start-Process @captureOptions
 Write-Output ("Capturing {0}, device address {1}, for {2} seconds..." -f $Interface, $DeviceAddress, $DurationSeconds)
 
 try {
+    if ($ReadyPath) {
+        if ($capture.HasExited) { throw 'USBPcap exited before the ready handshake.' }
+        $ready = [ordered]@{
+            StartedUtc = [DateTime]::UtcNow.ToString('o')
+            Interface = $Interface
+            DeviceAddress = $DeviceAddress
+            DurationSeconds = $DurationSeconds
+        }
+        $ready | ConvertTo-Json | Set-Content -LiteralPath $ReadyPath -Encoding UTF8
+    }
     $exitedEarly = $capture.WaitForExit($DurationSeconds * 1000)
     if ($exitedEarly) {
         throw "USBPcap exited before the requested duration (exit code $($capture.ExitCode))."

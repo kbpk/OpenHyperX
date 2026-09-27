@@ -1,5 +1,9 @@
 param([switch]$ConfirmRuntimeWrites)
 
+# A stale executable would still run the hazardous query. Stop before invoking
+# any binary, checking processes, creating logs or touching USB.
+throw 'Runtime hardware verification is suspended for device safety (2026-09-27). No CLI/USB operation was started. See docs/research.md.'
+
 # Opt-in test of the real executable. Changes polling only, verifies every
 # profile byte, restores after success, and never saves onboard. An ambiguous
 # failure stops without automatic retry or blind restoration.

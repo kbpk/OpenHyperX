@@ -7,6 +7,9 @@ param(
     [string]$CapturePrefix
 )
 
+# Block even when the native executable has not been rebuilt; no UAC or capture.
+throw 'Runtime hardware verification is suspended for device safety (2026-09-27). No CLI/USB operation was started. See docs/research.md.'
+
 # Fixed-purpose, volatile-only lab test. No physical macro execution, onboard
 # save, raw-send facility, automatic retry or restoration after an ambiguous failure.
 $ErrorActionPreference = 'Stop'

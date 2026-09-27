@@ -51,6 +51,28 @@ fn example_profile_validates_without_hardware() {
 }
 
 #[test]
+fn cold_legacy_startup_fixture_shows_empty_read_before_populated_write_offline() {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../hyperx-protocol/tests/fixtures/cold-legacy-startup-images.hex");
+    let output = cli(&["profile", "inspect-capture", fixture.to_str().unwrap()]);
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    for fragment in [
+        "2 report(s)",
+        "Runtime DeviceReadResponse",
+        "WARNING: empty body after the report header",
+        "Runtime HostWrite",
+        "Polling rate: 1000 Hz",
+        "1: 800 DPI, color #2B00FF",
+        "Button 5:         Macro reference",
+        "no HID device was discovered or opened",
+    ] {
+        assert!(stdout.contains(fragment), "missing {fragment}: {stdout}");
+    }
+    assert!(!stdout.contains("Runtime macro for"));
+}
+
+#[test]
 fn optional_settings_and_binding_families_validate_without_a_format_version() {
     for source in [
         "[polling]\nhz = 125\n",
@@ -342,4 +364,41 @@ fn capture_inspection_supports_golden_hex_unknown_packets_and_invalid_input() {
     assert!(String::from_utf8(output.stderr)
         .unwrap()
         .contains("16 MiB limit"));
+}
+
+#[test]
+fn selector_free_request_fixture_is_onboard_not_an_assumed_runtime_read() {
+    let source = include_str!("../../hyperx-protocol/tests/fixtures/read-request-get-onboard.hex");
+    let file = ProfileFile::new(source);
+    let output = cli(&[
+        "--trace",
+        "profile",
+        "inspect-capture",
+        file.0.to_str().unwrap(),
+    ]);
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    for expected in [
+        "2 report(s)",
+        "no section in this packet",
+        "Profile image: Onboard DeviceReadResponse",
+        "1000 Hz",
+        "800 DPI",
+        "6400 DPI",
+        "definition is not present in this profile image",
+        "no HID device was discovered or opened",
+        "no reports were replayed",
+    ] {
+        assert!(stdout.contains(expected), "missing {expected}: {stdout}");
+    }
+    for wrong in [
+        "Profile image: Runtime",
+        "Confirmed Runtime profile selector",
+        "definition is not present in the runtime profile",
+        "enumerated HID collection",
+        "raw HID report",
+    ] {
+        assert!(!stdout.contains(wrong), "unexpected {wrong}: {stdout}");
+    }
+    assert_eq!(fs::read_to_string(&file.0).unwrap(), source);
 }

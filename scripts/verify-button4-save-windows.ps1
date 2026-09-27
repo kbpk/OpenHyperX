@@ -13,6 +13,9 @@ param(
     [switch]$ConfirmSave
 )
 
+# Block even when the native executable has not been rebuilt; no UAC or capture.
+throw 'Runtime hardware verification is suspended for device safety (2026-09-27). No CLI/USB operation was started. See docs/research.md.'
+
 # Fixed-purpose lab check for the locally recorded Raid release-1124 state:
 # Button 5 has coverage-recorded-timing, wheel is off, logo is blue. This is
 # not a general profile importer and never exposes raw reports or firmware I/O.

@@ -166,6 +166,7 @@ pub mod testing {
         feature_rx: VecDeque<Result<Vec<u8>, HidError>>,
         feature_tx_attempts: Vec<Vec<u8>>,
         feature_read_attempts: usize,
+        descriptor: Option<Vec<u8>>,
         expected_output_tx: VecDeque<Vec<u8>>,
         input_rx: VecDeque<Vec<u8>>,
     }
@@ -182,6 +183,10 @@ pub mod testing {
             let report = report.into();
             let length = report.len();
             self.expect_feature_report_result(report, Ok(length));
+        }
+
+        pub fn set_report_descriptor(&mut self, descriptor: impl Into<Vec<u8>>) {
+            self.descriptor = Some(descriptor.into());
         }
 
         /// Match the exact packet but inject a short write or transport failure.
@@ -316,9 +321,9 @@ pub mod testing {
         }
 
         fn report_descriptor(&self) -> Result<Vec<u8>, HidError> {
-            Err(HidError::Transport(
-                "no mock report descriptor is configured".to_owned(),
-            ))
+            self.descriptor.clone().ok_or_else(|| {
+                HidError::Transport("no mock report descriptor is configured".to_owned())
+            })
         }
     }
 }

@@ -37,6 +37,7 @@ use hyperx_protocol::{
 };
 use tracing_subscriber::EnvFilter;
 
+mod lab;
 mod profile_tools;
 
 #[derive(Debug, Parser)]
@@ -60,13 +61,19 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Isolated, explicitly authorized diagnostics; not normal device control.
+    #[command(hide = true)]
+    Lab {
+        #[command(subcommand)]
+        command: lab::LabCommand,
+    },
     /// Enumerate supported HyperX mice and their HID collections.
     Devices {
         /// Also print HID collections belonging to unsupported devices.
         #[arg(long)]
         all: bool,
     },
-    /// Show the HID descriptor and read the current runtime profile.
+    /// Show identity and the standard HID descriptor; send no vendor reports.
     Info {
         /// Print the complete raw HID report descriptor in hexadecimal.
         #[arg(long)]
@@ -77,17 +84,17 @@ enum Command {
         #[command(subcommand)]
         command: RgbCommand,
     },
-    /// Read or change the active runtime DPI stage.
+    /// Runtime DPI access (temporarily blocked for device safety).
     Dpi {
         #[command(subcommand)]
         command: DpiCommand,
     },
-    /// Read or change the runtime USB polling rate.
+    /// Runtime polling access (temporarily blocked for device safety).
     Polling {
         #[command(subcommand)]
         command: PollingCommand,
     },
-    /// Read button mappings or apply an exact capture-backed runtime mapping.
+    /// Button operations; live access is blocked, offline tools remain available.
     Buttons {
         #[command(subcommand)]
         command: ButtonsCommand,
@@ -155,11 +162,10 @@ enum ProfileCommand {
     },
     /// Validate a software TOML profile without discovering or opening HID.
     Validate { file: PathBuf },
-    /// Experimental composed runtime apply; hardware validation is pending.
-    /// Close NGENUITY/OpenRGB first. Never saves onboard.
+    /// Composed runtime apply (temporarily blocked, including --dry-run).
     Apply {
         file: PathBuf,
-        /// Read current state and preview; send no configuration writes.
+        /// Preview current state (blocked: the query itself can affect the mouse).
         #[arg(long, conflicts_with = "lighting_duration")]
         dry_run: bool,
         /// Keep Solid RGB alive in the foreground for this many seconds.
@@ -192,14 +198,14 @@ enum ProfileCommand {
         /// New TOML file. Existing files are never overwritten.
         output: PathBuf,
     },
-    /// Check the save ACK path without writing a profile image or onboard memory.
+    /// Save ACK probe (temporarily blocked: it selects the runtime profile).
     #[command(name = "check-save-ack")]
     CheckSaveAck {
         /// Explicitly send the captured volatile Legacy session startup first.
         #[arg(long)]
         initialize_session: bool,
     },
-    /// Persist confirmed runtime settings to the mouse's onboard profile.
+    /// Onboard save (temporarily blocked: it first accesses the runtime profile).
     #[command(name = "save-to-mouse")]
     SaveToMouse {
         /// Static scroll-wheel snapshot carried by the save transaction, or "off".
@@ -719,6 +725,7 @@ fn main() -> Result<()> {
     init_logging(cli.verbose, cli.trace)?;
 
     match cli.command {
+        Command::Lab { command } => lab::run(command, &HidApiDiscovery),
         Command::Devices { all } => devices(&HidApiDiscovery, all),
         Command::Info { descriptor } => info(&HidApiDiscovery, descriptor),
         Command::Rgb { command } => match command {
@@ -848,9 +855,6 @@ fn profile(command: ProfileCommand) -> Result<()> {
             let (_, settings) = load_software_profile(&file)?;
             if lighting_duration.is_some() && settings.direct_colors().is_none() {
                 return Err(anyhow!("--lighting-duration requires a [lighting] section"));
-            }
-            if !dry_run {
-                eprintln!("Warning: composed profile apply is not yet hardware-validated; the first native test stopped on an empty readback. See docs/profile-format.md. Close NGENUITY/OpenRGB; no onboard save will be attempted.");
             }
             let mut device = open_pulsefire_raid()?;
             if dry_run {
@@ -1667,6 +1671,18 @@ fn info(discovery: &dyn HidDiscovery, show_descriptor: bool) -> Result<()> {
             configuration.path
         )
     })?;
+    print_descriptor_info(&transport, configuration, show_descriptor)
+}
+
+// Intentionally accepts only a borrowed transport and never constructs the
+// driver. The old `info` query sent 07 03 04 64 and 07 81 SET_REPORT packets;
+// on 2026-09-27 the operator reported loss of cursor/clicks/lighting afterward.
+// A captured query is NOT evidence of side-effect-free access to a cold device.
+fn print_descriptor_info(
+    transport: &dyn HidTransport,
+    configuration: &HidInterfaceInfo,
+    show_descriptor: bool,
+) -> Result<()> {
     let descriptor = transport
         .report_descriptor()
         .context("failed to read the HID report descriptor")?;
@@ -1693,18 +1709,10 @@ fn info(discovery: &dyn HidDiscovery, show_descriptor: bool) -> Result<()> {
         println!("  {}", format_hex(&descriptor));
     }
 
-    let mut device = PulsefireRaid::new(transport)?;
-    let profile = device.runtime_profile().context(
-        "failed to read the Pulsefire Raid runtime profile; close every NGENUITY variant and retry",
-    )?;
-    print_runtime_profile(&profile);
+    println!("Runtime settings: not queried (vendor-profile access is temporarily blocked for device safety).");
+    println!("No vendor feature/input/output reports were sent or requested.");
 
     Ok(())
-}
-
-fn print_runtime_profile(profile: &PerformanceProfile) {
-    println!("Runtime profile:");
-    print_profile_settings(profile);
 }
 
 fn print_profile_settings(profile: &PerformanceProfile) {
@@ -1792,7 +1800,7 @@ fn inspect_capture_file(path: &Path, raw: bool, all_raw: bool) -> Result<()> {
                 *previous = Some(*profile);
             }
             RaidReportInspection::ProfileSelector(section) => println!("  Confirmed {section:?} profile selector."),
-            RaidReportInspection::ProfileReadRequest => println!("  Confirmed profile read request; section comes from the preceding selector."),
+            RaidReportInspection::ProfileReadRequest => println!("  Confirmed profile read request; no section in this packet. Inspect any preceding selector and the RX section byte."),
             RaidReportInspection::VendorSessionPhase(phase) => println!("  Confirmed fixed volatile vendor-session phase {phase}; not a reset/firmware operation."),
             RaidReportInspection::DirectRgb { wheel, logo } => println!("  Volatile direct RGB: wheel={wheel}, logo={logo}; needs keepalive, not onboard persistence."),
             RaidReportInspection::OnboardSolidSnapshot { index, colors } => {
@@ -1819,7 +1827,7 @@ fn print_button_profile(profile: &PerformanceProfile, indent: &str) {
     for control in PulsefireRaidControl::ALL {
         if profile.has_confirmed_macro_reference(control) {
             println!(
-                "{indent}{:<17} Macro reference (definition is not present in the runtime profile)",
+                "{indent}{:<17} Macro reference (definition is not present in this profile image)",
                 format!("{}:", control.name())
             );
             continue;
@@ -2108,7 +2116,29 @@ fn buttons(command: ButtonsCommand) -> Result<()> {
 }
 
 fn open_pulsefire_raid() -> Result<PulsefireRaid<HidApiTransport>> {
-    let discovery = HidApiDiscovery;
+    open_runtime_pulsefire_raid_with(&HidApiDiscovery)
+}
+
+fn open_runtime_pulsefire_raid_with(
+    discovery: &dyn HidDiscovery,
+) -> Result<PulsefireRaid<HidApiTransport>> {
+    require_runtime_access()?;
+    open_direct_rgb_pulsefire_raid_with(discovery)
+}
+
+fn require_runtime_access() -> Result<()> {
+    // Fail BEFORE discovery/opening, not after receiving the zero-filled image:
+    // by then the captured SET_REPORT query may already have affected the mouse.
+    // No --unsafe override or speculative recovery/initializer is offered.
+    Err(anyhow!("Pulsefire Raid runtime access is temporarily blocked for device safety: the profile query was followed by loss of cursor, clicks and lighting. No HID enumeration or opening was attempted. Use devices or descriptor-only info, or offline profile/macro tools. See docs/research.md; do not retry the old query."))
+}
+
+// Direct RGB is a distinct, explicitly requested volatile write. Its 07 0A
+// packets do not run either runtime-query SET_REPORT; keep the proven encoder
+// separate without making an implicit recovery claim or using it in `info`.
+fn open_direct_rgb_pulsefire_raid_with(
+    discovery: &dyn HidDiscovery,
+) -> Result<PulsefireRaid<HidApiTransport>> {
     let interfaces = discovery.enumerate()?;
     let configuration = select_configuration_interface(&interfaces)?;
     let transport = HidApiTransport::open(configuration).with_context(|| {
@@ -2121,7 +2151,15 @@ fn open_pulsefire_raid() -> Result<PulsefireRaid<HidApiTransport>> {
 }
 
 fn open_pulsefire_raid_for_save() -> Result<(PulsefireRaid<HidApiTransport>, HidApiTransport)> {
-    let discovery = HidApiDiscovery;
+    open_pulsefire_raid_for_save_with(&HidApiDiscovery)
+}
+
+fn open_pulsefire_raid_for_save_with(
+    discovery: &dyn HidDiscovery,
+) -> Result<(PulsefireRaid<HidApiTransport>, HidApiTransport)> {
+    // Also gates check-save-ack, with or without session initialization. An ACK
+    // proves delivery, not that selecting an empty runtime profile is harmless.
+    require_runtime_access()?;
     let interfaces = discovery.enumerate()?;
     let configuration = select_configuration_interface(&interfaces)?;
     let acknowledgement = select_acknowledgement_interface(&interfaces)?;
@@ -2148,7 +2186,7 @@ fn rgb(wheel: RgbColor, logo: RgbColor, duration_seconds: u64) -> Result<()> {
         return Err(anyhow!("--duration cannot exceed 3600 seconds"));
     }
 
-    let mut device = open_pulsefire_raid()?;
+    let mut device = open_direct_rgb_pulsefire_raid_with(&HidApiDiscovery)?;
     let deadline = Instant::now() + Duration::from_secs(duration_seconds);
 
     loop {
@@ -2180,7 +2218,7 @@ fn rgb_cycle(
     period_seconds: u64,
     logo_phase: u16,
 ) -> Result<()> {
-    let mut device = open_pulsefire_raid()?;
+    let mut device = open_direct_rgb_pulsefire_raid_with(&HidApiDiscovery)?;
     let started = Instant::now();
     let duration = Duration::from_secs(duration_seconds);
     let wheel_effect = SoftwareLightingEffect::Cycle {
@@ -2215,7 +2253,7 @@ fn rgb_play(program: SoftwareLightingProgram) -> Result<()> {
     let logo_effect = program.zones.get("logo");
     let mut trigger = SystemMouseTrigger::new();
     let mut last_trigger_ms = None;
-    let mut device = open_pulsefire_raid()?;
+    let mut device = open_direct_rgb_pulsefire_raid_with(&HidApiDiscovery)?;
     let started = Instant::now();
     let duration = Duration::from_secs(program.duration_seconds);
 
@@ -2407,6 +2445,48 @@ fn print_unsupported(interfaces: &[&HidInterfaceInfo]) {
 mod tests {
     use super::*;
     use hyperx_core::{MacroEvent, MacroPlayback};
+
+    #[test]
+    fn descriptor_only_info_sends_no_vendor_reports() {
+        use hyperx_hid::testing::MockHidTransport;
+
+        for show_raw in [false, true] {
+            let mut transport = MockHidTransport::new(1);
+            transport.set_report_descriptor([
+                0x06, 0x01, 0xFF, 0x09, 0x01, 0xA1, 0x01, 0x85, 0x07, 0x09, 0x20, 0x15, 0x00, 0x26,
+                0xFF, 0x00, 0x75, 0x08, 0x96, 0x07, 0x01, 0xB1, 0x02, 0xC0,
+            ]);
+            print_descriptor_info(&transport, &fixture(), show_raw).unwrap();
+            assert!(transport.feature_reports_sent().is_empty());
+            assert_eq!(transport.feature_read_attempts(), 0);
+            transport.assert_drained();
+        }
+    }
+
+    #[test]
+    fn runtime_and_save_openers_fail_before_discovery() {
+        struct MustNotDiscover;
+        impl HidDiscovery for MustNotDiscover {
+            fn enumerate(&self) -> Result<Vec<HidInterfaceInfo>, hyperx_hid::HidError> {
+                panic!("suspended operation attempted HID discovery");
+            }
+        }
+
+        let runtime = open_runtime_pulsefire_raid_with(&MustNotDiscover)
+            .err()
+            .expect("runtime access must be suspended");
+        let save = open_pulsefire_raid_for_save_with(&MustNotDiscover)
+            .err()
+            .expect("save/ACK access must be suspended");
+        for error in [runtime, save] {
+            assert!(error
+                .to_string()
+                .contains("temporarily blocked for device safety"));
+            assert!(error
+                .to_string()
+                .contains("No HID enumeration or opening was attempted"));
+        }
+    }
 
     #[test]
     fn first_value_skips_missing_strings() {
@@ -3209,7 +3289,7 @@ mod tests {
         .is_err());
     }
 
-    fn fixture() -> HidInterfaceInfo {
+    pub(super) fn fixture() -> HidInterfaceInfo {
         HidInterfaceInfo {
             path: r"\\?\hid#vid_0951&pid_16e4&mi_01".to_owned(),
             vendor_id: 0x0951,
