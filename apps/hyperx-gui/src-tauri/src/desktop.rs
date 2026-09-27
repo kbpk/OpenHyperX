@@ -38,6 +38,13 @@ fn gui_edit(
     with_session(&state, |session| session.edit(expected_revision, edit))
 }
 #[tauri::command]
+fn gui_set_local_draft(state: State<'_, Managed>, pending: bool) -> Result<(), String> {
+    with_session(&state, |session| {
+        session.set_local_draft(pending);
+        Ok(())
+    })
+}
+#[tauri::command]
 fn gui_reset(
     state: State<'_, Managed>,
     expected_revision: u64,
@@ -84,7 +91,7 @@ async fn gui_save_profile(
     state: State<'_, Managed>,
     expected_revision: u64,
 ) -> Result<Snapshot, String> {
-    with_session(&state, |session| session.check_revision(expected_revision))?;
+    with_session(&state, |session| session.check_save(expected_revision))?;
     let selected = tauri::async_runtime::spawn_blocking(move || {
         app.dialog()
             .file()
@@ -96,7 +103,7 @@ async fn gui_save_profile(
     .await
     .map_err(|error| error.to_string())?;
     with_session(&state, |session| {
-        session.check_revision(expected_revision)?;
+        session.check_save(expected_revision)?;
         if let Some(file) = selected {
             session.save_new(expected_revision, &file.into_path()?)
         } else {
@@ -114,12 +121,12 @@ pub fn run(demo: bool) {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Managed { session: Mutex::new(session), close_pending: AtomicBool::new(false) })
-        .invoke_handler(tauri::generate_handler![gui_snapshot, gui_edit, gui_reset, gui_open_profile, gui_save_profile])
+        .invoke_handler(tauri::generate_handler![gui_snapshot, gui_edit, gui_set_local_draft, gui_reset, gui_open_profile, gui_save_profile])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.state::<Managed>();
                 let (revision, dirty) = state.session.lock()
-                    .map(|session| (Some(session.snapshot().revision), session.dirty()))
+                    .map(|session| { let (token, dirty) = session.close_guard(); (Some(token), dirty) })
                     .unwrap_or((None, true));
                 if !dirty { return; }
                 api.prevent_close();
@@ -127,7 +134,7 @@ pub fn run(demo: bool) {
                 let app = window.app_handle().clone();
                 let window = window.clone();
                 std::thread::spawn(move || {
-                    let confirmed = app.dialog().message("Discard unsaved file edits and close OpenHyperX? No mouse settings have been changed.")
+                    let confirmed = app.dialog().message("Discard unsaved file and macro timeline edits and close OpenHyperX? No mouse settings have been changed.")
                         .title("Unsaved offline profile")
                         .kind(MessageDialogKind::Warning)
                         .buttons(MessageDialogButtons::OkCancel)
@@ -137,7 +144,7 @@ pub fn run(demo: bool) {
                     if confirmed {
                         let managed = app.state::<Managed>();
                         if let Ok(session) = managed.session.lock() {
-                            if Some(session.snapshot().revision) == revision {
+                            if Some(session.close_guard().0) == revision {
                                 let _ = window.destroy();
                             }
                         };

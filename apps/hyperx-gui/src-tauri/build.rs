@@ -4,6 +4,7 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "gui_snapshot",
             "gui_edit",
+            "gui_set_local_draft",
             "gui_reset",
             "gui_open_profile",
             "gui_save_profile",

@@ -5,9 +5,13 @@ import type { Edit, Snapshot } from "./types";
 export interface Backend {
   desktop: boolean;
   request(command: string, args?: Record<string, unknown>): Promise<Snapshot>;
+  setLocalDraft?(pending: boolean): Promise<void>;
 }
 export const desktopBackend: Backend = {
   desktop: isTauri(),
+  async setLocalDraft(pending) {
+    if (isTauri()) await invoke("gui_set_local_draft", { pending });
+  },
   async request(command, args) {
     if (isTauri()) return invoke<Snapshot>(command, args);
     if (command === "gui_snapshot") return structuredClone(fixture) as Snapshot;

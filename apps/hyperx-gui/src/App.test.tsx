@@ -32,9 +32,144 @@ function fakeBackend() {
       return current;
     },
   );
-  return { desktop: true, request };
+  return {
+    desktop: true,
+    request,
+    setLocalDraft: vi.fn(async (_pending: boolean) => undefined),
+  };
 }
 describe("offline profile UI", () => {
+  it("retains uncommitted timelines across navigation/revisions and protects save/reset/native close", async () => {
+    const backend = fakeBackend();
+    render(<App backend={backend} />);
+    await screen.findByRole("slider", { name: "Stage 1 DPI slider" });
+    await userEvent.click(screen.getByRole("button", { name: /^Macros$/ }));
+    await userEvent.click(screen.getByRole("button", { name: "New macro" }));
+    fireEvent.change(screen.getByLabelText("Macro name"), {
+      target: { value: "Untitled chord draft" },
+    });
+    await waitFor(() =>
+      expect(backend.setLocalDraft).toHaveBeenLastCalledWith(true),
+    );
+    expect(screen.getByText("Uncommitted macro timeline")).toBeTruthy();
+    expect(screen.queryByText("No unsaved file changes")).toBeNull();
+    const trueCalls = backend.setLocalDraft.mock.calls.filter(
+      ([pending]) => pending,
+    ).length;
+    fireEvent.change(screen.getByLabelText("Macro name"), {
+      target: { value: "Named chord draft" },
+    });
+    await waitFor(() =>
+      expect(
+        backend.setLocalDraft.mock.calls.filter(([pending]) => pending).length,
+      ).toBeGreaterThan(trueCalls),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Performance" }));
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Save new file",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Open profile",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    await userEvent.click(screen.getByRole("button", { name: "250 Hz" }));
+    await userEvent.click(screen.getByRole("button", { name: "Profiles" }));
+    expect(
+      (screen.getByRole("button", { name: "New draft" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "Load demo" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Return to macro editor" }),
+    );
+    expect(
+      (screen.getByLabelText("Macro name") as HTMLInputElement).value,
+    ).toBe("Named chord draft");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add macro to file" }),
+    );
+    await waitFor(() =>
+      expect(backend.request).toHaveBeenCalledWith("gui_edit", {
+        expectedRevision: 1,
+        edit: {
+          kind: "macro-create",
+          macro: {
+            source_id: expect.stringMatching(/^macro-/),
+            name: "Named chord draft",
+            playback: "once",
+            events: [],
+          },
+        },
+      }),
+    );
+    await waitFor(() =>
+      expect(backend.setLocalDraft).toHaveBeenLastCalledWith(false),
+    );
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Save new file",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+  });
+  it("warns when the native local-draft close notification fails without losing the draft", async () => {
+    const backend = fakeBackend();
+    backend.setLocalDraft.mockRejectedValue(new Error("guard unavailable"));
+    render(<App backend={backend} />);
+    await screen.findByRole("slider", { name: "Stage 1 DPI slider" });
+    await userEvent.click(screen.getByRole("button", { name: /^Macros$/ }));
+    await userEvent.click(screen.getByRole("button", { name: "New macro" }));
+    await screen.findByRole("alert");
+    expect(screen.getByRole("alert").textContent).toContain(
+      "native close guard",
+    );
+    expect(screen.getByLabelText("Macro name")).toBeTruthy();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Discard timeline edits" }),
+    );
+    expect(
+      screen.queryByRole("form", { name: "Edit macro timeline" }),
+    ).toBeNull();
+  });
+  it("commits exactly the selected control's typed binding through existing IPC", async () => {
+    const backend = fakeBackend();
+    render(<App backend={backend} />);
+    await screen.findByRole("slider", { name: "Stage 1 DPI slider" });
+    await userEvent.click(screen.getByRole("button", { name: /^Buttons$/ }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Select Button 4 on mouse" }),
+    );
+    await userEvent.selectOptions(
+      screen.getByLabelText("Assignment category"),
+      "disabled",
+    );
+    expect(backend.request).toHaveBeenCalledTimes(1);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Update file binding" }),
+    );
+    await waitFor(() =>
+      expect(backend.request).toHaveBeenCalledWith("gui_edit", {
+        expectedRevision: 0,
+        edit: {
+          kind: "button-binding",
+          control: "button4",
+          binding: { type: "disabled" },
+        },
+      }),
+    );
+    expect(backend.request).toHaveBeenCalledTimes(2);
+  });
   it("selects graphic/table controls without edits or other IPC", async () => {
     const backend = fakeBackend();
     render(<App backend={backend} />);

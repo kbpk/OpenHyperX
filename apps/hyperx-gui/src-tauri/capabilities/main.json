@@ -7,6 +7,7 @@
     "core:default",
     "allow-gui-snapshot",
     "allow-gui-edit",
+    "allow-gui-set-local-draft",
     "allow-gui-reset",
     "allow-gui-open-profile",
     "allow-gui-save-profile"

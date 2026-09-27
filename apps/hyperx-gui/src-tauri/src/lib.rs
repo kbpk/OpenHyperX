@@ -3,10 +3,14 @@ use std::path::Path;
 
 use anyhow::{bail, Result};
 use hyperx_app::{
-    device_descriptor, edit_profile_value, parse_profile, profile_controls, validate_profile,
-    ProfileDocument, ProfileValueEdit,
+    device_descriptor, edit_profile_value, macro_keyboard_names, macro_mouse_button_names,
+    parse_profile, profile_binding_choices, profile_controls, validate_profile,
+    ProfileBindingChoice, ProfileDocument, ProfileValueEdit,
 };
-use hyperx_core::{MacroPlayback, PrimaryButtonLayout, RgbColor, SoftwareProfile};
+use hyperx_core::{
+    MacroPlayback, NamedMacro, PrimaryButtonLayout, RgbColor, SoftwareButtonBinding,
+    SoftwareProfile,
+};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "desktop")]
@@ -30,6 +34,9 @@ pub struct Snapshot {
     pub readiness: Readiness,
     pub changes: Changes,
     pub capabilities: Option<Capabilities>,
+    pub binding_choices: Vec<ProfileBindingChoice>,
+    pub macro_keys: Vec<String>,
+    pub macro_mouse_buttons: Vec<String>,
     pub controls: Vec<Control>,
 }
 #[derive(Debug, Serialize)]
@@ -74,6 +81,8 @@ pub struct Control {
     pub id: &'static str,
     pub name: &'static str,
     pub primary: bool,
+    /// Indices into Snapshot::binding_choices, never USB/HID slot numbers.
+    pub bindings: Vec<usize>,
     pub macros: Option<MacroLimits>,
 }
 #[derive(Debug, Serialize)]
@@ -88,21 +97,69 @@ pub struct MacroLimits {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Edit {
-    StageDpi { index: usize, dpi: u32 },
-    StageColor { index: usize, color: RgbColor },
-    AddStage { dpi: u32, color: RgbColor },
+    StageDpi {
+        index: usize,
+        dpi: u32,
+    },
+    StageColor {
+        index: usize,
+        color: RgbColor,
+    },
+    AddStage {
+        dpi: u32,
+        color: RgbColor,
+    },
     RemoveLastStage {},
-    ActiveStage { index: Option<usize> },
-    Polling { hz: Option<u16> },
-    PrimaryButtons { layout: Option<PrimaryButtonLayout> },
-    SolidZone { zone: String, color: RgbColor },
-    Name { name: String },
+    ActiveStage {
+        index: Option<usize>,
+    },
+    Polling {
+        hz: Option<u16>,
+    },
+    PrimaryButtons {
+        layout: Option<PrimaryButtonLayout>,
+    },
+    ButtonBinding {
+        control: String,
+        #[serde(deserialize_with = "required_binding")]
+        binding: Option<SoftwareButtonBinding>,
+    },
+    MacroCreate {
+        #[serde(rename = "macro")]
+        definition: NamedMacro,
+    },
+    MacroReplace {
+        source_id: String,
+        #[serde(rename = "macro")]
+        definition: NamedMacro,
+        confirm_references: bool,
+    },
+    MacroRemove {
+        source_id: String,
+    },
+    SolidZone {
+        zone: String,
+        color: RgbColor,
+    },
+    Name {
+        name: String,
+    },
+}
+
+// A missing binding field is not consent to remove an assignment. Only an
+// explicitly supplied JSON null denotes omission in a file.
+fn required_binding<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<SoftwareButtonBinding>, D::Error> {
+    Option::deserialize(deserializer)
 }
 
 pub struct Session {
     document: ProfileDocument,
     origin: Origin,
     revision: u64,
+    local_draft: bool,
+    local_draft_generation: u64,
 }
 
 impl Default for Session {
@@ -121,6 +178,8 @@ impl Session {
             }),
             origin: Origin::Empty,
             revision: 0,
+            local_draft: false,
+            local_draft_generation: 0,
         }
     }
     pub fn demo() -> Result<Self> {
@@ -130,10 +189,24 @@ impl Session {
             ))?),
             origin: Origin::Demo,
             revision: 0,
+            local_draft: false,
+            local_draft_generation: 0,
         })
     }
     pub fn dirty(&self) -> bool {
         self.document.dirty()
+    }
+    /// Frontend-only timeline edits are not yet in the file document. Protect
+    /// native close without fabricating a document diff or changing its revision.
+    pub fn set_local_draft(&mut self, pending: bool) {
+        self.local_draft = pending;
+        self.local_draft_generation += 1;
+    }
+    pub fn close_guard(&self) -> ((u64, u64), bool) {
+        (
+            (self.revision, self.local_draft_generation),
+            self.dirty() || self.local_draft,
+        )
     }
     pub fn check_revision(&self, expected: u64) -> Result<()> {
         if self.revision != expected {
@@ -143,8 +216,18 @@ impl Session {
     }
     pub fn check_discard(&self, expected: u64, discard: bool) -> Result<()> {
         self.check_revision(expected)?;
+        if self.local_draft {
+            bail!("update or discard the local macro timeline before replacing the file");
+        }
         if self.dirty() && !discard {
             bail!("explicit confirmation is required to discard unsaved file edits");
+        }
+        Ok(())
+    }
+    pub fn check_save(&self, expected: u64) -> Result<()> {
+        self.check_revision(expected)?;
+        if self.local_draft {
+            bail!("update or discard the local macro timeline before saving the file");
         }
         Ok(())
     }
@@ -175,6 +258,34 @@ impl Session {
                 error: Some(error.to_string()),
             },
         };
+        let mut binding_choices = Vec::new();
+        let controls = profile_controls(&profile.device)
+            .into_iter()
+            .map(|control| Control {
+                id: control.id,
+                name: control.name,
+                primary: control.primary,
+                bindings: profile_binding_choices(profile, control.id)
+                    .into_iter()
+                    .map(|choice| {
+                        if let Some(index) =
+                            binding_choices.iter().position(|entry| entry == &choice)
+                        {
+                            index
+                        } else {
+                            binding_choices.push(choice);
+                            binding_choices.len() - 1
+                        }
+                    })
+                    .collect(),
+                macros: control.macros.map(|limits| MacroLimits {
+                    runtime: limits.runtime_playback.to_vec(),
+                    onboard: limits.onboard_playback.to_vec(),
+                    max_events: limits.max_events,
+                    max_delay_ms: limits.max_delay_ms,
+                }),
+            })
+            .collect();
         Snapshot {
             revision: self.revision,
             origin: self.origin,
@@ -184,6 +295,8 @@ impl Session {
                 .map(|path| path.to_string_lossy().into_owned()),
             dirty: self.dirty(),
             profile: profile.clone(),
+            macro_keys: macro_keyboard_names(&profile.device),
+            macro_mouse_buttons: macro_mouse_button_names(&profile.device),
             readiness: Readiness {
                 error: readiness.error,
                 warnings: readiness.warnings,
@@ -214,20 +327,8 @@ impl Session {
                     })
                     .collect(),
             }),
-            controls: profile_controls(&profile.device)
-                .into_iter()
-                .map(|control| Control {
-                    id: control.id,
-                    name: control.name,
-                    primary: control.primary,
-                    macros: control.macros.map(|limits| MacroLimits {
-                        runtime: limits.runtime_playback.to_vec(),
-                        onboard: limits.onboard_playback.to_vec(),
-                        max_events: limits.max_events,
-                        max_delay_ms: limits.max_delay_ms,
-                    }),
-                })
-                .collect(),
+            controls,
+            binding_choices,
         }
     }
     pub fn edit(&mut self, expected: u64, edit: Edit) -> Result<Snapshot> {
@@ -240,6 +341,20 @@ impl Session {
             Edit::ActiveStage { index } => ProfileValueEdit::ActiveStage(index),
             Edit::Polling { hz } => ProfileValueEdit::Polling(hz),
             Edit::PrimaryButtons { layout } => ProfileValueEdit::PrimaryButtons(layout),
+            Edit::ButtonBinding { control, binding } => {
+                ProfileValueEdit::ButtonBinding { control, binding }
+            }
+            Edit::MacroCreate { definition } => ProfileValueEdit::MacroCreate { definition },
+            Edit::MacroReplace {
+                source_id,
+                definition,
+                confirm_references,
+            } => ProfileValueEdit::MacroReplace {
+                source_id,
+                definition,
+                confirm_references,
+            },
+            Edit::MacroRemove { source_id } => ProfileValueEdit::MacroRemove { source_id },
             Edit::SolidZone { zone, color } => ProfileValueEdit::SolidZone { zone, color },
             Edit::Name { name } => {
                 let name = name.trim();
@@ -282,7 +397,7 @@ impl Session {
         Ok(self.snapshot())
     }
     pub fn save_new(&mut self, expected: u64, path: &Path) -> Result<Snapshot> {
-        self.check_revision(expected)?;
+        self.check_save(expected)?;
         self.document.save_as(path)?;
         self.origin = Origin::File;
         self.revision += 1;
@@ -296,6 +411,40 @@ pub fn smoke_test() -> Result<()> {
     let snapshot = session.edit(0, Edit::StageDpi { index: 0, dpi: 900 })?;
     assert!(snapshot.dirty && snapshot.profile.dpi.as_ref().unwrap().stages[0].x == 900);
     let snapshot = session.edit(snapshot.revision, Edit::StageDpi { index: 0, dpi: 800 })?;
+    assert!(!snapshot.dirty && snapshot.readiness.error.is_none());
+    let original = snapshot.profile.buttons.get("button4").cloned();
+    let snapshot = session.edit(
+        snapshot.revision,
+        Edit::ButtonBinding {
+            control: "button4".into(),
+            binding: Some(SoftwareButtonBinding::Disabled {}),
+        },
+    )?;
+    assert!(
+        snapshot.dirty
+            && matches!(
+                snapshot.profile.buttons["button4"],
+                SoftwareButtonBinding::Disabled {}
+            )
+    );
+    let snapshot = session.edit(
+        snapshot.revision,
+        Edit::ButtonBinding {
+            control: "button4".into(),
+            binding: original,
+        },
+    )?;
+    assert!(!snapshot.dirty && snapshot.readiness.error.is_none());
+    let mut definition = snapshot.profile.macros[0].clone();
+    definition.source_id = "offline-smoke-macro".into();
+    let snapshot = session.edit(snapshot.revision, Edit::MacroCreate { definition })?;
+    assert!(snapshot.dirty && snapshot.profile.macros.len() == 2);
+    let snapshot = session.edit(
+        snapshot.revision,
+        Edit::MacroRemove {
+            source_id: "offline-smoke-macro".into(),
+        },
+    )?;
     assert!(!snapshot.dirty && snapshot.readiness.error.is_none());
     println!("OpenHyperX GUI offline smoke passed: typed edits, validation and diff; no WebView or HID initialized.");
     Ok(())

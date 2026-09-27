@@ -1,6 +1,6 @@
 # Tauri GUI — first offline iteration
 
-The native Windows GUI is an **offline profile editor**, not a live-device
+The native GUI is an **offline profile editor**, not a live-device
 controller. It never discovers HID devices, opens a mouse, sends reports or runs
 RGB keepalive. NGENUITY does not need to be closed for file editing. No background
 service, firmware updater, shell plugin or global keyboard hook is included.
@@ -14,10 +14,12 @@ service, firmware updater, shell plugin or global keyboard hook is included.
 - Buttons: clickable top/left-side maps for all 11 Raid controls, synchronized
   with the assignment table and selected-control details. Tab + Enter/Space
   selects controls too; selection/hover never changes the document or sends IPC.
-  Editable coupled primary-button layout; general binding selectors are not yet
-  implemented.
-- Macros: complete ordered event timelines, playback and individual delays;
-  read-only in this iteration, without collapsing chords.
+  Editable coupled primary-button layout, Mouse/Multimedia/Windows Shortcut/
+  Disabled assignments, searchable named keyboard keys and existing library
+  macros, with per-target choices/validation from Rust.
+- Macros: named-library creation/rename/deletion and editable ordered down/up
+  timelines with individual delays, add/remove/reorder and Once/Toggle/Hold
+  playback, without collapsing chords. Referenced replacements need confirmation.
 - Lighting: independent wheel/logo Solid colors, palette and Off per zone.
 - Profiles: naming, native TOML open/save dialogs, validation and baseline diff.
 
@@ -46,6 +48,54 @@ it never overwrites existing files, even after a native overwrite confirmation.
 Save may preserve an invalid/partial draft and does not grant hardware readiness.
 Failed edits, loads and saves preserve the last successful document/baseline.
 Replacing a dirty document and closing a dirty native window require confirmation.
+
+## Editing bindings
+
+Select a non-primary control on the graphic or table. Choose an assignment
+category and an explicit action/key/macro, then press **Update file binding**.
+Browsing categories and filtering keys are local UI state, not document edits.
+The updated draft still needs Save new file for disk persistence; neither action
+sends USB. Current aliases/imported unsupported assignments remain visible and
+unchanged until explicitly replaced. Failed edits retain the draft and picker.
+
+Not specified removes only that control from `[buttons]`: it means preserve an
+omitted device setting on a future apply, not Disabled or a factory reset.
+Disabled is a separate explicit binding. Left/right are edited only through the
+coupled Standard/Swapped primary layout, never two independent assignments.
+
+Choices come from shared `hyperx-app` metadata. Macro definitions are validated
+against the selected target; missing/duplicate IDs and rejected timelines/modes
+cannot be newly assigned. Rejected library entries stay visible with reasons.
+Editing one binding preserves all other settings, macros, partial flags and
+unresolved source provenance, even if those other fields still fail readiness.
+Runtime encoding support does not imply onboard support or physical verification.
+
+## Editing macros
+
+Macros edits a local timeline draft until **Add macro to file** or **Update file
+macro** is explicitly pressed. Choosing keys, changing playback/delays and
+moving events do not submit IPC edits or send USB. Separate modifier/key down/up
+rows express chords; delay is the interval *after* each row. Keyboard inputs and
+left/right/middle mouse inputs come from Rust metadata, not HID/vendor records.
+Imported aliases, unsupported inputs and long timelines remain visible without
+automatic normalization or truncation.
+
+An edited library entry keeps its opaque ID. Replacement requires explicit
+confirmation if physical or unresolved source assignments reference it.
+Referenced entries cannot be deleted; remove their assignments explicitly first.
+New entries must have fresh IDs and never silently satisfy unresolved imports.
+Library edits preserve other sections, partial flags and import provenance.
+
+The file's event-delay range is 0–65535 ms; this is **not** a hardware limit.
+The currently confirmed Raid encoder limit is 14 transitions and 0–9999 ms,
+with target-specific runtime/onboard playback support shown separately.
+Incomplete/unbalanced drafts can be retained in the file, but cannot be newly
+assigned through the binding picker. Committing/saving a draft never grants
+permission to apply it. No global recorder or keyboard hook is implemented.
+
+Pending local timeline edits survive page navigation, prevent replacing/saving
+the document until committed or discarded, and protect native window close.
+After updating the file draft, use Save new file for disk persistence.
 
 ## Build on Windows from WSL
 
@@ -166,6 +216,11 @@ Rendered-window/native-dialog operator validation is not yet verified.
 
 Frontend tests cover typed edits, slider release, validation, safe save intent,
 dirty-document replacement, preview restrictions and serialized IPC revisions.
+Macro tests cover separate chord transitions, mouse-button events, per-event
+delays, reorder/removal, referenced replacement consent, stale-definition guards,
+local-draft preservation and native close-guard notifications. A browser test
+also exercises editable timeline layout using explicitly mocked native IPC;
+this does not replace native-window operator verification.
 Rust tests cover the real shared validation, preservation of unknown values,
 failed actions, safe new-file writes and the demo JSON contract. Browser tests
 do not replace an operator test of native Windows dialogs/WebView2.
@@ -179,13 +234,14 @@ discard. Commit its Rust sources, `Cargo.toml`, `build.rs`, `tauri.conf.json`,
 `src-tauri/gen` schemas, autogenerated permissions, `target`, `dist` and
 `node_modules` are ignored; they are recreated during install/build.
 
-React → five narrow local-window IPC commands → `Session` → `hyperx-app`.
+React → six narrow local-window IPC commands → `Session` → `hyperx-app`.
 UI requests use a typed edit plus the expected document revision. The backend
 rechecks revisions after native dialogs; stale completion cannot overwrite a
 newer document. The client serializes requests without automatic retry.
 
 The local main-window capability grants only snapshot/edit/reset/open/save
-commands and Tauri core defaults. Native dialogs select paths in Rust; the
+commands, the local timeline close-protection notification, and Tauri core
+defaults. Native dialogs select paths in Rust; the
 frontend cannot supply arbitrary filesystem paths. No JS filesystem/dialog,
 shell, updater or hardware permissions are granted. Production CSP allows no
 external scripts, assets or connections.
@@ -196,8 +252,8 @@ Sources: [Rust IPC](https://v2.tauri.app/develop/calling-rust/),
 
 ## Next
 
-- [ ] General binding selectors, legal choices from shared model metadata.
-- [ ] Editable macro timeline with target-specific limits and library management.
+- [x] General binding selectors, legal choices from shared model metadata.
+- [x] Editable macro timeline with target-specific limits and library management.
 - [ ] Partial/unresolved import inspection and explicit resolution/omission controls.
 - [ ] Keyboard navigation/operator tests of native dialogs and WebView2.
 - [ ] Undo/recovery and a deliberate recoverable overwrite workflow.

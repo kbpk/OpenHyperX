@@ -815,6 +815,41 @@ main {
   outline: 2px solid var(--accent);
   outline-offset: 4px;
 }
+.binding-editor {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+.binding-editor .field-label {
+  max-width: 460px;
+}
+.binding-editor select {
+  width: 100%;
+}
+.binding-editor select[size] {
+  padding: 5px;
+}
+.binding-editor select[size] option {
+  padding: 7px 10px;
+}
+.binding-editor-actions {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  margin-top: 18px;
+}
+.binding-editor-actions span,
+.binding-editor-help,
+.binding-macro-notes p {
+  font-size: 12px;
+}
+.binding-macro-notes p {
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+.binding-editor-actions span {
+  flex: 1;
+}
 @media (max-width: 1000px) {
   .button-map-views {
     grid-template-columns: 1fr;
@@ -888,6 +923,102 @@ td small {
 }
 .profile-details {
   margin-bottom: 20px;
+}
+.macro-library {
+  min-width: 0;
+}
+.macro-editor {
+  margin: 20px 0;
+}
+.macro-id {
+  overflow-wrap: anywhere;
+}
+.macro-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 1fr);
+  gap: 20px;
+}
+.macro-key-search {
+  max-width: 420px;
+}
+.macro-events {
+  list-style: none;
+  padding: 0;
+  margin: 20px 0;
+}
+.macro-event {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1fr) 105px;
+  gap: 14px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  align-items: center;
+}
+.macro-event .field-label {
+  min-width: 0;
+  margin: 0;
+}
+.macro-event input,
+.macro-event select {
+  width: 100%;
+  min-width: 0;
+}
+.event-number {
+  color: var(--accent);
+  font-family: monospace;
+}
+.event-actions {
+  grid-column: 2 / -1;
+  display: flex;
+  gap: 8px;
+}
+.macro-editor-actions,
+.macro-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 18px 0;
+}
+.macro-editor-actions {
+  justify-content: flex-end;
+}
+.macro-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.macro-confirm input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+.macro-table-scroll {
+  overflow-x: auto;
+}
+.macro-preflight {
+  margin: 14px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.macro-preflight p {
+  margin: 10px 0;
+  overflow-wrap: anywhere;
+}
+.macro-preflight summary {
+  cursor: pointer;
+}
+@media (max-width: 960px) {
+  .macro-fields {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .macro-event {
+    grid-template-columns: 20px minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px;
+  }
+  .macro-event > .field-label:nth-of-type(3) {
+    grid-column: 2 / -1;
+    max-width: 180px;
+  }
 }
 .field-label {
   display: flex;

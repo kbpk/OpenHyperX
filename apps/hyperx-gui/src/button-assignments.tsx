@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { buttonLayout } from "./button-layout";
 import { MouseArt } from "./mouse-art";
-import type { Profile, Snapshot } from "./types";
+import { BindingEditor } from "./binding-editor";
+import type { Edit, Profile, Snapshot } from "./types";
 
 type Control = Snapshot["controls"][number];
 const humanize = (text: string) => text.replaceAll("-", " ");
@@ -15,13 +16,28 @@ function assignment(control: Control, profile: Profile) {
   }
   const binding = profile.buttons?.[control.id];
   if (!binding) return "Not specified";
-  const value = binding.action ?? binding.key ?? binding.id;
+  const value =
+    binding.type === "keyboard"
+      ? binding.key
+      : binding.type === "macro"
+        ? binding.id
+        : binding.type === "disabled"
+          ? undefined
+          : binding.action;
   return [humanize(binding.type), value && humanize(value)]
     .filter(Boolean)
     .join(" · ");
 }
 
-export function ButtonAssignments({ snapshot }: { snapshot: Snapshot }) {
+export function ButtonAssignments({
+  snapshot,
+  disabled = true,
+  edit,
+}: {
+  snapshot: Snapshot;
+  disabled?: boolean;
+  edit?: (value: Edit) => Promise<boolean>;
+}) {
   const { profile, controls } = snapshot;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
@@ -164,6 +180,23 @@ export function ButtonAssignments({ snapshot }: { snapshot: Snapshot }) {
             <p>No controls declared for this model.</p>
           )}
         </div>
+        {selected && !selected.primary && (
+          <BindingEditor
+            key={`${selected.id}:${snapshot.revision}`}
+            snapshot={snapshot}
+            control={selected}
+            disabled={disabled || !edit}
+            commit={(binding) =>
+              edit
+                ? edit({
+                    kind: "button-binding",
+                    control: selected.id,
+                    binding,
+                  })
+                : Promise.resolve(false)
+            }
+          />
+        )}
       </section>
       <section className="panel table-panel">
         <div className="section-heading">

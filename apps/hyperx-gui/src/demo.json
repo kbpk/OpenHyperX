@@ -116,29 +116,1393 @@
       }
     ]
   },
+  "binding_choices": [
+    {
+      "label": "Left click",
+      "binding": {
+        "type": "mouse",
+        "action": "left-click"
+      },
+      "error": null
+    },
+    {
+      "label": "Right click",
+      "binding": {
+        "type": "mouse",
+        "action": "right-click"
+      },
+      "error": null
+    },
+    {
+      "label": "Middle click",
+      "binding": {
+        "type": "mouse",
+        "action": "middle-click"
+      },
+      "error": null
+    },
+    {
+      "label": "Back",
+      "binding": {
+        "type": "mouse",
+        "action": "back"
+      },
+      "error": null
+    },
+    {
+      "label": "Forward",
+      "binding": {
+        "type": "mouse",
+        "action": "forward"
+      },
+      "error": null
+    },
+    {
+      "label": "Wheel tilt left",
+      "binding": {
+        "type": "mouse",
+        "action": "tilt-left"
+      },
+      "error": null
+    },
+    {
+      "label": "Wheel tilt right",
+      "binding": {
+        "type": "mouse",
+        "action": "tilt-right"
+      },
+      "error": null
+    },
+    {
+      "label": "DPI toggle",
+      "binding": {
+        "type": "mouse",
+        "action": "dpi-toggle"
+      },
+      "error": null
+    },
+    {
+      "label": "Scroll up",
+      "binding": {
+        "type": "mouse",
+        "action": "scroll-up"
+      },
+      "error": null
+    },
+    {
+      "label": "Scroll down",
+      "binding": {
+        "type": "mouse",
+        "action": "scroll-down"
+      },
+      "error": null
+    },
+    {
+      "label": "Play / pause",
+      "binding": {
+        "type": "multimedia",
+        "action": "play-pause"
+      },
+      "error": null
+    },
+    {
+      "label": "Stop",
+      "binding": {
+        "type": "multimedia",
+        "action": "stop"
+      },
+      "error": null
+    },
+    {
+      "label": "Next track",
+      "binding": {
+        "type": "multimedia",
+        "action": "next-track"
+      },
+      "error": null
+    },
+    {
+      "label": "Previous track",
+      "binding": {
+        "type": "multimedia",
+        "action": "previous-track"
+      },
+      "error": null
+    },
+    {
+      "label": "Mute volume",
+      "binding": {
+        "type": "multimedia",
+        "action": "mute-volume"
+      },
+      "error": null
+    },
+    {
+      "label": "Volume up",
+      "binding": {
+        "type": "multimedia",
+        "action": "volume-up"
+      },
+      "error": null
+    },
+    {
+      "label": "Volume down",
+      "binding": {
+        "type": "multimedia",
+        "action": "volume-down"
+      },
+      "error": null
+    },
+    {
+      "label": "Cycle apps",
+      "binding": {
+        "type": "windows-shortcut",
+        "action": "cycle-apps"
+      },
+      "error": null
+    },
+    {
+      "label": "Switch apps",
+      "binding": {
+        "type": "windows-shortcut",
+        "action": "switch-apps"
+      },
+      "error": null
+    },
+    {
+      "label": "Cut",
+      "binding": {
+        "type": "windows-shortcut",
+        "action": "cut"
+      },
+      "error": null
+    },
+    {
+      "label": "Copy",
+      "binding": {
+        "type": "windows-shortcut",
+        "action": "copy"
+      },
+      "error": null
+    },
+    {
+      "label": "Paste",
+      "binding": {
+        "type": "windows-shortcut",
+        "action": "paste"
+      },
+      "error": null
+    },
+    {
+      "label": "Undo",
+      "binding": {
+        "type": "windows-shortcut",
+        "action": "undo"
+      },
+      "error": null
+    },
+    {
+      "label": "Disabled",
+      "binding": {
+        "type": "disabled"
+      },
+      "error": null
+    },
+    {
+      "label": "A",
+      "binding": {
+        "type": "keyboard",
+        "key": "a"
+      },
+      "error": null
+    },
+    {
+      "label": "B",
+      "binding": {
+        "type": "keyboard",
+        "key": "b"
+      },
+      "error": null
+    },
+    {
+      "label": "C",
+      "binding": {
+        "type": "keyboard",
+        "key": "c"
+      },
+      "error": null
+    },
+    {
+      "label": "D",
+      "binding": {
+        "type": "keyboard",
+        "key": "d"
+      },
+      "error": null
+    },
+    {
+      "label": "E",
+      "binding": {
+        "type": "keyboard",
+        "key": "e"
+      },
+      "error": null
+    },
+    {
+      "label": "F",
+      "binding": {
+        "type": "keyboard",
+        "key": "f"
+      },
+      "error": null
+    },
+    {
+      "label": "G",
+      "binding": {
+        "type": "keyboard",
+        "key": "g"
+      },
+      "error": null
+    },
+    {
+      "label": "H",
+      "binding": {
+        "type": "keyboard",
+        "key": "h"
+      },
+      "error": null
+    },
+    {
+      "label": "I",
+      "binding": {
+        "type": "keyboard",
+        "key": "i"
+      },
+      "error": null
+    },
+    {
+      "label": "J",
+      "binding": {
+        "type": "keyboard",
+        "key": "j"
+      },
+      "error": null
+    },
+    {
+      "label": "K",
+      "binding": {
+        "type": "keyboard",
+        "key": "k"
+      },
+      "error": null
+    },
+    {
+      "label": "L",
+      "binding": {
+        "type": "keyboard",
+        "key": "l"
+      },
+      "error": null
+    },
+    {
+      "label": "M",
+      "binding": {
+        "type": "keyboard",
+        "key": "m"
+      },
+      "error": null
+    },
+    {
+      "label": "N",
+      "binding": {
+        "type": "keyboard",
+        "key": "n"
+      },
+      "error": null
+    },
+    {
+      "label": "O",
+      "binding": {
+        "type": "keyboard",
+        "key": "o"
+      },
+      "error": null
+    },
+    {
+      "label": "P",
+      "binding": {
+        "type": "keyboard",
+        "key": "p"
+      },
+      "error": null
+    },
+    {
+      "label": "Q",
+      "binding": {
+        "type": "keyboard",
+        "key": "q"
+      },
+      "error": null
+    },
+    {
+      "label": "R",
+      "binding": {
+        "type": "keyboard",
+        "key": "r"
+      },
+      "error": null
+    },
+    {
+      "label": "S",
+      "binding": {
+        "type": "keyboard",
+        "key": "s"
+      },
+      "error": null
+    },
+    {
+      "label": "T",
+      "binding": {
+        "type": "keyboard",
+        "key": "t"
+      },
+      "error": null
+    },
+    {
+      "label": "U",
+      "binding": {
+        "type": "keyboard",
+        "key": "u"
+      },
+      "error": null
+    },
+    {
+      "label": "V",
+      "binding": {
+        "type": "keyboard",
+        "key": "v"
+      },
+      "error": null
+    },
+    {
+      "label": "W",
+      "binding": {
+        "type": "keyboard",
+        "key": "w"
+      },
+      "error": null
+    },
+    {
+      "label": "X",
+      "binding": {
+        "type": "keyboard",
+        "key": "x"
+      },
+      "error": null
+    },
+    {
+      "label": "Y",
+      "binding": {
+        "type": "keyboard",
+        "key": "y"
+      },
+      "error": null
+    },
+    {
+      "label": "Z",
+      "binding": {
+        "type": "keyboard",
+        "key": "z"
+      },
+      "error": null
+    },
+    {
+      "label": "0",
+      "binding": {
+        "type": "keyboard",
+        "key": "0"
+      },
+      "error": null
+    },
+    {
+      "label": "1",
+      "binding": {
+        "type": "keyboard",
+        "key": "1"
+      },
+      "error": null
+    },
+    {
+      "label": "2",
+      "binding": {
+        "type": "keyboard",
+        "key": "2"
+      },
+      "error": null
+    },
+    {
+      "label": "3",
+      "binding": {
+        "type": "keyboard",
+        "key": "3"
+      },
+      "error": null
+    },
+    {
+      "label": "4",
+      "binding": {
+        "type": "keyboard",
+        "key": "4"
+      },
+      "error": null
+    },
+    {
+      "label": "5",
+      "binding": {
+        "type": "keyboard",
+        "key": "5"
+      },
+      "error": null
+    },
+    {
+      "label": "6",
+      "binding": {
+        "type": "keyboard",
+        "key": "6"
+      },
+      "error": null
+    },
+    {
+      "label": "7",
+      "binding": {
+        "type": "keyboard",
+        "key": "7"
+      },
+      "error": null
+    },
+    {
+      "label": "8",
+      "binding": {
+        "type": "keyboard",
+        "key": "8"
+      },
+      "error": null
+    },
+    {
+      "label": "9",
+      "binding": {
+        "type": "keyboard",
+        "key": "9"
+      },
+      "error": null
+    },
+    {
+      "label": "F1",
+      "binding": {
+        "type": "keyboard",
+        "key": "f1"
+      },
+      "error": null
+    },
+    {
+      "label": "F2",
+      "binding": {
+        "type": "keyboard",
+        "key": "f2"
+      },
+      "error": null
+    },
+    {
+      "label": "F3",
+      "binding": {
+        "type": "keyboard",
+        "key": "f3"
+      },
+      "error": null
+    },
+    {
+      "label": "F4",
+      "binding": {
+        "type": "keyboard",
+        "key": "f4"
+      },
+      "error": null
+    },
+    {
+      "label": "F5",
+      "binding": {
+        "type": "keyboard",
+        "key": "f5"
+      },
+      "error": null
+    },
+    {
+      "label": "F6",
+      "binding": {
+        "type": "keyboard",
+        "key": "f6"
+      },
+      "error": null
+    },
+    {
+      "label": "F7",
+      "binding": {
+        "type": "keyboard",
+        "key": "f7"
+      },
+      "error": null
+    },
+    {
+      "label": "F8",
+      "binding": {
+        "type": "keyboard",
+        "key": "f8"
+      },
+      "error": null
+    },
+    {
+      "label": "F9",
+      "binding": {
+        "type": "keyboard",
+        "key": "f9"
+      },
+      "error": null
+    },
+    {
+      "label": "F10",
+      "binding": {
+        "type": "keyboard",
+        "key": "f10"
+      },
+      "error": null
+    },
+    {
+      "label": "F11",
+      "binding": {
+        "type": "keyboard",
+        "key": "f11"
+      },
+      "error": null
+    },
+    {
+      "label": "F12",
+      "binding": {
+        "type": "keyboard",
+        "key": "f12"
+      },
+      "error": null
+    },
+    {
+      "label": "F13",
+      "binding": {
+        "type": "keyboard",
+        "key": "f13"
+      },
+      "error": null
+    },
+    {
+      "label": "F14",
+      "binding": {
+        "type": "keyboard",
+        "key": "f14"
+      },
+      "error": null
+    },
+    {
+      "label": "F15",
+      "binding": {
+        "type": "keyboard",
+        "key": "f15"
+      },
+      "error": null
+    },
+    {
+      "label": "F16",
+      "binding": {
+        "type": "keyboard",
+        "key": "f16"
+      },
+      "error": null
+    },
+    {
+      "label": "F17",
+      "binding": {
+        "type": "keyboard",
+        "key": "f17"
+      },
+      "error": null
+    },
+    {
+      "label": "F18",
+      "binding": {
+        "type": "keyboard",
+        "key": "f18"
+      },
+      "error": null
+    },
+    {
+      "label": "F19",
+      "binding": {
+        "type": "keyboard",
+        "key": "f19"
+      },
+      "error": null
+    },
+    {
+      "label": "F20",
+      "binding": {
+        "type": "keyboard",
+        "key": "f20"
+      },
+      "error": null
+    },
+    {
+      "label": "F21",
+      "binding": {
+        "type": "keyboard",
+        "key": "f21"
+      },
+      "error": null
+    },
+    {
+      "label": "F22",
+      "binding": {
+        "type": "keyboard",
+        "key": "f22"
+      },
+      "error": null
+    },
+    {
+      "label": "F23",
+      "binding": {
+        "type": "keyboard",
+        "key": "f23"
+      },
+      "error": null
+    },
+    {
+      "label": "F24",
+      "binding": {
+        "type": "keyboard",
+        "key": "f24"
+      },
+      "error": null
+    },
+    {
+      "label": "KEYPAD 0",
+      "binding": {
+        "type": "keyboard",
+        "key": "keypad-0"
+      },
+      "error": null
+    },
+    {
+      "label": "KEYPAD 1",
+      "binding": {
+        "type": "keyboard",
+        "key": "keypad-1"
+      },
+      "error": null
+    },
+    {
+      "label": "KEYPAD 2",
+      "binding": {
+        "type": "keyboard",
+        "key": "keypad-2"
+      },
+      "error": null
+    },
+    {
+      "label": "KEYPAD 3",
+      "binding": {
+        "type": "keyboard",
+        "key": "keypad-3"
+      },
+      "error": null
+    },
+    {
+      "label": "KEYPAD 4",
+      "binding": {
+        "type": "keyboard",
+        "key": "keypad-4"
+      },
+      "error": null
+    },
+    {
+      "label": "KEYPAD 5",
+      "binding": {
+        "type": "keyboard",
+        "key": "keypad-5"
+      },
+      "error": null
+    },
+    {
+      "label": "KEYPAD 6",
+      "binding": {
+        "type": "keyboard",
+        "key": "keypad-6"
+      },
+      "error": null
+    },
+    {
+      "label": "KEYPAD 7",
+      "binding": {
+        "type": "keyboard",
+        "key": "keypad-7"
+      },
+      "error": null
+    },
+    {
+      "label": "KEYPAD 8",
+      "binding": {
+        "type": "keyboard",
+        "key": "keypad-8"
+      },
+      "error": null
+    },
+    {
+      "label": "KEYPAD 9",
+      "binding": {
+        "type": "keyboard",
+        "key": "keypad-9"
+      },
+      "error": null
+    },
+    {
+      "label": "ENTER",
+      "binding": {
+        "type": "keyboard",
+        "key": "enter"
+      },
+      "error": null
+    },
+    {
+      "label": "ESCAPE",
+      "binding": {
+        "type": "keyboard",
+        "key": "escape"
+      },
+      "error": null
+    },
+    {
+      "label": "BACKSPACE",
+      "binding": {
+        "type": "keyboard",
+        "key": "backspace"
+      },
+      "error": null
+    },
+    {
+      "label": "TAB",
+      "binding": {
+        "type": "keyboard",
+        "key": "tab"
+      },
+      "error": null
+    },
+    {
+      "label": "SPACE",
+      "binding": {
+        "type": "keyboard",
+        "key": "space"
+      },
+      "error": null
+    },
+    {
+      "label": "MINUS",
+      "binding": {
+        "type": "keyboard",
+        "key": "minus"
+      },
+      "error": null
+    },
+    {
+      "label": "EQUAL",
+      "binding": {
+        "type": "keyboard",
+        "key": "equal"
+      },
+      "error": null
+    },
+    {
+      "label": "LEFT BRACKET",
+      "binding": {
+        "type": "keyboard",
+        "key": "left-bracket"
+      },
+      "error": null
+    },
+    {
+      "label": "RIGHT BRACKET",
+      "binding": {
+        "type": "keyboard",
+        "key": "right-bracket"
+      },
+      "error": null
+    },
+    {
+      "label": "BACKSLASH",
+      "binding": {
+        "type": "keyboard",
+        "key": "backslash"
+      },
+      "error": null
+    },
+    {
+      "label": "NON US HASH",
+      "binding": {
+        "type": "keyboard",
+        "key": "non-us-hash"
+      },
+      "error": null
+    },
+    {
+      "label": "SEMICOLON",
+      "binding": {
+        "type": "keyboard",
+        "key": "semicolon"
+      },
+      "error": null
+    },
+    {
+      "label": "APOSTROPHE",
+      "binding": {
+        "type": "keyboard",
+        "key": "apostrophe"
+      },
+      "error": null
+    },
+    {
+      "label": "GRAVE",
+      "binding": {
+        "type": "keyboard",
+        "key": "grave"
+      },
+      "error": null
+    },
+    {
+      "label": "COMMA",
+      "binding": {
+        "type": "keyboard",
+        "key": "comma"
+      },
+      "error": null
+    },
+    {
+      "label": "PERIOD",
+      "binding": {
+        "type": "keyboard",
+        "key": "period"
+      },
+      "error": null
+    },
+    {
+      "label": "SLASH",
+      "binding": {
+        "type": "keyboard",
+        "key": "slash"
+      },
+      "error": null
+    },
+    {
+      "label": "CAPS LOCK",
+      "binding": {
+        "type": "keyboard",
+        "key": "caps-lock"
+      },
+      "error": null
+    },
+    {
+      "label": "PRINT SCREEN",
+      "binding": {
+        "type": "keyboard",
+        "key": "print-screen"
+      },
+      "error": null
+    },
+    {
+      "label": "SCROLL LOCK",
+      "binding": {
+        "type": "keyboard",
+        "key": "scroll-lock"
+      },
+      "error": null
+    },
+    {
+      "label": "PAUSE",
+      "binding": {
+        "type": "keyboard",
+        "key": "pause"
+      },
+      "error": null
+    },
+    {
+      "label": "INSERT",
+      "binding": {
+        "type": "keyboard",
+        "key": "insert"
+      },
+      "error": null
+    },
+    {
+      "label": "HOME",
+      "binding": {
+        "type": "keyboard",
+        "key": "home"
+      },
+      "error": null
+    },
+    {
+      "label": "PAGE UP",
+      "binding": {
+        "type": "keyboard",
+        "key": "page-up"
+      },
+      "error": null
+    },
+    {
+      "label": "DELETE",
+      "binding": {
+        "type": "keyboard",
+        "key": "delete"
+      },
+      "error": null
+    },
+    {
+      "label": "END",
+      "binding": {
+        "type": "keyboard",
+        "key": "end"
+      },
+      "error": null
+    },
+    {
+      "label": "PAGE DOWN",
+      "binding": {
+        "type": "keyboard",
+        "key": "page-down"
+      },
+      "error": null
+    },
+    {
+      "label": "ARROW RIGHT",
+      "binding": {
+        "type": "keyboard",
+        "key": "arrow-right"
+      },
+      "error": null
+    },
+    {
+      "label": "ARROW LEFT",
+      "binding": {
+        "type": "keyboard",
+        "key": "arrow-left"
+      },
+      "error": null
+    },
+    {
+      "label": "ARROW DOWN",
+      "binding": {
+        "type": "keyboard",
+        "key": "arrow-down"
+      },
+      "error": null
+    },
+    {
+      "label": "ARROW UP",
+      "binding": {
+        "type": "keyboard",
+        "key": "arrow-up"
+      },
+      "error": null
+    },
+    {
+      "label": "NUM LOCK",
+      "binding": {
+        "type": "keyboard",
+        "key": "num-lock"
+      },
+      "error": null
+    },
+    {
+      "label": "KEYPAD DIVIDE",
+      "binding": {
+        "type": "keyboard",
+        "key": "keypad-divide"
+      },
+      "error": null
+    },
+    {
+      "label": "KEYPAD MULTIPLY",
+      "binding": {
+        "type": "keyboard",
+        "key": "keypad-multiply"
+      },
+      "error": null
+    },
+    {
+      "label": "KEYPAD SUBTRACT",
+      "binding": {
+        "type": "keyboard",
+        "key": "keypad-subtract"
+      },
+      "error": null
+    },
+    {
+      "label": "KEYPAD ADD",
+      "binding": {
+        "type": "keyboard",
+        "key": "keypad-add"
+      },
+      "error": null
+    },
+    {
+      "label": "KEYPAD ENTER",
+      "binding": {
+        "type": "keyboard",
+        "key": "keypad-enter"
+      },
+      "error": null
+    },
+    {
+      "label": "KEYPAD DECIMAL",
+      "binding": {
+        "type": "keyboard",
+        "key": "keypad-decimal"
+      },
+      "error": null
+    },
+    {
+      "label": "NON US BACKSLASH",
+      "binding": {
+        "type": "keyboard",
+        "key": "non-us-backslash"
+      },
+      "error": null
+    },
+    {
+      "label": "APPLICATION",
+      "binding": {
+        "type": "keyboard",
+        "key": "application"
+      },
+      "error": null
+    },
+    {
+      "label": "POWER",
+      "binding": {
+        "type": "keyboard",
+        "key": "power"
+      },
+      "error": null
+    },
+    {
+      "label": "KEYPAD EQUAL",
+      "binding": {
+        "type": "keyboard",
+        "key": "keypad-equal"
+      },
+      "error": null
+    },
+    {
+      "label": "LEFT CONTROL",
+      "binding": {
+        "type": "keyboard",
+        "key": "left-control"
+      },
+      "error": null
+    },
+    {
+      "label": "LEFT SHIFT",
+      "binding": {
+        "type": "keyboard",
+        "key": "left-shift"
+      },
+      "error": null
+    },
+    {
+      "label": "LEFT ALT",
+      "binding": {
+        "type": "keyboard",
+        "key": "left-alt"
+      },
+      "error": null
+    },
+    {
+      "label": "LEFT GUI",
+      "binding": {
+        "type": "keyboard",
+        "key": "left-gui"
+      },
+      "error": null
+    },
+    {
+      "label": "RIGHT CONTROL",
+      "binding": {
+        "type": "keyboard",
+        "key": "right-control"
+      },
+      "error": null
+    },
+    {
+      "label": "RIGHT SHIFT",
+      "binding": {
+        "type": "keyboard",
+        "key": "right-shift"
+      },
+      "error": null
+    },
+    {
+      "label": "RIGHT ALT",
+      "binding": {
+        "type": "keyboard",
+        "key": "right-alt"
+      },
+      "error": null
+    },
+    {
+      "label": "RIGHT GUI",
+      "binding": {
+        "type": "keyboard",
+        "key": "right-gui"
+      },
+      "error": null
+    },
+    {
+      "label": "AB, 20 ms · ab",
+      "binding": {
+        "type": "macro",
+        "id": "ab"
+      },
+      "error": "binding rejected: runtime macro target MiddleClick has no confirmed Pulsefire Raid encoding"
+    },
+    {
+      "label": "AB, 20 ms · ab",
+      "binding": {
+        "type": "macro",
+        "id": "ab"
+      },
+      "error": null
+    },
+    {
+      "label": "AB, 20 ms · ab",
+      "binding": {
+        "type": "macro",
+        "id": "ab"
+      },
+      "error": "binding rejected: runtime macro target Button7 has no confirmed Pulsefire Raid encoding"
+    },
+    {
+      "label": "AB, 20 ms · ab",
+      "binding": {
+        "type": "macro",
+        "id": "ab"
+      },
+      "error": "binding rejected: runtime macro target Button6 has no confirmed Pulsefire Raid encoding"
+    },
+    {
+      "label": "AB, 20 ms · ab",
+      "binding": {
+        "type": "macro",
+        "id": "ab"
+      },
+      "error": "binding rejected: runtime macro target Button8 has no confirmed Pulsefire Raid encoding"
+    },
+    {
+      "label": "AB, 20 ms · ab",
+      "binding": {
+        "type": "macro",
+        "id": "ab"
+      },
+      "error": "binding rejected: runtime macro target Dpi has no confirmed Pulsefire Raid encoding"
+    },
+    {
+      "label": "AB, 20 ms · ab",
+      "binding": {
+        "type": "macro",
+        "id": "ab"
+      },
+      "error": "binding rejected: runtime macro target WheelTiltLeft has no confirmed Pulsefire Raid encoding"
+    },
+    {
+      "label": "AB, 20 ms · ab",
+      "binding": {
+        "type": "macro",
+        "id": "ab"
+      },
+      "error": "binding rejected: runtime macro target WheelTiltRight has no confirmed Pulsefire Raid encoding"
+    }
+  ],
+  "macro_keys": [
+    "a",
+    "b",
+    "c",
+    "d",
+    "e",
+    "f",
+    "g",
+    "h",
+    "i",
+    "j",
+    "k",
+    "l",
+    "m",
+    "n",
+    "o",
+    "p",
+    "q",
+    "r",
+    "s",
+    "t",
+    "u",
+    "v",
+    "w",
+    "x",
+    "y",
+    "z",
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "f1",
+    "f2",
+    "f3",
+    "f4",
+    "f5",
+    "f6",
+    "f7",
+    "f8",
+    "f9",
+    "f10",
+    "f11",
+    "f12",
+    "f13",
+    "f14",
+    "f15",
+    "f16",
+    "f17",
+    "f18",
+    "f19",
+    "f20",
+    "f21",
+    "f22",
+    "f23",
+    "f24",
+    "keypad-0",
+    "keypad-1",
+    "keypad-2",
+    "keypad-3",
+    "keypad-4",
+    "keypad-5",
+    "keypad-6",
+    "keypad-7",
+    "keypad-8",
+    "keypad-9",
+    "enter",
+    "escape",
+    "backspace",
+    "tab",
+    "space",
+    "minus",
+    "equal",
+    "left-bracket",
+    "right-bracket",
+    "backslash",
+    "non-us-hash",
+    "semicolon",
+    "apostrophe",
+    "grave",
+    "comma",
+    "period",
+    "slash",
+    "caps-lock",
+    "print-screen",
+    "scroll-lock",
+    "pause",
+    "insert",
+    "home",
+    "page-up",
+    "delete",
+    "end",
+    "page-down",
+    "arrow-right",
+    "arrow-left",
+    "arrow-down",
+    "arrow-up",
+    "num-lock",
+    "keypad-divide",
+    "keypad-multiply",
+    "keypad-subtract",
+    "keypad-add",
+    "keypad-enter",
+    "keypad-decimal",
+    "non-us-backslash",
+    "application",
+    "power",
+    "keypad-equal",
+    "left-control",
+    "left-shift",
+    "left-alt",
+    "left-gui",
+    "right-control",
+    "right-shift",
+    "right-alt",
+    "right-gui"
+  ],
+  "macro_mouse_buttons": ["left", "right", "middle"],
   "controls": [
     {
       "id": "left-click",
       "name": "Left click",
       "primary": true,
+      "bindings": [],
       "macros": null
     },
     {
       "id": "right-click",
       "name": "Right click",
       "primary": true,
+      "bindings": [],
       "macros": null
     },
     {
       "id": "wheel-click",
       "name": "Wheel click",
       "primary": false,
+      "bindings": [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+        20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37,
+        38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55,
+        56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73,
+        74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91,
+        92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107,
+        108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121,
+        122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135,
+        136, 137, 138, 139, 140, 141, 142, 143, 144
+      ],
       "macros": null
     },
     {
       "id": "button4",
       "name": "Button 4",
       "primary": false,
+      "bindings": [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+        20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37,
+        38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55,
+        56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73,
+        74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91,
+        92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107,
+        108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121,
+        122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135,
+        136, 137, 138, 139, 140, 141, 142, 143, 145
+      ],
       "macros": {
         "runtime": ["once", "toggle-repeat", "repeat-while-held"],
         "onboard": ["once"],
@@ -150,6 +1514,17 @@
       "id": "button5",
       "name": "Button 5",
       "primary": false,
+      "bindings": [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+        20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37,
+        38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55,
+        56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73,
+        74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91,
+        92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107,
+        108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121,
+        122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135,
+        136, 137, 138, 139, 140, 141, 142, 143, 145
+      ],
       "macros": {
         "runtime": ["once"],
         "onboard": ["once"],
@@ -161,36 +1536,102 @@
       "id": "button7",
       "name": "Button 7",
       "primary": false,
+      "bindings": [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+        20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37,
+        38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55,
+        56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73,
+        74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91,
+        92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107,
+        108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121,
+        122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135,
+        136, 137, 138, 139, 140, 141, 142, 143, 146
+      ],
       "macros": null
     },
     {
       "id": "button6",
       "name": "Button 6",
       "primary": false,
+      "bindings": [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+        20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37,
+        38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55,
+        56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73,
+        74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91,
+        92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107,
+        108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121,
+        122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135,
+        136, 137, 138, 139, 140, 141, 142, 143, 147
+      ],
       "macros": null
     },
     {
       "id": "button8",
       "name": "Button 8",
       "primary": false,
+      "bindings": [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+        20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37,
+        38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55,
+        56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73,
+        74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91,
+        92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107,
+        108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121,
+        122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135,
+        136, 137, 138, 139, 140, 141, 142, 143, 148
+      ],
       "macros": null
     },
     {
       "id": "dpi",
       "name": "DPI button",
       "primary": false,
+      "bindings": [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+        20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37,
+        38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55,
+        56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73,
+        74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91,
+        92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107,
+        108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121,
+        122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135,
+        136, 137, 138, 139, 140, 141, 142, 143, 149
+      ],
       "macros": null
     },
     {
       "id": "wheel-tilt-left",
       "name": "Wheel tilt left",
       "primary": false,
+      "bindings": [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+        20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37,
+        38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55,
+        56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73,
+        74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91,
+        92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107,
+        108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121,
+        122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135,
+        136, 137, 138, 139, 140, 141, 142, 143, 150
+      ],
       "macros": null
     },
     {
       "id": "wheel-tilt-right",
       "name": "Wheel tilt right",
       "primary": false,
+      "bindings": [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+        20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37,
+        38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55,
+        56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73,
+        74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91,
+        92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107,
+        108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121,
+        122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135,
+        136, 137, 138, 139, 140, 141, 142, 143, 151
+      ],
       "macros": null
     }
   ]

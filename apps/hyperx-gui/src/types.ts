@@ -6,18 +6,29 @@ export interface Stage {
   y: number;
   color: string;
 }
-export type Binding = {
-  type: string;
-  action?: string;
-  key?: string;
-  id?: string;
-};
-export type MacroEvent = {
-  type: string;
-  key?: string;
-  button?: string;
-  delay_ms: number;
-};
+export type Binding =
+  | { type: "mouse" | "multimedia" | "windows-shortcut"; action: string }
+  | { type: "keyboard"; key: string }
+  | { type: "macro"; id: string }
+  | { type: "disabled" };
+export interface BindingChoice {
+  label: string;
+  binding: Binding;
+  error: string | null;
+}
+export type MacroEvent =
+  | { type: "key-down" | "key-up"; key: string; delay_ms: number }
+  | {
+      type: "mouse-button-down" | "mouse-button-up";
+      button: string;
+      delay_ms: number;
+    };
+export interface NamedMacro {
+  source_id: string;
+  name: string;
+  playback: Playback;
+  events: MacroEvent[];
+}
 export interface Profile {
   name: string;
   device: string;
@@ -32,12 +43,7 @@ export interface Profile {
   primary_buttons: PrimaryLayout | null;
   buttons?: Record<string, Binding>;
   lighting: { mode: "solid"; zones: Record<string, string> } | null;
-  macros?: {
-    source_id: string;
-    name: string;
-    playback: Playback;
-    events: MacroEvent[];
-  }[];
+  macros?: NamedMacro[];
   unresolved_button_assignments?: {
     source_id: string;
     macro_source_id: string | null;
@@ -72,6 +78,7 @@ export interface Snapshot {
     id: string;
     name: string;
     primary: boolean;
+    bindings: number[];
     macros: {
       runtime: Playback[];
       onboard: Playback[];
@@ -79,6 +86,9 @@ export interface Snapshot {
       max_delay_ms: number;
     } | null;
   }[];
+  binding_choices: BindingChoice[];
+  macro_keys: string[];
+  macro_mouse_buttons: string[];
 }
 export type Edit =
   | { kind: "stage-dpi"; index: number; dpi: number }
@@ -88,6 +98,15 @@ export type Edit =
   | { kind: "active-stage"; index: number | null }
   | { kind: "polling"; hz: number | null }
   | { kind: "primary-buttons"; layout: PrimaryLayout | null }
+  | { kind: "button-binding"; control: string; binding: Binding | null }
+  | { kind: "macro-create"; macro: NamedMacro }
+  | {
+      kind: "macro-replace";
+      source_id: string;
+      macro: NamedMacro;
+      confirm_references: boolean;
+    }
+  | { kind: "macro-remove"; source_id: string }
   | { kind: "solid-zone"; zone: string; color: string }
   | { kind: "name"; name: string };
 export type Page =

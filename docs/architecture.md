@@ -144,6 +144,12 @@ implicit ID/control overwrites. Invalid/partial drafts remain inspectable.
 Typed value edits validate the requested field against model metadata while
 preserving other sections, unread values and unresolved provenance; UI controls
 never need to rebuild a profile or guess missing defaults.
+Named-library operations preserve macro identity and all unrelated fields.
+Fresh IDs cannot collide with existing definitions or resolved/unresolved
+references; replacing a referenced definition requires explicit confirmation,
+and deletion is refused until references are explicitly removed. Empty or
+unsupported timelines remain valid *file drafts*, within the file-size limit;
+assignment preflight and hardware-readiness validation remain separate gates.
 This is not yet a hardware session facade; existing CLI device handlers continue
 to use the model driver. The app layer exposes no discovery/HID/send API.
 
@@ -258,7 +264,16 @@ The narrow, revision-checked command surface grants no runtime apply, onboard
 save, raw-report or arbitrary frontend-supplied filesystem path. Native dialogs
 run outside the webview thread and revision checks run again on completion.
 Dirty-window close checks cannot discard a newer revision than the one confirmed.
+Uncommitted frontend timeline edits also protect native close via a narrow local
+draft notification. Its generation is independent of document revision/diff,
+and close-dialog completion checks both tokens before destroying the window.
 The browser fixture is contract-tested against Rust and stays read-only.
+Binding pickers use shared `hyperx-app` candidates and isolated assignment
+preflight, not JavaScript device rules. The snapshot deduplicates choice records;
+control indices reference that presentation catalog, never HID/vendor slots.
+Typed binding IPC preserves unrelated invalid drafts/provenance and resolves
+library IDs unambiguously before editing. Null omits one file assignment and is
+distinct from Disabled. Physical primary clicks remain one coupled layout.
 See [GUI controls, build and backlog](gui.md).
 
 ## Device API direction

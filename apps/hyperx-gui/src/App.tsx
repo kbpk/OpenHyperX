@@ -1,4 +1,11 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   desktopBackend,
   GuiClient,
@@ -8,6 +15,7 @@ import {
 import { Icon } from "./icons";
 import { DeviceRender, MouseArt } from "./mouse-art";
 import { ButtonAssignments } from "./button-assignments";
+import { MacroLibrary } from "./macro-library";
 import type { Edit, Page, Snapshot, Stage } from "./types";
 
 const pages: Page[] = [
@@ -22,11 +30,10 @@ const descriptions: Record<Page, string> = {
   Device: "One mouse. Your settings. No background service.",
   Performance: "Fine-tune your sensitivity and response.",
   Buttons: "Every control, with its own purpose.",
-  Macros: "Inspect the exact sequence, including individual delays.",
+  Macros: "Build the exact sequence, including chords and individual delays.",
   Lighting: "Two zones. Independent colors.",
   Profiles: "Keep your configuration in an open, portable format.",
 };
-const humanize = (text: string) => text.replaceAll("-", " ");
 
 function Dialog({
   title,
@@ -256,6 +263,30 @@ export default function App({
   const [addedDpi, setAddedDpi] = useState(800);
   const [addedColor, setAddedColor] = useState("#FFFFFF");
   const [name, setName] = useState("");
+  const [macroDraft, setMacroDraft] = useState(false);
+  const [macroGeneration, setMacroGeneration] = useState(0);
+  const reportMacroDraft = useCallback((pending: boolean) => {
+    setMacroDraft(pending);
+    setMacroGeneration((generation) => generation + 1);
+  }, []);
+  const [draftGuardError, setDraftGuardError] = useState<string | null>(null);
+  const draftGuardQueue = useRef<Promise<unknown>>(Promise.resolve());
+  useEffect(() => {
+    if (!backend.desktop || !backend.setLocalDraft) return;
+    // Keep true/false notifications ordered, separately from document edits.
+    draftGuardQueue.current = draftGuardQueue.current
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          await backend.setLocalDraft!(macroDraft);
+          setDraftGuardError(null);
+        } catch {
+          setDraftGuardError(
+            "Cannot notify the native close guard. Keep this window open until your timeline is updated or discarded.",
+          );
+        }
+      });
+  }, [backend, macroDraft, macroGeneration]);
   useEffect(() => {
     const unsubscribe = client.subscribe(setState);
     void client.request("gui_snapshot").catch(() => undefined);
@@ -266,6 +297,10 @@ export default function App({
   }, [state.snapshot?.profile.name]);
   async function request(command: string, args?: Record<string, unknown>) {
     try {
+      if (
+        ["gui_save_profile", "gui_open_profile", "gui_reset"].includes(command)
+      )
+        await draftGuardQueue.current;
       await client.request(command, args);
       return true;
     } catch {
@@ -281,6 +316,7 @@ export default function App({
     }
   }
   function replace(action: "open" | "empty" | "demo") {
+    if (macroDraft) return;
     setReplacement(action);
     if (state.snapshot?.dirty) setModal("discard");
     else void doReplace(action, false);
@@ -364,13 +400,16 @@ export default function App({
             <span className="badge">OFFLINE</span>
           </div>
           <div className="toolbar-actions">
-            <button disabled={disabled} onClick={() => replace("open")}>
+            <button
+              disabled={disabled || macroDraft}
+              onClick={() => replace("open")}
+            >
               <Icon name="open" />
               Open profile
             </button>
             <button
               className="primary"
-              disabled={disabled || !snapshot}
+              disabled={disabled || !snapshot || macroDraft}
               onClick={() => void request("gui_save_profile")}
             >
               <Icon name="save" />
@@ -406,6 +445,20 @@ export default function App({
           {state.error && (
             <div className="notice error" role="alert">
               {state.error}
+            </div>
+          )}
+          {draftGuardError && (
+            <div className="notice error" role="alert">
+              {draftGuardError}
+            </div>
+          )}
+          {macroDraft && page !== "Macros" && (
+            <div className="notice">
+              Uncommitted macro timeline preserved. Update or discard it before
+              saving or replacing the file.
+              <button onClick={() => setPage("Macros")}>
+                Return to macro editor
+              </button>
             </div>
           )}
           {!snapshot && (
@@ -696,7 +749,12 @@ export default function App({
               )}
               {page === "Buttons" && (
                 <>
-                  <ButtonAssignments key={profile.device} snapshot={snapshot} />
+                  <ButtonAssignments
+                    key={profile.device}
+                    snapshot={snapshot}
+                    disabled={disabled}
+                    edit={edit}
+                  />
                   <div className="panel primary-buttons">
                     <div>
                       <h2>Primary buttons</h2>
@@ -722,70 +780,25 @@ export default function App({
                     </select>
                   </div>
                   <div className="notice">
-                    Binding selectors are next. Existing assignments are
-                    preserved unchanged; unsupported and unresolved data are not
-                    silently discarded.
+                    Binding edits change this file only. Existing library
+                    definitions and unresolved source assignments are preserved;
+                    invalid values are not silently discarded. Runtime/offline
+                    encoding support is not a confirmation of onboard
+                    persistence.
                   </div>
                 </>
               )}
-              {page === "Macros" && (
-                <>
-                  {!profile.macros?.length && (
-                    <section className="panel empty-state">
-                      <h2>No macros in this file</h2>
-                      <p>
-                        The event editor and recorder are planned. No global
-                        keyboard hook runs.
-                      </p>
-                    </section>
-                  )}
-                  {profile.macros?.map((macro) => (
-                    <section
-                      className="panel table-panel macro-panel"
-                      key={macro.source_id}
-                    >
-                      <div className="section-heading">
-                        <div>
-                          <h2>{macro.name}</h2>
-                          <p>ID: {macro.source_id}</p>
-                        </div>
-                        <span className="badge">
-                          {humanize(macro.playback).toUpperCase()}
-                        </span>
-                      </div>
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>#</th>
-                            <th>Event</th>
-                            <th>Key / button</th>
-                            <th>Delay after event</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {macro.events.map((event, index) => (
-                            <tr key={index}>
-                              <td>{index + 1}</td>
-                              <td>{humanize(event.type)}</td>
-                              <td>
-                                <code>{event.key ?? event.button ?? "—"}</code>
-                              </td>
-                              <td>
-                                <code>{event.delay_ms} ms</code>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </section>
-                  ))}
-                  <div className="notice">
-                    Chords remain separate key-down / key-up events. Limits and
-                    legal playback modes depend on the destination control;
-                    runtime and onboard support are not interchangeable.
-                  </div>
-                </>
-              )}
+              <section
+                hidden={page !== "Macros"}
+                aria-label="Macro library workspace"
+              >
+                <MacroLibrary
+                  snapshot={snapshot}
+                  disabled={disabled}
+                  edit={edit}
+                  onDraftChange={reportMacroDraft}
+                />
+              </section>
               {page === "Profiles" && (
                 <>
                   <section className="panel profile-details">
@@ -872,19 +885,19 @@ export default function App({
                     )}
                     <div className="inline-actions">
                       <button
-                        disabled={disabled}
+                        disabled={disabled || macroDraft}
                         onClick={() => replace("empty")}
                       >
                         New draft
                       </button>
                       <button
-                        disabled={disabled}
+                        disabled={disabled || macroDraft}
                         onClick={() => replace("demo")}
                       >
                         Load demo
                       </button>
                       <button
-                        disabled={disabled}
+                        disabled={disabled || macroDraft}
                         onClick={() => replace("open")}
                       >
                         <Icon name="open" />
@@ -933,14 +946,20 @@ export default function App({
         <footer className="statusbar">
           <div>
             <i
-              className={snapshot?.dirty ? "status-dot unsaved" : "status-dot"}
+              className={
+                snapshot?.dirty || macroDraft
+                  ? "status-dot unsaved"
+                  : "status-dot"
+              }
             />
             <span>
               {state.busy
                 ? "Working on file…"
-                : snapshot?.dirty
-                  ? "Unsaved file changes"
-                  : "No unsaved file changes"}
+                : macroDraft
+                  ? "Uncommitted macro timeline"
+                  : snapshot?.dirty
+                    ? "Unsaved file changes"
+                    : "No unsaved file changes"}
             </span>
             <button
               className="text-button"
@@ -967,6 +986,12 @@ export default function App({
             Compared with the last successfully opened or saved file. Not
             compared with the mouse.
           </p>
+          {macroDraft && (
+            <div className="notice">
+              The local macro timeline is not yet in this file diff. Update or
+              discard it in Macros before saving the profile.
+            </div>
+          )}
           {snapshot.changes.error && (
             <div className="notice error">{snapshot.changes.error}</div>
           )}
