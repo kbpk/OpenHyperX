@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "apps/hyperx-gui/src-tauri",
     "crates/hyperx-app",
     "crates/hyperx-cli",
     "crates/hyperx-core",

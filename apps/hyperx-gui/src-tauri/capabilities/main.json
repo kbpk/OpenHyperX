@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Local offline editor. No filesystem, shell, updater, HID or hardware permissions.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "allow-gui-snapshot",
+    "allow-gui-edit",
+    "allow-gui-reset",
+    "allow-gui-open-profile",
+    "allow-gui-save-profile"
+  ]
+}

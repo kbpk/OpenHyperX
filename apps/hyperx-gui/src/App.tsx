@@ -1,0 +1,1076 @@
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import {
+  desktopBackend,
+  GuiClient,
+  type Backend,
+  type SessionState,
+} from "./bridge";
+import { Icon } from "./icons";
+import { DeviceRender, MouseArt } from "./mouse-art";
+import { ButtonAssignments } from "./button-assignments";
+import type { Edit, Page, Snapshot, Stage } from "./types";
+
+const pages: Page[] = [
+  "Device",
+  "Performance",
+  "Buttons",
+  "Macros",
+  "Lighting",
+  "Profiles",
+];
+const descriptions: Record<Page, string> = {
+  Device: "One mouse. Your settings. No background service.",
+  Performance: "Fine-tune your sensitivity and response.",
+  Buttons: "Every control, with its own purpose.",
+  Macros: "Inspect the exact sequence, including individual delays.",
+  Lighting: "Two zones. Independent colors.",
+  Profiles: "Keep your configuration in an open, portable format.",
+};
+const humanize = (text: string) => text.replaceAll("-", " ");
+
+function Dialog({
+  title,
+  children,
+  close,
+}: {
+  title: string;
+  children: ReactNode;
+  close: () => void;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  useEffect(() => {
+    ref.current?.showModal();
+  }, []);
+  return (
+    <dialog
+      ref={ref}
+      aria-labelledby={titleId}
+      onCancel={(event) => {
+        event.preventDefault();
+        close();
+      }}
+    >
+      <div className="dialog-title">
+        <h2 id={titleId}>{title}</h2>
+        <button
+          className="icon-button"
+          aria-label="Close dialog"
+          onClick={close}
+        >
+          <Icon name="close" />
+        </button>
+      </div>
+      {children}
+    </dialog>
+  );
+}
+
+function ColorField({
+  label,
+  color,
+  disabled,
+  commit,
+}: {
+  label: string;
+  color?: string;
+  disabled: boolean;
+  commit: (color: string) => void;
+}) {
+  const [text, setText] = useState(color ?? "");
+  const [invalid, setInvalid] = useState(false);
+  useEffect(() => {
+    setText(color ?? "");
+    setInvalid(false);
+  }, [color]);
+  function submit() {
+    if (!/^#[0-9a-f]{6}$/i.test(text)) {
+      setInvalid(true);
+      return;
+    }
+    setInvalid(false);
+    if (text.toUpperCase() !== color?.toUpperCase()) commit(text.toUpperCase());
+  }
+  return (
+    <div className="color-field">
+      <label
+        className="color-chip"
+        style={{ backgroundColor: color ?? "#252b2d" }}
+      >
+        <input
+          type="color"
+          aria-label={`${label} picker`}
+          value={color ?? "#000000"}
+          disabled={disabled}
+          onChange={(event) => {
+            setText(event.target.value.toUpperCase());
+            commit(event.target.value.toUpperCase());
+          }}
+        />
+      </label>
+      <input
+        aria-label={label}
+        className="hex"
+        value={text}
+        placeholder="#RRGGBB"
+        disabled={disabled}
+        aria-invalid={invalid}
+        onChange={(event) => setText(event.target.value)}
+        onBlur={submit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            submit();
+          }
+        }}
+      />
+      {invalid && <span className="field-error">Use #RRGGBB</span>}
+    </div>
+  );
+}
+
+function StageCard({
+  stage,
+  index,
+  active,
+  limits,
+  disabled,
+  edit,
+}: {
+  stage: Stage;
+  index: number;
+  active: boolean;
+  limits: NonNullable<NonNullable<Snapshot["capabilities"]>["dpi"]>;
+  disabled: boolean;
+  edit: (edit: Edit) => Promise<boolean>;
+}) {
+  const [value, setValue] = useState(String(stage.x));
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    setValue(String(stage.x));
+    setError(false);
+  }, [stage.x, stage.y]);
+  const commit = async () => {
+    const dpi = Number(value);
+    if (
+      !value.trim() ||
+      !Number.isInteger(dpi) ||
+      dpi < limits.minimum ||
+      dpi > limits.maximum ||
+      dpi % limits.step !== 0
+    ) {
+      setError(true);
+      return;
+    }
+    setError(false);
+    if (dpi !== stage.x || dpi !== stage.y)
+      await edit({ kind: "stage-dpi", index, dpi });
+  };
+  return (
+    <article className={`stage-card ${active ? "active" : ""}`}>
+      <div className="stage-top">
+        <span>
+          <i style={{ backgroundColor: stage.color }} />
+          Stage {index + 1}
+        </span>
+        <button
+          className="small-button"
+          disabled={disabled}
+          aria-pressed={active}
+          onClick={() => void edit({ kind: "active-stage", index })}
+        >
+          {active ? "Active" : "Set active"}
+        </button>
+      </div>
+      <label className="dpi-value">
+        <input
+          type="number"
+          aria-label={`Stage ${index + 1} DPI`}
+          value={value}
+          min={limits.minimum}
+          max={limits.maximum}
+          step={limits.step}
+          disabled={disabled}
+          aria-invalid={error}
+          onChange={(event) => setValue(event.target.value)}
+          onBlur={() => void commit()}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+          }}
+        />
+        <span>DPI</span>
+      </label>
+      <input
+        className="slider"
+        type="range"
+        aria-label={`Stage ${index + 1} DPI slider`}
+        min={limits.minimum}
+        max={limits.maximum}
+        step={limits.step}
+        value={Number(value) || limits.minimum}
+        disabled={disabled}
+        onChange={(event) => setValue(event.target.value)}
+        onPointerUp={() => void commit()}
+        onKeyUp={() => void commit()}
+        onBlur={() => void commit()}
+      />
+      <div className="range-labels">
+        <span>{limits.minimum}</span>
+        <span>{limits.maximum.toLocaleString("en-US")}</span>
+      </div>
+      {stage.x !== stage.y && (
+        <p className="field-error">
+          X {stage.x} / Y {stage.y}. Editing links both axes.
+        </p>
+      )}
+      {error && (
+        <p className="field-error">
+          {limits.minimum}–{limits.maximum}, in steps of {limits.step}.
+        </p>
+      )}
+      <div className="stage-color">
+        <span>Stage color</span>
+        <ColorField
+          label={`Stage ${index + 1} color`}
+          color={stage.color}
+          disabled={disabled}
+          commit={(color) => void edit({ kind: "stage-color", index, color })}
+        />
+      </div>
+    </article>
+  );
+}
+
+export default function App({
+  backend = desktopBackend,
+}: {
+  backend?: Backend;
+}) {
+  const [client] = useState(() => new GuiClient(backend));
+  const [state, setState] = useState<SessionState>(client.state);
+  const [page, setPage] = useState<Page>("Performance");
+  const [modal, setModal] = useState<"review" | "add" | "discard" | null>(null);
+  const [replacement, setReplacement] = useState<"open" | "empty" | "demo">(
+    "empty",
+  );
+  const [addedDpi, setAddedDpi] = useState(800);
+  const [addedColor, setAddedColor] = useState("#FFFFFF");
+  const [name, setName] = useState("");
+  useEffect(() => {
+    const unsubscribe = client.subscribe(setState);
+    void client.request("gui_snapshot").catch(() => undefined);
+    return unsubscribe;
+  }, [client]);
+  useEffect(() => {
+    setName(state.snapshot?.profile.name ?? "");
+  }, [state.snapshot?.profile.name]);
+  async function request(command: string, args?: Record<string, unknown>) {
+    try {
+      await client.request(command, args);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  async function edit(value: Edit) {
+    try {
+      await client.edit(value);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  function replace(action: "open" | "empty" | "demo") {
+    setReplacement(action);
+    if (state.snapshot?.dirty) setModal("discard");
+    else void doReplace(action, false);
+  }
+  async function doReplace(
+    action: "open" | "empty" | "demo",
+    discard: boolean,
+  ) {
+    setModal(null);
+    if (action === "open")
+      await request("gui_open_profile", { discardChanges: discard });
+    else
+      await request("gui_reset", {
+        discardChanges: discard,
+        demo: action === "demo",
+      });
+  }
+  const snapshot = state.snapshot;
+  const profile = snapshot?.profile;
+  const disabled = !backend.desktop || state.busy;
+  const changes =
+    (snapshot?.changes.settings.length ?? 0) +
+    (snapshot?.changes.metadata.length ?? 0);
+  const dpi = profile?.dpi;
+  const limits = snapshot?.capabilities?.dpi;
+  const zones = profile?.lighting?.zones;
+
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <a
+          className="brand"
+          href="#"
+          onClick={(event) => event.preventDefault()}
+        >
+          <img src="/mark.svg" alt="" />
+          <span>
+            OpenHyperX<small>DEVICE CONTROL</small>
+          </span>
+        </a>
+        <div className="sidebar-label">WORKSPACE</div>
+        <nav aria-label="Sections">
+          {pages.map((item) => (
+            <button
+              key={item}
+              className={`nav-item ${page === item ? "selected" : ""}`}
+              aria-current={page === item ? "page" : undefined}
+              onClick={() => setPage(item)}
+            >
+              <Icon name={item} />
+              {item}
+              {item === "Profiles" && snapshot?.dirty && (
+                <i className="dirty-dot" />
+              )}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-bottom">
+          <div className="file-badge">
+            <Icon name="Profiles" />
+            <div>
+              <strong>{profile?.name ?? "Loading…"}</strong>
+              <small>
+                {snapshot?.origin === "file"
+                  ? "LOCAL FILE"
+                  : snapshot?.origin === "demo"
+                    ? "DEMO PROFILE"
+                    : "NEW DRAFT"}
+              </small>
+            </div>
+          </div>
+          <p>Open source. Yours to control.</p>
+          <span className="version">EXPERIMENTAL · 0.1</span>
+        </div>
+      </aside>
+      <div className="workspace">
+        <header className="toolbar">
+          <div className="device-label">
+            <i />
+            {snapshot?.capabilities?.name ?? "OpenHyperX"}
+            <span className="badge">OFFLINE</span>
+          </div>
+          <div className="toolbar-actions">
+            <button disabled={disabled} onClick={() => replace("open")}>
+              <Icon name="open" />
+              Open profile
+            </button>
+            <button
+              className="primary"
+              disabled={disabled || !snapshot}
+              onClick={() => void request("gui_save_profile")}
+            >
+              <Icon name="save" />
+              Save new file
+            </button>
+          </div>
+        </header>
+        <main>
+          <div className="page-heading">
+            <div className="eyebrow">
+              {(
+                snapshot?.capabilities?.name ??
+                profile?.device ??
+                "LOCAL PROFILE"
+              ).toUpperCase()}{" "}
+              / {page.toUpperCase()}
+            </div>
+            <h1>{page}</h1>
+            <p>{descriptions[page]}</p>
+          </div>
+          {!backend.desktop && (
+            <div className="notice preview">
+              <span className="badge">PREVIEW</span>Read-only demo in your
+              browser. Editing and file dialogs are available in the native
+              Tauri app.
+            </div>
+          )}
+          {snapshot?.origin === "demo" && backend.desktop && (
+            <div className="notice">
+              Demo profile — not a readout of your connected mouse.
+            </div>
+          )}
+          {state.error && (
+            <div className="notice error" role="alert">
+              {state.error}
+            </div>
+          )}
+          {!snapshot && (
+            <div className="panel empty-state">
+              <h2>
+                {state.error
+                  ? "Cannot load the offline document"
+                  : "Loading your workspace…"}
+              </h2>
+              <button
+                onClick={() => void request("gui_snapshot")}
+                disabled={state.busy}
+              >
+                Retry document load
+              </button>
+            </div>
+          )}
+          {snapshot && profile && (
+            <>
+              {page === "Performance" && (
+                <>
+                  <section className="performance-hero panel">
+                    <div>
+                      <span className="eyebrow">PROFILE SENSITIVITY</span>
+                      <div className="hero-value">
+                        {dpi?.active_stage != null
+                          ? (dpi.stages[dpi.active_stage]?.x.toLocaleString(
+                              "en-US",
+                            ) ?? "—")
+                          : "—"}
+                        <span>DPI</span>
+                      </div>
+                      <p>
+                        {dpi?.active_stage != null
+                          ? `Stage ${dpi.active_stage + 1} selected in this file`
+                          : "No active stage specified in this file"}
+                      </p>
+                      <span className="subtle">
+                        File settings only. Nothing is sent to your mouse.
+                      </span>
+                    </div>
+                    <div
+                      className="mouse-illustration"
+                      aria-label="Mouse illustration, not live device state"
+                    >
+                      <MouseArt
+                        device={profile.device}
+                        wheel={zones?.wheel}
+                        logo={zones?.logo}
+                      />
+                    </div>
+                  </section>
+                  <div className="section-heading">
+                    <div>
+                      <h2>DPI stages</h2>
+                      <p>
+                        Switch between sensitivities. Stage colors are separate
+                        from lighting.
+                      </p>
+                    </div>
+                    <div className="inline-actions">
+                      <span className="counter">
+                        {dpi?.stages.length ?? 0} / {limits?.max_stages ?? "—"}
+                      </span>
+                      <button
+                        disabled={
+                          disabled ||
+                          !limits ||
+                          (dpi?.stages.length ?? 0) >= limits.max_stages
+                        }
+                        onClick={() => setModal("add")}
+                      >
+                        <Icon name="plus" />
+                        Add stage
+                      </button>
+                    </div>
+                  </div>
+                  {limits && (
+                    <div className="stage-grid">
+                      {dpi?.stages.map((stage, index) => (
+                        <StageCard
+                          key={index}
+                          stage={stage}
+                          index={index}
+                          active={dpi.active_stage === index}
+                          limits={limits}
+                          disabled={disabled}
+                          edit={edit}
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {!dpi?.stages.length && (
+                    <div className="panel empty-state">
+                      <h3>No DPI stages in this draft</h3>
+                      <p>
+                        Add a stage with an explicit DPI and color. Missing
+                        settings are never guessed.
+                      </p>
+                    </div>
+                  )}
+                  {!!dpi?.stages.length && (
+                    <div className="stage-tools">
+                      <button
+                        className="text-button"
+                        disabled={disabled || dpi.active_stage == null}
+                        onClick={() =>
+                          void edit({ kind: "active-stage", index: null })
+                        }
+                      >
+                        Clear active selection
+                      </button>
+                      <button
+                        className="text-button"
+                        disabled={
+                          disabled ||
+                          dpi.stages.length <= 1 ||
+                          dpi.active_stage === dpi.stages.length - 1
+                        }
+                        title="Select a different active stage before removing the last one"
+                        onClick={() => void edit({ kind: "remove-last-stage" })}
+                      >
+                        Remove last stage
+                      </button>
+                    </div>
+                  )}
+                  <section className="panel polling-panel">
+                    <div>
+                      <h2>Polling rate</h2>
+                      <p>USB reporting frequency in the profile.</p>
+                    </div>
+                    <div className="segmented" aria-label="Polling rate">
+                      {snapshot.capabilities?.polling_rates.map((hz) => (
+                        <button
+                          key={hz}
+                          aria-label={`${hz} Hz`}
+                          disabled={disabled}
+                          aria-pressed={profile.polling?.hz === hz}
+                          className={profile.polling?.hz === hz ? "chosen" : ""}
+                          onClick={() => void edit({ kind: "polling", hz })}
+                        >
+                          {hz}
+                          <span>Hz</span>
+                        </button>
+                      ))}
+                    </div>
+                    <span className="subtle">
+                      {profile.polling
+                        ? `${(1000 / profile.polling.hz).toFixed(0)} ms interval`
+                        : "Not specified"}
+                    </span>
+                  </section>
+                </>
+              )}
+              {page === "Lighting" && (
+                <>
+                  <div className="lighting-layout">
+                    <section className="panel lighting-visual">
+                      <span className="eyebrow">PROFILE COLOR PREVIEW</span>
+                      <MouseArt
+                        device={profile.device}
+                        wheel={zones?.wheel}
+                        logo={zones?.logo}
+                      />
+                      <p>Markers show file colors · Not live LEDs</p>
+                    </section>
+                    <div className="zone-list">
+                      {snapshot.capabilities?.zones.map((zone) => (
+                        <section key={zone.id} className="panel zone-card">
+                          <div className="section-heading">
+                            <h2>{zone.name}</h2>
+                            <span className="badge">SOLID</span>
+                          </div>
+                          <p>
+                            {zones?.[zone.id]
+                              ? "Independent zone color in this file."
+                              : "No color specified. The preview does not imply a device value."}
+                          </p>
+                          <ColorField
+                            label={`${zone.name} color`}
+                            color={zones?.[zone.id]}
+                            disabled={disabled}
+                            commit={(color) =>
+                              void edit({
+                                kind: "solid-zone",
+                                zone: zone.id,
+                                color,
+                              })
+                            }
+                          />
+                          <div className="swatches">
+                            {[
+                              "#FF4B4B",
+                              "#FFAB4B",
+                              "#B9EB83",
+                              "#44CEC2",
+                              "#5489FF",
+                              "#AF7AFF",
+                              "#FFFFFF",
+                            ].map((color) => (
+                              <button
+                                key={color}
+                                aria-label={`${zone.name} ${color}`}
+                                style={{ backgroundColor: color }}
+                                disabled={disabled}
+                                onClick={() =>
+                                  void edit({
+                                    kind: "solid-zone",
+                                    zone: zone.id,
+                                    color,
+                                  })
+                                }
+                              />
+                            ))}
+                            <button
+                              className="off-swatch"
+                              disabled={disabled}
+                              onClick={() =>
+                                void edit({
+                                  kind: "solid-zone",
+                                  zone: zone.id,
+                                  color: "#000000",
+                                })
+                              }
+                            >
+                              Off
+                            </button>
+                          </div>
+                        </section>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="notice">
+                    This first GUI edits Solid zones only. Hardware effects and
+                    software light sync are not exposed here yet. No lighting
+                    command or keepalive runs.
+                  </div>
+                </>
+              )}
+              {page === "Device" && (
+                <div className="device-grid">
+                  <section className="panel device-art">
+                    <DeviceRender device={profile.device} />
+                  </section>
+                  <section className="panel">
+                    <h2>{snapshot.capabilities?.name ?? profile.device}</h2>
+                    <p className="subtle">
+                      Supported model metadata, not a connected-device scan.
+                    </p>
+                    <dl className="spec-list">
+                      <div>
+                        <dt>Controls</dt>
+                        <dd>
+                          {snapshot.capabilities?.button_count ?? "Unknown"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Supported DPI</dt>
+                        <dd>
+                          {limits
+                            ? `${limits.minimum}–${limits.maximum.toLocaleString("en-US")}`
+                            : "Unknown"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Lighting zones</dt>
+                        <dd>
+                          {snapshot.capabilities?.zones
+                            .map((zone) => zone.name)
+                            .join(" / ") ?? "Unknown"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Connection</dt>
+                        <dd>Not opened</dd>
+                      </div>
+                      <div>
+                        <dt>Firmware / serial</dt>
+                        <dd>Not read</dd>
+                      </div>
+                    </dl>
+                    <div className="notice">
+                      Offline mode does not enumerate HID, open the mouse, or
+                      send USB reports.
+                    </div>
+                  </section>
+                </div>
+              )}
+              {page === "Buttons" && (
+                <>
+                  <ButtonAssignments key={profile.device} snapshot={snapshot} />
+                  <div className="panel primary-buttons">
+                    <div>
+                      <h2>Primary buttons</h2>
+                      <p>Left and right form one coupled pair.</p>
+                    </div>
+                    <select
+                      aria-label="Primary button layout"
+                      value={profile.primary_buttons ?? ""}
+                      disabled={disabled}
+                      onChange={(event) =>
+                        void edit({
+                          kind: "primary-buttons",
+                          layout:
+                            event.target.value === ""
+                              ? null
+                              : (event.target.value as "standard" | "swapped"),
+                        })
+                      }
+                    >
+                      <option value="">Not specified</option>
+                      <option value="standard">Standard · left / right</option>
+                      <option value="swapped">Swapped · right / left</option>
+                    </select>
+                  </div>
+                  <div className="notice">
+                    Binding selectors are next. Existing assignments are
+                    preserved unchanged; unsupported and unresolved data are not
+                    silently discarded.
+                  </div>
+                </>
+              )}
+              {page === "Macros" && (
+                <>
+                  {!profile.macros?.length && (
+                    <section className="panel empty-state">
+                      <h2>No macros in this file</h2>
+                      <p>
+                        The event editor and recorder are planned. No global
+                        keyboard hook runs.
+                      </p>
+                    </section>
+                  )}
+                  {profile.macros?.map((macro) => (
+                    <section
+                      className="panel table-panel macro-panel"
+                      key={macro.source_id}
+                    >
+                      <div className="section-heading">
+                        <div>
+                          <h2>{macro.name}</h2>
+                          <p>ID: {macro.source_id}</p>
+                        </div>
+                        <span className="badge">
+                          {humanize(macro.playback).toUpperCase()}
+                        </span>
+                      </div>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>#</th>
+                            <th>Event</th>
+                            <th>Key / button</th>
+                            <th>Delay after event</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {macro.events.map((event, index) => (
+                            <tr key={index}>
+                              <td>{index + 1}</td>
+                              <td>{humanize(event.type)}</td>
+                              <td>
+                                <code>{event.key ?? event.button ?? "—"}</code>
+                              </td>
+                              <td>
+                                <code>{event.delay_ms} ms</code>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </section>
+                  ))}
+                  <div className="notice">
+                    Chords remain separate key-down / key-up events. Limits and
+                    legal playback modes depend on the destination control;
+                    runtime and onboard support are not interchangeable.
+                  </div>
+                </>
+              )}
+              {page === "Profiles" && (
+                <>
+                  <section className="panel profile-details">
+                    <div className="section-heading">
+                      <h2>Software profile</h2>
+                      <span className="badge">TOML</span>
+                    </div>
+                    <label className="field-label">
+                      Profile name
+                      <input
+                        aria-label="Profile name"
+                        value={name}
+                        disabled={disabled}
+                        maxLength={128}
+                        onChange={(event) => setName(event.target.value)}
+                        onBlur={() => {
+                          if (name !== profile.name)
+                            void edit({ kind: "name", name });
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") event.currentTarget.blur();
+                        }}
+                      />
+                    </label>
+                    <dl className="spec-list">
+                      <div>
+                        <dt>Source</dt>
+                        <dd>
+                          {snapshot.path ??
+                            (snapshot.origin === "demo"
+                              ? "Bundled example — demo only"
+                              : "Unsaved new draft")}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Target model</dt>
+                        <dd>{profile.device}</dd>
+                      </div>
+                      <div>
+                        <dt>Partial import</dt>
+                        <dd>
+                          {profile.partial
+                            ? "Yes — values may be missing"
+                            : "No"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Legacy provenance</dt>
+                        <dd>
+                          {profile.source
+                            ? `${profile.source.format} · source format ${profile.source.format_version}`
+                            : "None"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Unresolved assignments</dt>
+                        <dd>
+                          {profile.unresolved_button_assignments?.length ?? 0}
+                        </dd>
+                      </div>
+                      {dpi?.source_active_stage != null && (
+                        <div>
+                          <dt>Unconfirmed source stage</dt>
+                          <dd>
+                            {dpi.source_active_stage} — preserved, not applied
+                            as active
+                          </dd>
+                        </div>
+                      )}
+                    </dl>
+                    {!!profile.unresolved_button_assignments?.length && (
+                      <div className="notice">
+                        {profile.unresolved_button_assignments.map(
+                          (entry, index) => (
+                            <p key={index}>
+                              {entry.source_id}
+                              {entry.macro_source_id
+                                ? ` → macro ${entry.macro_source_id}`
+                                : " — definition or target unknown"}
+                            </p>
+                          ),
+                        )}
+                      </div>
+                    )}
+                    <div className="inline-actions">
+                      <button
+                        disabled={disabled}
+                        onClick={() => replace("empty")}
+                      >
+                        New draft
+                      </button>
+                      <button
+                        disabled={disabled}
+                        onClick={() => replace("demo")}
+                      >
+                        Load demo
+                      </button>
+                      <button
+                        disabled={disabled}
+                        onClick={() => replace("open")}
+                      >
+                        <Icon name="open" />
+                        Open TOML
+                      </button>
+                    </div>
+                  </section>
+                  <section className="panel validation">
+                    <div className="section-heading">
+                      <h2>Validation</h2>
+                      <span
+                        className={`badge ${snapshot.readiness.error ? "warning-badge" : "success-badge"}`}
+                      >
+                        {snapshot.readiness.error
+                          ? "NEEDS ATTENTION"
+                          : "VALID PROFILE"}
+                      </span>
+                    </div>
+                    <p>
+                      {snapshot.readiness.error ??
+                        "The shared model validates this profile. This does not verify a connected device or authorize a hardware write."}
+                    </p>
+                    {snapshot.readiness.warnings.map((warning) => (
+                      <p className="subtle" key={warning}>
+                        {warning}
+                      </p>
+                    ))}
+                    <button
+                      onClick={() => setModal("review")}
+                      disabled={state.busy}
+                    >
+                      Review changes <Icon name="arrow" />
+                    </button>
+                  </section>
+                  <div className="notice">
+                    Save creates a new file, including drafts that are not ready
+                    for hardware. Existing files are never overwritten. Save to
+                    mouse is a separate operation and is unavailable in this
+                    GUI.
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </main>
+        <footer className="statusbar">
+          <div>
+            <i
+              className={snapshot?.dirty ? "status-dot unsaved" : "status-dot"}
+            />
+            <span>
+              {state.busy
+                ? "Working on file…"
+                : snapshot?.dirty
+                  ? "Unsaved file changes"
+                  : "No unsaved file changes"}
+            </span>
+            <button
+              className="text-button"
+              disabled={!snapshot || state.busy}
+              onClick={() => setModal("review")}
+            >
+              Review{changes > 0 ? ` (${changes})` : ""}
+            </button>
+          </div>
+          <div className="hardware-actions">
+            <span>Hardware actions unavailable</span>
+            <button disabled title="Offline editor: no device writes">
+              Apply
+            </button>
+            <button disabled title="Offline editor: no onboard writes">
+              Save to mouse
+            </button>
+          </div>
+        </footer>
+      </div>
+      {modal === "review" && snapshot && (
+        <Dialog title="Review file changes" close={() => setModal(null)}>
+          <p className="subtle">
+            Compared with the last successfully opened or saved file. Not
+            compared with the mouse.
+          </p>
+          {snapshot.changes.error && (
+            <div className="notice error">{snapshot.changes.error}</div>
+          )}
+          {changes === 0 && !snapshot.changes.error && (
+            <p>No changes to review.</p>
+          )}
+          {[...snapshot.changes.settings, ...snapshot.changes.metadata].map(
+            (change) => (
+              <div className="change-row" key={change.field}>
+                <strong>{change.field}</strong>
+                <code>{change.before ?? "Not specified"}</code>
+                <Icon name="arrow" />
+                <code>{change.after ?? "Not specified"}</code>
+              </div>
+            ),
+          )}
+          <div className="dialog-actions">
+            <button className="primary" onClick={() => setModal(null)}>
+              Done
+            </button>
+          </div>
+        </Dialog>
+      )}
+      {modal === "discard" && (
+        <Dialog
+          title="Discard unsaved file changes?"
+          close={() => setModal(null)}
+        >
+          <p>
+            Replacing this document will discard your edits. No mouse settings
+            have been changed.
+          </p>
+          <div className="dialog-actions">
+            <button onClick={() => setModal(null)}>Cancel</button>
+            <button
+              className="primary"
+              disabled={state.busy}
+              onClick={() => void doReplace(replacement, true)}
+            >
+              Discard and continue
+            </button>
+          </div>
+        </Dialog>
+      )}
+      {modal === "add" && limits && (
+        <Dialog title="Add DPI stage" close={() => setModal(null)}>
+          <form
+            onSubmit={async (event) => {
+              event.preventDefault();
+              if (
+                await edit({
+                  kind: "add-stage",
+                  dpi: addedDpi,
+                  color: addedColor,
+                })
+              )
+                setModal(null);
+            }}
+          >
+            <label className="field-label">
+              DPI
+              <input
+                type="number"
+                aria-label="New stage DPI"
+                min={limits.minimum}
+                max={limits.maximum}
+                step={limits.step}
+                required
+                value={addedDpi}
+                disabled={disabled}
+                onChange={(event) => setAddedDpi(event.target.valueAsNumber)}
+              />
+            </label>
+            <label className="field-label">
+              Stage color
+              <input
+                type="color"
+                aria-label="New stage color"
+                value={addedColor}
+                disabled={disabled}
+                onChange={(event) =>
+                  setAddedColor(event.target.value.toUpperCase())
+                }
+              />
+            </label>
+            <p className="subtle">
+              Adding a stage does not select it as active.
+            </p>
+            {state.error && (
+              <div className="notice error" role="alert">
+                {state.error}
+              </div>
+            )}
+            <div className="dialog-actions">
+              <button type="button" onClick={() => setModal(null)}>
+                Cancel
+              </button>
+              <button type="submit" className="primary" disabled={disabled}>
+                Add stage
+              </button>
+            </div>
+          </form>
+        </Dialog>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,197 @@
+{
+  "revision": 0,
+  "origin": "demo",
+  "path": null,
+  "dirty": false,
+  "profile": {
+    "name": "Raid example",
+    "device": "pulsefire-raid",
+    "partial": false,
+    "source": null,
+    "dpi": {
+      "stages": [
+        {
+          "x": 800,
+          "y": 800,
+          "color": "#2B00FF"
+        },
+        {
+          "x": 1600,
+          "y": 1600,
+          "color": "#FFFF00"
+        },
+        {
+          "x": 3200,
+          "y": 3200,
+          "color": "#00FF00"
+        }
+      ],
+      "active_stage": 0,
+      "source_active_stage": null
+    },
+    "polling": {
+      "hz": 1000
+    },
+    "primary_buttons": "standard",
+    "buttons": {
+      "button4": {
+        "type": "mouse",
+        "action": "back"
+      },
+      "button5": {
+        "type": "macro",
+        "id": "ab"
+      },
+      "dpi": {
+        "type": "mouse",
+        "action": "dpi-toggle"
+      }
+    },
+    "lighting": {
+      "mode": "solid",
+      "zones": {
+        "logo": "#0000FF",
+        "wheel": "#000000"
+      }
+    },
+    "macros": [
+      {
+        "source_id": "ab",
+        "name": "AB, 20 ms",
+        "playback": "once",
+        "events": [
+          {
+            "type": "key-down",
+            "key": "a",
+            "delay_ms": 20
+          },
+          {
+            "type": "key-up",
+            "key": "a",
+            "delay_ms": 20
+          },
+          {
+            "type": "key-down",
+            "key": "b",
+            "delay_ms": 20
+          },
+          {
+            "type": "key-up",
+            "key": "b",
+            "delay_ms": 20
+          }
+        ]
+      }
+    ]
+  },
+  "readiness": {
+    "error": null,
+    "warnings": [
+      "Solid RGB is volatile direct lighting; it reverts after keepalive ends. Persist separately with save-to-mouse."
+    ]
+  },
+  "changes": {
+    "settings": [],
+    "metadata": [],
+    "error": null
+  },
+  "capabilities": {
+    "name": "HyperX Pulsefire Raid",
+    "button_count": 11,
+    "dpi": {
+      "minimum": 200,
+      "maximum": 16000,
+      "step": 50,
+      "max_stages": 5
+    },
+    "polling_rates": [125, 250, 500, 1000],
+    "zones": [
+      {
+        "id": "wheel",
+        "name": "Scroll Wheel"
+      },
+      {
+        "id": "logo",
+        "name": "Logo"
+      }
+    ]
+  },
+  "controls": [
+    {
+      "id": "left-click",
+      "name": "Left click",
+      "primary": true,
+      "macros": null
+    },
+    {
+      "id": "right-click",
+      "name": "Right click",
+      "primary": true,
+      "macros": null
+    },
+    {
+      "id": "wheel-click",
+      "name": "Wheel click",
+      "primary": false,
+      "macros": null
+    },
+    {
+      "id": "button4",
+      "name": "Button 4",
+      "primary": false,
+      "macros": {
+        "runtime": ["once", "toggle-repeat", "repeat-while-held"],
+        "onboard": ["once"],
+        "max_events": 14,
+        "max_delay_ms": 9999
+      }
+    },
+    {
+      "id": "button5",
+      "name": "Button 5",
+      "primary": false,
+      "macros": {
+        "runtime": ["once"],
+        "onboard": ["once"],
+        "max_events": 14,
+        "max_delay_ms": 9999
+      }
+    },
+    {
+      "id": "button7",
+      "name": "Button 7",
+      "primary": false,
+      "macros": null
+    },
+    {
+      "id": "button6",
+      "name": "Button 6",
+      "primary": false,
+      "macros": null
+    },
+    {
+      "id": "button8",
+      "name": "Button 8",
+      "primary": false,
+      "macros": null
+    },
+    {
+      "id": "dpi",
+      "name": "DPI button",
+      "primary": false,
+      "macros": null
+    },
+    {
+      "id": "wheel-tilt-left",
+      "name": "Wheel tilt left",
+      "primary": false,
+      "macros": null
+    },
+    {
+      "id": "wheel-tilt-right",
+      "name": "Wheel tilt right",
+      "primary": false,
+      "macros": null
+    }
+  ]
+}

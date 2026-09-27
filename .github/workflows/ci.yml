@@ -29,6 +29,37 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      - name: Install Node LTS
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/hyperx-gui/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: apps/hyperx-gui
+        run: npm ci
+
+      - name: Check frontend formatting and types
+        working-directory: apps/hyperx-gui
+        run: |
+          npm run format:check
+          npm run typecheck
+
+      - name: Test and build frontend
+        working-directory: apps/hyperx-gui
+        run: |
+          npm test
+          npm run build
+
+      - name: Install headless browser
+        working-directory: apps/hyperx-gui
+        run: npx playwright install --with-deps chromium
+
+      - name: Test browser preview
+        working-directory: apps/hyperx-gui
+        run: npm run test:e2e
+
   linux:
     name: Linux tests, build and CLI smoke test
     needs: quality
@@ -55,7 +86,7 @@ jobs:
           ./target/debug/hyperx-tui --demo --render
 
   windows:
-    name: Windows tests, build and CLI smoke test
+    name: Windows tests, build and CLI/TUI/GUI smoke tests
     needs: quality
     runs-on: windows-latest
 
@@ -63,11 +94,24 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
+      - name: Install Node LTS
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/hyperx-gui/package-lock.json
+
+      - name: Build frontend assets
+        working-directory: apps/hyperx-gui
+        run: |
+          npm ci
+          npm run build
+
       - name: Run tests
-        run: cargo test --workspace --all-targets --locked
+        run: cargo test --workspace --all-targets --locked --features hyperx-gui/desktop,hyperx-gui/custom-protocol
 
       - name: Build workspace
-        run: cargo build --workspace --locked
+        run: cargo build --workspace --locked --features hyperx-gui/desktop,hyperx-gui/custom-protocol
 
       - name: Smoke test CLI executable
         shell: pwsh
@@ -76,9 +120,10 @@ jobs:
           .\target\debug\hyperx-cli.exe devices
           .\target\debug\hyperx-tui.exe --demo --check
           .\target\debug\hyperx-tui.exe --demo --render
+          .\target\debug\hyperx-gui.exe --smoke-test
 
   macos:
-    name: macOS ${{ matrix.arch }} tests, build and CLI smoke test
+    name: macOS ${{ matrix.arch }} tests, build and CLI/TUI/GUI smoke tests
     needs: quality
     strategy:
       fail-fast: false
@@ -94,15 +139,32 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
+      - name: Verify Apple desktop toolchain
+        run: xcodebuild -version
+
+      - name: Install Node LTS
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/hyperx-gui/package-lock.json
+
+      - name: Build frontend assets
+        working-directory: apps/hyperx-gui
+        run: |
+          npm ci
+          npm run build
+
       - name: Run tests
-        run: cargo test --workspace --all-targets --locked
+        run: cargo test --workspace --all-targets --locked --features hyperx-gui/desktop,hyperx-gui/custom-protocol
 
       - name: Build workspace
-        run: cargo build --workspace --locked
+        run: cargo build --workspace --locked --features hyperx-gui/desktop,hyperx-gui/custom-protocol
 
-      - name: Smoke test CLI executable
+      - name: Smoke test CLI, TUI and GUI executables
         run: |
           ./target/debug/hyperx-cli --version
           ./target/debug/hyperx-cli devices
           ./target/debug/hyperx-tui --demo --check
           ./target/debug/hyperx-tui --demo --render
+          ./target/debug/hyperx-gui --smoke-test

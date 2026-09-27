@@ -49,6 +49,7 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
   button records, complete referenced Button 4/5 Play Once macros and independent
   wheel/logo Solid colors, hardware-verified across a physical power-cycle
 - no non-Solid persistent firmware-lighting effects yet
+- offline TUI and initial Tauri GUI sharing profile validation/editing operations
 
 The implementation stops wherever protocol evidence stops. Known facts and
 their confidence level are recorded in [docs/research.md](docs/research.md).
@@ -64,6 +65,8 @@ crates/
   hyperx-devices/   per-model descriptors and future drivers
   hyperx-cli/       command-line application
   hyperx-tui/       offline terminal profile editor (Ratatui)
+apps/
+  hyperx-gui/       React/TypeScript frontend + optional native Tauri client
 ```
 
 See [docs/architecture.md](docs/architecture.md) for dependency and safety
@@ -108,8 +111,38 @@ hyperx-tui --demo --render
 hyperx-tui my-profile.toml --render --width 120 --height 40
 ```
 
-See [TUI controls and limits](docs/tui.md). Real-time device control and the
-Tauri GUI remain later milestones, after hardware communication is stable.
+See [TUI controls and limits](docs/tui.md) and the [TUI backlog](docs/tui-todo.md).
+Real-time device control remains blocked until hardware communication is stable.
+
+## Offline GUI
+
+The first Tauri GUI uses React/TypeScript and the same `hyperx-app` operations.
+It has Device, Performance, Buttons, Macros, Lighting and Profiles views. DPI
+stages/sliders/colors, polling, primary layout and independent Solid zone colors
+edit files directly; general bindings and macro timelines are read-only for now.
+In Buttons, click any of the 11 controls on the Raid's top/left-side render to
+inspect its file binding. Selection is synchronized with the table and supports
+Tab + Enter/Space; it neither edits the profile nor communicates with hardware.
+Native file dialogs open TOML or save to a **new** file, with validation and diff.
+No USB is opened. Apply and Save to mouse are unavailable, not merely hidden.
+
+After the [GUI build steps](docs/gui.md), launch on Windows:
+
+```powershell
+& '.\target\x86_64-pc-windows-msvc\debug\hyperx-gui.exe' --demo
+```
+
+Normal launch creates an empty partial draft, not assumed factory defaults.
+GUI builds target Windows and macOS (Apple Silicon/Intel), using the same
+`src-tauri` backend. See the [macOS build steps](docs/gui.md#build-on-macos).
+GUI requires Rust 1.90+ and Node 24 LTS for building; Windows uses WebView2.
+A built executable embeds assets and needs no Node/background server.
+`npm run dev` in `apps/hyperx-gui` provides a clearly labeled read-only preview.
+
+The GUI includes the NGENUITY Legacy Pulsefire Raid product render, with top/side
+views and file-color markers. This manufacturer-owned PNG is **not MIT**; see
+[third-party asset provenance and rights status](THIRD_PARTY_ASSETS.md).
+Original code and SVG artwork remain MIT. No installed NGENUITY is needed.
 
 ## Build and run on Windows from WSL
 
@@ -509,7 +542,8 @@ publishing them.
 6. **TUI (offline implemented):** shared application-layer profile editing,
    validation, diff and explicit unresolved-assignment handling. Hardware controls
    remain unavailable until confirmed separately.
-7. **GUI:** Tauri client using the same shared application/core API.
+7. **GUI:** initial offline Tauri client exists; general binding/macro editors,
+   native operator checks and later evidence-gated connected mode remain.
 
 See [docs/reverse-engineering.md](docs/reverse-engineering.md) for the capture
 workflow and [docs/adding-device.md](docs/adding-device.md) for registry rules.

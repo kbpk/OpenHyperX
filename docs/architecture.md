@@ -3,12 +3,12 @@
 ## Goals
 
 The core design separates device behavior from USB transport and presentation.
-A TUI or future Tauri UI must not know HID paths, report IDs or packet layouts. Adding a
+A TUI or Tauri UI must not know HID paths, report IDs or packet layouts. Adding a
 mouse should normally mean adding one driver and registry entry, not changing
 the CLI or GUI.
 
 ```text
-CLI + offline TUI now / Tauri later
+CLI device operations / offline TUI + Tauri via hyperx-app
         |
         v
 public device API (hyperx-core)
@@ -135,7 +135,7 @@ observed response and does not infer a cause or prove the device's actual state.
 
 ### `hyperx-app`
 
-Shared offline application operations for CLI/TUI/future GUI: bounded profile
+Shared offline application operations for CLI/TUI/GUI: bounded profile
 and macro-file parsing, safe new-file serialization, section edits, file-session
 baseline/diff state, model metadata and separate offline readiness. Explicit
 macro resolution/omission never guesses Legacy physical targets or timeline
@@ -246,6 +246,20 @@ all use the shared app API. Diff/dirty state is against a FILE baseline, not a
 live mouse read; Save to mouse is unavailable. TestBackend plus real executable
 headless modes exercise the UI without a terminal or hardware. Future connected
 control must preserve driver evidence gates and add explicit write intent.
+
+### `hyperx-gui`
+
+React/TypeScript presentation in `apps/hyperx-gui`, with an optional Tauri desktop
+feature in its Rust facade. The default facade is testable on Linux/macOS without
+GTK/WebKit; native desktop CI targets Windows and macOS (arm64/Intel). GUI edit IPC delegates
+to `hyperx-app`, not protocol codecs. Immutable snapshots expose file readiness,
+diff, model controls and capabilities, never transport handles or HID paths.
+The narrow, revision-checked command surface grants no runtime apply, onboard
+save, raw-report or arbitrary frontend-supplied filesystem path. Native dialogs
+run outside the webview thread and revision checks run again on completion.
+Dirty-window close checks cannot discard a newer revision than the one confirmed.
+The browser fixture is contract-tested against Rust and stays read-only.
+See [GUI controls, build and backlog](gui.md).
 
 ## Device API direction
 
