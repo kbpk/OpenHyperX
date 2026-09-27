@@ -34,6 +34,35 @@ fn example() -> SoftwareProfile {
     .unwrap()
 }
 
+#[test]
+fn profile_naming_is_a_bounded_metadata_edit_not_a_target_capability() {
+    let mut profile = example();
+    profile.device = "future-mouse".into();
+    profile.partial = true;
+    profile
+        .unresolved_button_assignments
+        .push(UnresolvedButtonAssignment {
+            source_id: "legacy-source".into(),
+            macro_source_id: Some("missing-definition".into()),
+        });
+    let mut expected = profile.clone();
+    expected.name = "Zażółć gęślą jaźń 🖱".into();
+    assert_eq!(rename_profile(&profile, &expected.name).unwrap(), expected);
+    assert_eq!(rename_profile(&profile, &profile.name).unwrap(), profile);
+    for name in [
+        "",
+        "   ",
+        "a\nb",
+        "x\u{1b}y",
+        &"x".repeat(129),
+        &"ą".repeat(65),
+    ] {
+        assert!(rename_profile(&profile, name).is_err());
+    }
+    assert!(rename_profile(&profile, &"ą".repeat(64)).is_ok());
+    assert_eq!(profile.name, "Raid example");
+}
+
 fn library_macro(id: &str) -> NamedMacro {
     NamedMacro {
         source_id: id.into(),
@@ -643,6 +672,44 @@ fn resolution_rejects_target_gates_ambiguous_ids_and_implicit_overwrites() {
         resolve_macro_assignment(&duplicate, "runtime:button5", "button5", "ab", None).is_err()
     );
     assert!(omit_unresolved_assignment(&duplicate, "runtime:button5").is_err());
+    assert_eq!(original, unresolved());
+}
+
+#[test]
+fn resolution_target_metadata_and_commit_share_gates_without_guessing_a_timeline() {
+    let original = unresolved();
+    let targets = macro_resolution_targets(&original, "runtime:button5").unwrap();
+    assert_eq!(targets.len(), profile_controls(&original.device).len());
+    for target in targets {
+        assert_eq!(target.error.is_none(), target.control.id == "button5");
+        assert_eq!(
+            target.error.is_none(),
+            resolve_macro_assignment(&original, "runtime:button5", target.control.id, "ab", None)
+                .is_ok()
+        );
+    }
+    let mut profile = original.clone();
+    profile.buttons.remove("button4");
+    profile.macros[0].definition.playback = MacroPlayback::ToggleRepeat;
+    let targets = macro_resolution_targets(&profile, "opaque-legacy").unwrap();
+    assert!(targets
+        .iter()
+        .find(|target| target.control.id == "button5")
+        .unwrap()
+        .error
+        .is_none());
+    // Target legality is not playback legality; the real definition is required.
+    assert!(resolve_macro_assignment(&profile, "opaque-legacy", "button5", "ab", None).is_err());
+    assert!(resolve_macro_assignment(&profile, "opaque-legacy", "button4", "ab", None).is_ok());
+    profile.device = "unknown-mouse".into();
+    assert!(macro_resolution_targets(&profile, "opaque-legacy")
+        .unwrap()
+        .is_empty());
+    assert!(macro_resolution_targets(&profile, "missing").is_err());
+    profile
+        .unresolved_button_assignments
+        .push(profile.unresolved_button_assignments[0].clone());
+    assert!(macro_resolution_targets(&profile, "runtime:button5").is_err());
     assert_eq!(original, unresolved());
 }
 

@@ -25,6 +25,8 @@ mod bindings;
 pub use bindings::{profile_binding_choices, validate_button_binding, ProfileBindingChoice};
 mod macros;
 pub use macros::{macro_keyboard_names, macro_mouse_button_names, macro_references};
+mod resolution;
+pub use resolution::{macro_resolution_targets, MacroResolutionTarget};
 
 /// Validation is offline encoding support, never proof of device state or playback.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -126,6 +128,18 @@ pub fn encode_profile(profile: &SoftwareProfile) -> Result<String> {
     let text = toml::to_string_pretty(profile)?;
     check_size(&text)?;
     Ok(text)
+}
+
+/// Rename only the offline document, even for an unknown/unsupported target.
+/// Existing imported names remain inspectable; explicit new names are bounded.
+pub fn rename_profile(profile: &SoftwareProfile, name: &str) -> Result<SoftwareProfile> {
+    if name.trim().is_empty() || name.len() > 128 || name.chars().any(char::is_control) {
+        bail!("profile name must be nonblank, at most 128 UTF-8 bytes, with no control characters");
+    }
+    let mut edited = profile.clone();
+    edited.name = name.into();
+    encode_profile(&edited)?;
+    Ok(edited)
 }
 
 /// Even a semantically unsupported draft can be saved offline. No apply implied.
@@ -259,18 +273,7 @@ pub fn resolve_macro_assignment(
     macro_id: &str,
     imported: Option<MacroDefinition>,
 ) -> Result<SoftwareProfile> {
-    let index = unresolved_index(profile, source_id)?;
-    // A normalized runtime export DOES identify its control. Legacy opaque
-    // source IDs do not. Do not hide an unreadable captured macro by resolving
-    // its diagnostic entry into a different physical target.
-    if let Some(known_control) = source_id.strip_prefix("runtime:") {
-        if known_control != control {
-            bail!("captured source {source_id:?} belongs to {known_control}, not {control}");
-        }
-    }
-    if profile.buttons.contains_key(control) {
-        bail!("control {control:?} already has a supplied binding; edit it explicitly rather than overwriting it during resolution");
-    }
+    let index = resolution::check_target(profile, source_id, control)?;
     let mut edited = profile.clone();
     if let Some(definition) = imported {
         edited = import_macro(&edited, macro_id, definition)?;
