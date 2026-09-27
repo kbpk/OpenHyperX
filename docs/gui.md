@@ -125,6 +125,31 @@ This is an unbundled native executable, not a signed/notarized `.app` or DMG.
 Packaging/signing and operator window tests remain separate work. macOS builds
 do not establish hardware-protocol verification; the GUI remains offline.
 
+## Build on Linux
+
+Install Rust 1.90+, Node 24 LTS and the
+[Linux desktop prerequisites](https://v2.tauri.app/start/prerequisites/#linux).
+On Debian/Ubuntu, including WSL Ubuntu:
+
+```bash
+sudo apt-get update
+sudo apt-get install --yes libudev-dev libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+cd apps/hyperx-gui
+npm ci
+npm run build
+cd ../..
+cargo test --workspace --all-targets --locked --features hyperx-gui/desktop,hyperx-gui/custom-protocol
+cargo build --workspace --locked --features hyperx-gui/desktop,hyperx-gui/custom-protocol
+./target/debug/hyperx-gui --smoke-test  # no display, window, dialogs or HID
+./target/debug/hyperx-gui --demo       # requires a graphical desktop / WSLg
+```
+
+For development, run `npm run tauri -- dev -- --demo` in `apps/hyperx-gui`.
+Linux CI compiles GTK/WebKit desktop code and smoke-tests the real executable
+without starting a graphical session. This is an unbundled executable, not an
+AppImage/deb release. Window/dialog behavior and packaging remain operator work;
+the GUI does not open USB even if `/dev/hidraw` access is configured.
+
 ## Preview and tests
 
 ```bash
@@ -135,8 +160,8 @@ npm run test:e2e               # preview, navigation, modal and minimum-width ch
 ```
 
 Rust facade tests run on Linux/macOS without GTK/WebKit packages: `desktop` is
-opt-in. Native desktop CI builds/tests target Windows and macOS arm64/Intel.
-Linux desktop builds and operator GUI validation are not yet verified.
+opt-in. Native desktop CI builds/tests target Windows, Linux and macOS arm64/Intel.
+Rendered-window/native-dialog operator validation is not yet verified.
 `cargo build --workspace` alone does not enable the desktop GUI binary.
 
 Frontend tests cover typed edits, slider release, validation, safe save intent,

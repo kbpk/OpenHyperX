@@ -133,8 +133,9 @@ After the [GUI build steps](docs/gui.md), launch on Windows:
 ```
 
 Normal launch creates an empty partial draft, not assumed factory defaults.
-GUI builds target Windows and macOS (Apple Silicon/Intel), using the same
-`src-tauri` backend. See the [macOS build steps](docs/gui.md#build-on-macos).
+GUI builds target Windows, Linux and macOS (Apple Silicon/Intel), using the same
+`src-tauri` backend. See the [macOS](docs/gui.md#build-on-macos) and
+[Linux build steps](docs/gui.md#build-on-linux).
 GUI requires Rust 1.90+ and Node 24 LTS for building; Windows uses WebView2.
 A built executable embeds assets and needs no Node/background server.
 `npm run dev` in `apps/hyperx-gui` provides a clearly labeled read-only preview.

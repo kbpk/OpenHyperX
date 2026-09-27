@@ -251,7 +251,7 @@ control must preserve driver evidence gates and add explicit write intent.
 
 React/TypeScript presentation in `apps/hyperx-gui`, with an optional Tauri desktop
 feature in its Rust facade. The default facade is testable on Linux/macOS without
-GTK/WebKit; native desktop CI targets Windows and macOS (arm64/Intel). GUI edit IPC delegates
+GTK/WebKit; native desktop CI targets Windows, Linux and macOS (arm64/Intel). GUI edit IPC delegates
 to `hyperx-app`, not protocol codecs. Immutable snapshots expose file readiness,
 diff, model controls and capabilities, never transport handles or HID paths.
 The narrow, revision-checked command surface grants no runtime apply, onboard

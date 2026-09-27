@@ -61,7 +61,7 @@ jobs:
         run: npm run test:e2e
 
   linux:
-    name: Linux tests, build and CLI smoke test
+    name: Linux tests, build and CLI/TUI/GUI smoke tests
     needs: quality
     runs-on: ubuntu-latest
 
@@ -69,21 +69,37 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      - name: Install HID build dependencies
-        run: sudo apt-get update && sudo apt-get install --yes libudev-dev
+      - name: Install HID and desktop build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libudev-dev libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Install Node LTS
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/hyperx-gui/package-lock.json
+
+      - name: Build frontend assets
+        working-directory: apps/hyperx-gui
+        run: |
+          npm ci
+          npm run build
 
       - name: Run tests
-        run: cargo test --workspace --all-targets --locked
+        run: cargo test --workspace --all-targets --locked --features hyperx-gui/desktop,hyperx-gui/custom-protocol
 
       - name: Build workspace
-        run: cargo build --workspace --locked
+        run: cargo build --workspace --locked --features hyperx-gui/desktop,hyperx-gui/custom-protocol
 
-      - name: Smoke test CLI executable
+      - name: Smoke test CLI, TUI and GUI executables
         run: |
           ./target/debug/hyperx-cli --version
           ./target/debug/hyperx-cli devices
           ./target/debug/hyperx-tui --demo --check
           ./target/debug/hyperx-tui --demo --render
+          ./target/debug/hyperx-gui --smoke-test
 
   windows:
     name: Windows tests, build and CLI/TUI/GUI smoke tests
