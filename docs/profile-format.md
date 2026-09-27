@@ -214,6 +214,16 @@ persistence. A detected empty snapshot does not diagnose the hardware failure.
 Inspection/compare never discover/open HID, replay reports or change files.
 Capture logs can contain macro keystrokes; keep real logs outside Git.
 
+To compare two explicit profile images even when they are in different files or
+sections, use `profile diff-capture-images BEFORE AFTER --before-report N
+--after-report M`. Numbers are the one-based report indexes from
+`inspect-capture`; non-profile and out-of-range selections fail. The command
+shows every changed byte (first 32 by default, all with `--all-raw`) and
+separately compares decoded polling, DPI, primary layout and 11 binding/reference
+slots when both bodies are usable. An empty body is never reported as an equal
+settings baseline. Equality of these known fields does not classify opaque
+bytes, prove the images came from the same mouse, or authorize a write.
+
 ### Inspect a TOML profile
 
 `inspect` uses the bounded TOML reader without requiring apply readiness. It

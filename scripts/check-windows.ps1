@@ -53,6 +53,12 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $binary profile inspect-capture crates/hyperx-protocol/tests/fixtures/cold-legacy-startup-images.hex
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+& $binary profile diff-capture-images `
+    crates/hyperx-protocol/tests/fixtures/read-request-get-onboard.hex `
+    crates/hyperx-protocol/tests/fixtures/cold-legacy-startup-images.hex `
+    --before-report 2 --after-report 2
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 if (-not $SkipDeviceDiscovery) {
     & $binary devices
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -148,6 +148,16 @@ the macro event stream is deliberately omitted. Inspect this fixture with
 `docs/research.md` for the full-byte diff and 32-file opaque-signature scan
 and its evidence limits. The files are **not** a bootstrap or replay plan.
 
+For future evidence, `hyperx-cli profile diff-capture-images BEFORE AFTER
+--before-report N --after-report M` compares only the explicitly chosen complete
+profile images, including envelope and opaque body bytes. It accepts the same
+bounded UTF-8 hex/trace input as `inspect-capture`, never PCAPNG directly, and
+does not infer that two reports are one transaction. For example, compare
+report 2 of `read-request-get-onboard.hex` against report 2 of
+`cold-legacy-startup-images.hex`; the 24 body-byte differences are evidence,
+not a source for a cold-runtime encoder. Keep real macro-containing captures
+outside Git.
+
 ## Capture procedure
 
 1. Record mouse part number, firmware/release value, Windows version, exact

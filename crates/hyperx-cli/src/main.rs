@@ -37,6 +37,7 @@ use hyperx_protocol::{
 };
 use tracing_subscriber::EnvFilter;
 
+mod capture_compare;
 mod lab;
 mod profile_tools;
 
@@ -157,6 +158,20 @@ enum ProfileCommand {
         #[arg(long)]
         raw: bool,
         /// Print all byte differences instead of the first 32 per profile.
+        #[arg(long)]
+        all_raw: bool,
+    },
+    /// Compare two explicitly selected Raid profile images offline, including opaque bytes.
+    DiffCaptureImages {
+        before: PathBuf,
+        after: PathBuf,
+        /// One-based report number in the baseline file (see inspect-capture).
+        #[arg(long, value_name = "NUMBER")]
+        before_report: std::num::NonZeroUsize,
+        /// One-based report number in the comparison file (see inspect-capture).
+        #[arg(long, value_name = "NUMBER")]
+        after_report: std::num::NonZeroUsize,
+        /// Print every changed byte instead of the first 32.
         #[arg(long)]
         all_raw: bool,
     },
@@ -833,6 +848,13 @@ fn profile(command: ProfileCommand) -> Result<()> {
         ProfileCommand::InspectCapture { file, raw, all_raw } => {
             inspect_capture_file(&file, raw, all_raw)
         }
+        ProfileCommand::DiffCaptureImages {
+            before,
+            after,
+            before_report,
+            after_report,
+            all_raw,
+        } => capture_compare::diff_images(&before, &after, before_report, after_report, all_raw),
         ProfileCommand::Validate { file } => {
             let (profile, settings) = load_software_profile(&file)?;
             println!(
