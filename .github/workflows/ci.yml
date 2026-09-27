@@ -99,6 +99,8 @@ jobs:
           ./target/debug/hyperx-cli devices
           ./target/debug/hyperx-tui --demo --check
           ./target/debug/hyperx-tui --demo --render
+          ./target/debug/hyperx-tui --demo --render --view macros
+          ./target/debug/hyperx-tui --demo --render --view profiles
           ./target/debug/hyperx-gui --smoke-test
 
   windows:
@@ -136,6 +138,8 @@ jobs:
           .\target\debug\hyperx-cli.exe devices
           .\target\debug\hyperx-tui.exe --demo --check
           .\target\debug\hyperx-tui.exe --demo --render
+          .\target\debug\hyperx-tui.exe --demo --render --view macros
+          .\target\debug\hyperx-tui.exe --demo --render --view profiles
           .\target\debug\hyperx-gui.exe --smoke-test
 
   macos:
@@ -183,4 +187,6 @@ jobs:
           ./target/debug/hyperx-cli devices
           ./target/debug/hyperx-tui --demo --check
           ./target/debug/hyperx-tui --demo --render
+          ./target/debug/hyperx-tui --demo --render --view macros
+          ./target/debug/hyperx-tui --demo --render --view profiles
           ./target/debug/hyperx-gui --smoke-test

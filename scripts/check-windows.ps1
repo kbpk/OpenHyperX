@@ -59,6 +59,10 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $tui --demo --render
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $tui --demo --render --view macros
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $tui --demo --render --view profiles
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if ($Gui) {
     $guiBinary = Join-Path (Get-Location) "target\$target\debug\hyperx-gui.exe"
