@@ -6,6 +6,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use hyperx_app::{parse_profile, ProfileDocument, ProfileSection};
 use ratatui::{backend::TestBackend, Terminal};
 
+mod bindings;
 mod mouse;
 
 fn app() -> App {

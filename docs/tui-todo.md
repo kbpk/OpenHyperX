@@ -14,11 +14,11 @@ must reuse `hyperx-app`; completing GUI work must not remove terminal features.
 
 ## Buttons
 
-- [ ] Clickable table of all model-declared physical controls.
-- [ ] Selectors for Mouse, Multimedia, Windows Shortcut, Keyboard, Disabled and library macros.
-- [ ] Searchable named-key picker without exposing vendor/HID records.
-- [ ] Target-aware legal choices and runtime/onboard macro limits from the app layer.
-- [ ] Preserve coupled primary-click layout and unresolved assignment provenance.
+- [x] Clickable table of all model-declared physical controls.
+- [x] Selectors for Mouse, Multimedia, Windows Shortcut, Keyboard, Disabled and library macros.
+- [x] Searchable named-key picker without exposing vendor/HID records.
+- [x] Target-aware legal choices and runtime/onboard macro limits from the app layer.
+- [x] Preserve coupled primary-click layout and unresolved assignment provenance.
 
 ## Macros
 

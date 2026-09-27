@@ -17,6 +17,7 @@ use hyperx_core::SoftwareProfile;
 use ratatui::{backend::TestBackend, Terminal};
 
 mod app;
+mod bindings;
 mod editor;
 mod render;
 #[cfg(test)]

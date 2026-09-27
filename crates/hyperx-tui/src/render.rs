@@ -56,7 +56,7 @@ impl App {
             );
             offset += width;
         }
-        if self.tab != 0 && self.tab != 3 {
+        if !matches!(self.tab, 0 | 1 | 3) {
             let content = self.content();
             self.scroll = self.scroll.min(
                 content
@@ -68,6 +68,8 @@ impl App {
         }
         if self.tab == 0 {
             self.render_performance(frame, areas[2]);
+        } else if self.tab == 1 {
+            self.render_buttons(frame, areas[2]);
         } else if self.tab == 3 {
             self.render_lighting(frame, areas[2]);
         } else {
@@ -133,6 +135,9 @@ impl App {
             });
             frame.render_widget(Clear, area);
             match modal {
+                Modal::Binding(picker) => {
+                    crate::bindings::render_picker(frame, area, picker, &mut self.hits);
+                }
                 Modal::Confirm { open } => frame.render_widget(
                     Paragraph::new(format!(
                         "Unsaved file edits. {} and discard them?\ny: confirm | n/Esc: cancel",
@@ -222,7 +227,7 @@ impl App {
             let row = ratatui::layout::Rect::new(
                 area.x + 1,
                 area.y + area.height
-                    - if matches!(modal, Modal::Editor { .. }) {
+                    - if matches!(modal, Modal::Editor { .. } | Modal::Binding(_)) {
                         1
                     } else {
                         2
@@ -240,6 +245,10 @@ impl App {
                 Modal::Viewer { .. } => vec![("[Close]", KeyCode::Esc)],
                 Modal::Editor { .. } => vec![
                     ("[Accept draft]", KeyCode::Enter),
+                    ("[Cancel]", KeyCode::Esc),
+                ],
+                Modal::Binding(_) => vec![
+                    ("[Accept binding]", KeyCode::Enter),
                     ("[Cancel]", KeyCode::Esc),
                 ],
             };
@@ -386,7 +395,7 @@ impl App {
     }
 }
 
-fn safe_text(text: &str) -> String {
+pub(crate) fn safe_text(text: &str) -> String {
     text.chars()
         .map(|character| {
             if character.is_control() && !matches!(character, '\n' | '\t') {

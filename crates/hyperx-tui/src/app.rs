@@ -22,6 +22,7 @@ pub enum EditAction {
 }
 
 pub enum Modal {
+    Binding(crate::bindings::BindingPicker),
     Editor {
         title: String,
         action: EditAction,
@@ -47,6 +48,7 @@ pub struct App {
     pub modal: Option<Modal>,
     pub quit: bool,
     pub selected_stage: usize,
+    pub selected_control: usize,
     pub hits: Vec<crate::widgets::Hit>,
     pub drag: Option<(usize, ratatui::layout::Rect)>,
 }
@@ -61,6 +63,7 @@ impl App {
             modal: None,
             quit: false,
             selected_stage: 0,
+            selected_control: 0,
             hits: Vec::new(),
             drag: None,
             status: "OFFLINE: file edits only; no HID access. Save to mouse is unavailable.".into(),
@@ -95,6 +98,9 @@ impl App {
     pub fn handle_paste(&mut self, text: &str) {
         if let Some(Modal::Editor { editor, .. }) = &mut self.modal {
             editor.paste(text);
+        } else if let Some(Modal::Binding(picker)) = &mut self.modal {
+            picker.search.paste(text);
+            picker.filter_changed();
         }
     }
     pub fn handle_key(&mut self, key: KeyEvent) {
@@ -113,6 +119,22 @@ impl App {
         };
         if let Some(mut modal) = self.modal.take() {
             match &mut modal {
+                Modal::Binding(picker) => {
+                    if key.code == KeyCode::Esc {
+                        return;
+                    }
+                    let accept = key.code == KeyCode::Enter
+                        || (key.code == KeyCode::Char('s')
+                            && key.modifiers.contains(KeyModifiers::CONTROL));
+                    if accept {
+                        match picker.edit().and_then(|edit| self.edit_value(edit)) {
+                            Ok(()) => return,
+                            Err(error) => picker.error = Some(format!("{error:#}")),
+                        }
+                    } else {
+                        picker.key(key);
+                    }
+                }
                 Modal::Confirm { open } => match key.code {
                     KeyCode::Char('y') => {
                         if *open {
@@ -171,7 +193,7 @@ impl App {
             self.modal = Some(modal);
             return;
         }
-        if self.performance_key(key) {
+        if self.bindings_key(key) || self.performance_key(key) {
             return;
         }
         match key.code {
@@ -302,6 +324,7 @@ impl App {
                 self.demo = false;
                 self.scroll = 0;
                 self.selected_stage = 0;
+                self.selected_control = 0;
                 self.status = "Opened offline file; current device state remains unknown.".into();
             }
             EditAction::SaveAs => {

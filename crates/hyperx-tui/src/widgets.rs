@@ -18,6 +18,9 @@ pub enum Action {
     Key(KeyCode),
     AcceptEditor,
     Tab(usize),
+    Control(usize),
+    BindingCategory(i8),
+    BindingChoice(usize),
     Stage(usize),
     Slider(usize),
     AdjustDpi { index: usize, delta: i64 },
@@ -191,6 +194,20 @@ impl App {
                 self.drag = None;
             }
             Action::Stage(index) => self.selected_stage = index,
+            Action::Control(index) => {
+                self.selected_control = index;
+                self.open_binding_picker();
+            }
+            Action::BindingCategory(delta) => {
+                if let Some(Modal::Binding(picker)) = &mut self.modal {
+                    picker.category_move(delta);
+                }
+            }
+            Action::BindingChoice(index) => {
+                if let Some(Modal::Binding(picker)) = &mut self.modal {
+                    picker.select(index);
+                }
+            }
             Action::DpiInput(index) => {
                 self.selected_stage = index;
                 if let Some(stage) = self
@@ -307,6 +324,7 @@ impl App {
                         ));
                     }
                 }
+                Some(Modal::Binding(picker)) => picker.move_selection(if down { 3 } else { -3 }),
                 Some(Modal::Confirm { .. }) => {}
                 None => {
                     if let Some(Hit {

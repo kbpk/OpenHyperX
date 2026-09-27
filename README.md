@@ -93,6 +93,9 @@ Click tabs and action buttons, drag DPI sliders or click a DPI number for exact
 input. Performance provides stage add/remove, active selection, stage colors,
 polling choices and the primary-button layout. Lighting has independent Solid
 color fields for wheel/logo. These controls edit the offline draft without TOML.
+Buttons has a clickable physical-control table and a target-aware binding picker,
+including searchable keys and existing library macros; Enter/Accept commits the
+selection to the file draft. Primary clicks remain a coupled layout.
 The wheel over a DPI bar adjusts one step; elsewhere it scrolls the view.
 Use `Tab` or `1`–`5` to switch views, `e` to edit the current section's advanced TOML,
 `a` for the complete document, `v` for offline validation and `d` for the file
@@ -119,7 +122,10 @@ Real-time device control remains blocked until hardware communication is stable.
 The first Tauri GUI uses React/TypeScript and the same `hyperx-app` operations.
 It has Device, Performance, Buttons, Macros, Lighting and Profiles views. DPI
 stages/sliders/colors, polling, primary layout and independent Solid zone colors
-edit files directly; general bindings and macro timelines are read-only for now.
+edit files directly. Buttons also edits model-approved mouse/media/shortcut/key/
+Disabled bindings and existing library macro references. Macros supports a named
+library and editable down/up timelines with individual delays, reordering and
+Once/Toggle/Hold playback; replacing referenced definitions requires confirmation.
 In Buttons, click any of the 11 controls on the Raid's top/left-side render to
 inspect its file binding. Selection is synchronized with the table and supports
 Tab + Enter/Space; it neither edits the profile nor communicates with hardware.
@@ -543,8 +549,8 @@ publishing them.
 6. **TUI (offline implemented):** shared application-layer profile editing,
    validation, diff and explicit unresolved-assignment handling. Hardware controls
    remain unavailable until confirmed separately.
-7. **GUI:** initial offline Tauri client exists; general binding/macro editors,
-   native operator checks and later evidence-gated connected mode remain.
+7. **GUI:** offline Tauri client, binding selectors and macro timeline/library
+   editing exist; native operator checks and later evidence-gated connected mode remain.
 
 See [docs/reverse-engineering.md](docs/reverse-engineering.md) for the capture
 workflow and [docs/adding-device.md](docs/adding-device.md) for registry rules.

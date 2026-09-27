@@ -54,6 +54,27 @@ one explicit Solid color field per declared zone; `#000000` is off. If a zone
 is missing it stays unknown until supplied, rather than defaulting to black.
 Both Raid zone colors are required for encoding readiness, just as before.
 
+Buttons renders all model-declared physical controls in a clickable table.
+Click a non-primary row, or select it with Up/Down and open it with Enter/F2.
+The binding selector reads its choices from `hyperx-app`: Mouse, Multimedia,
+Windows Shortcut, Keyboard, Disabled and existing library macros. Left/Right
+or Tab/Shift+Tab changes category; the clickable `<` / `>` buttons do the same.
+Type or paste to search the current category, including canonical key names
+such as `left-shift`; Ctrl+A then typing replaces the search. Up/Down,
+PageUp/PageDown, Home/End or a row click selects a **preview**, not a file edit.
+Enter, Ctrl+S or Accept binding explicitly changes the draft; Esc discards it.
+Changing category never selects its first item automatically.
+
+Not specified omits one file assignment, preserving device state; it is not
+Disabled, a factory reset or a request to delete unresolved provenance. Primary
+rows explain that Standard/Swapped must be changed atomically in Performance.
+Imported aliases and unsupported bindings are not silently normalized by
+opening the selector. Macro IDs refer to existing library definitions, which
+remain unchanged. Rejected target/macro combinations stay visible with their
+validation reason and cannot be accepted. Runtime/onboard modes and event/delay
+limits are app-declared encoding support, not proof that a connected mouse
+supports or has received that assignment. No controls send HID reports.
+
 The wheel away from a DPI bar scrolls the view. Text dialogs preselect the old
 value, so typing replaces it; Ctrl+A selects all again. Invalid input leaves the
 dialog open and preserves the document; cancel discards only that input. Changes
@@ -64,13 +85,19 @@ Save NEW writes a new file. This is **not live configuration or Save to mouse**.
 
 | Key | Action |
 | --- | --- |
-| Tab / Shift+Tab, 1–5 | switch tab (left/right also do so outside Performance) |
+| Tab / Shift+Tab, 1–5 | switch tab (left/right also do so outside Performance and binding dialogs) |
 | Left/Right or +/- in Performance | edit selected stage by one model DPI step; Shift+arrow uses ten steps |
 | [ / ] in Performance | select previous/next stage |
 | F2 / F3 in Performance | exact DPI / stage color input |
 | Enter / Insert / Delete in Performance | activate selected stage / add stage / remove last stage |
 | F4 in Performance | cycle supported polling values |
 | F2 / F3 in Lighting | edit first/second declared zone color |
+| Up/Down, Home/End in Buttons | select model-declared physical control |
+| Enter / F2 in Buttons | open selected control's binding selector |
+| Left/Right or Tab/Shift+Tab in binding selector | switch category; no implicit assignment |
+| Type/paste, Ctrl+A in binding selector | filter labels/canonical named keys; select search text |
+| Up/Down, PageUp/PageDown, Home/End in binding selector | preview a choice |
+| Enter / Ctrl+S in binding selector | explicitly accept selected semantic binding |
 | Up/Down, PageUp/PageDown, Home | scroll view |
 | e | edit this tab's typed TOML section |
 | a | edit the full profile, including name/source/unresolved entries |
@@ -102,9 +129,9 @@ and all ordered transitions/timings. Lighting edits `[lighting]` with explicit
 wheel/logo Solid colors; the other runtime software effects are not silently
 converted into profile Solid or firmware modes. Profiles edits the whole file.
 
-Performance/Lighting have direct controls; `e` and `a` retain the advanced typed
-TOML editors. Buttons and macro timelines still use those editors, not a macro
-recorder or a binding dropdown. Unknown fields and malformed TOML fail before modifying the
+Performance, Buttons and Lighting have direct controls; `e` and `a` retain the
+advanced typed TOML editors. Macro timelines still use those editors, not a
+macro recorder or interactive timeline table. Unknown fields and malformed TOML fail before modifying the
 document; the editor retains text and the error for correction. A parseable
 but unsupported value may remain in a draft with NOT READY status. Sections
 missing from the replacement text are removed from the FILE, not disabled or
@@ -168,6 +195,8 @@ Tests cover rendering all tabs/modals at multiple sizes, Unicode/paste, Windows
 key-release filtering, mouse click/drag/scroll and step/boundary behavior,
 modal isolation, resized/scrolled hit targets, direct numeric/color input,
 transactional edits, explicit resolution/omission,
+semantic binding previews/acceptance, searchable keys, target-rejected macros,
+Disabled versus omission, coupled primary protection and preserved aliases,
 dirty-state confirmation and save failures. Linux/Windows/macOS CI runs both
 headless executable checks in addition to workspace tests.
 
