@@ -15,6 +15,7 @@ pub enum EditAction {
     Resolve,
     Omit,
     ImportMacro,
+    ProfileName,
     StageDpi(usize),
     StageColor(usize),
     AddStage,
@@ -22,6 +23,13 @@ pub enum EditAction {
 }
 
 pub enum Modal {
+    Resolution(Box<crate::resolution::ResolutionPicker>),
+    Files(Box<crate::files::FileBrowser>),
+    Macro(Box<crate::macros::MacroEditor>),
+    MacroDelete {
+        original: hyperx_core::NamedMacro,
+        error: Option<String>,
+    },
     Binding(crate::bindings::BindingPicker),
     Editor {
         title: String,
@@ -49,6 +57,7 @@ pub struct App {
     pub quit: bool,
     pub selected_stage: usize,
     pub selected_control: usize,
+    pub selected_macro: usize,
     pub hits: Vec<crate::widgets::Hit>,
     pub drag: Option<(usize, ratatui::layout::Rect)>,
 }
@@ -64,6 +73,7 @@ impl App {
             quit: false,
             selected_stage: 0,
             selected_control: 0,
+            selected_macro: 0,
             hits: Vec::new(),
             drag: None,
             status: "OFFLINE: file edits only; no HID access. Save to mouse is unavailable.".into(),
@@ -101,6 +111,12 @@ impl App {
         } else if let Some(Modal::Binding(picker)) = &mut self.modal {
             picker.search.paste(text);
             picker.filter_changed();
+        } else if let Some(Modal::Macro(editor)) = &mut self.modal {
+            editor.paste(text);
+        } else if let Some(Modal::Files(browser)) = &mut self.modal {
+            browser.paste(text);
+        } else if let Some(Modal::Resolution(picker)) = &mut self.modal {
+            picker.paste(text);
         }
     }
     pub fn handle_key(&mut self, key: KeyEvent) {
@@ -119,6 +135,75 @@ impl App {
         };
         if let Some(mut modal) = self.modal.take() {
             match &mut modal {
+                Modal::Resolution(picker) => match picker.key(key, self.document.profile()) {
+                    crate::resolution::Outcome::Close => return,
+                    crate::resolution::Outcome::Commit => {
+                        match picker.edited(self.document.profile()) {
+                            Ok(edited) => {
+                                self.document.replace(edited);
+                                self.status = "Explicit source selection accepted into FILE draft only. Other settings/library unchanged; no HID access.".into();
+                                return;
+                            }
+                            Err(error) => picker.error = Some(format!("{error:#}")),
+                        }
+                    }
+                    crate::resolution::Outcome::Stay => {}
+                },
+                Modal::Files(browser) => match browser.key(key) {
+                    crate::files::Outcome::Close => return,
+                    crate::files::Outcome::Adopt(document) => {
+                        self.adopt_document(*document);
+                        return;
+                    }
+                    crate::files::Outcome::Open(path) => match ProfileDocument::open(&path) {
+                        Ok(document) if self.document.dirty() => {
+                            browser.pending = Some(Box::new(document))
+                        }
+                        Ok(document) => {
+                            self.adopt_document(document);
+                            return;
+                        }
+                        Err(error) => browser.error = Some(format!("{error:#}")),
+                    },
+                    crate::files::Outcome::Save(path) => match self.document.save_as(&path) {
+                        Ok(()) => {
+                            self.status = "Saved a NEW profile copy; this file is now the baseline. Original untouched; NOT Save to mouse.".into();
+                            return;
+                        }
+                        Err(error) => browser.error = Some(format!("{error:#}")),
+                    },
+                    crate::files::Outcome::Stay => {}
+                },
+                Modal::Macro(editor) => match editor.key(key, self.document.profile()) {
+                    crate::macros::Outcome::Close => return,
+                    crate::macros::Outcome::Commit => {
+                        match editor
+                            .edit(self.document.profile())
+                            .and_then(|edit| self.edit_value(edit))
+                        {
+                            Ok(()) => {
+                                self.selected_macro = self
+                                    .document
+                                    .profile()
+                                    .macros
+                                    .iter()
+                                    .position(|entry| entry.source_id == editor.draft.source_id)
+                                    .unwrap_or(0);
+                                return;
+                            }
+                            Err(error) => editor.error = Some(format!("{error:#}")),
+                        }
+                    }
+                    crate::macros::Outcome::Stay => {}
+                },
+                Modal::MacroDelete { original, error } => match key.code {
+                    KeyCode::Esc | KeyCode::Char('n') => return,
+                    KeyCode::Char('y') => match self.remove_macro(original) {
+                        Ok(()) => return,
+                        Err(failure) => *error = Some(format!("{failure:#}")),
+                    },
+                    _ => {}
+                },
                 Modal::Binding(picker) => {
                     if key.code == KeyCode::Esc {
                         return;
@@ -193,7 +278,11 @@ impl App {
             self.modal = Some(modal);
             return;
         }
-        if self.bindings_key(key) || self.performance_key(key) {
+        if self.profiles_key(key)
+            || self.macros_key(key)
+            || self.bindings_key(key)
+            || self.performance_key(key)
+        {
             return;
         }
         match key.code {
@@ -320,12 +409,13 @@ impl App {
                 }
                 // Replace only AFTER reading/parsing succeeds. Failed opens keep
                 // the current document, including unsaved edits.
-                self.document = ProfileDocument::open(Path::new(text.trim()))?;
-                self.demo = false;
-                self.scroll = 0;
-                self.selected_stage = 0;
-                self.selected_control = 0;
-                self.status = "Opened offline file; current device state remains unknown.".into();
+                self.adopt_document(ProfileDocument::open(Path::new(text.trim()))?);
+            }
+            EditAction::ProfileName => {
+                self.document
+                    .replace(hyperx_app::rename_profile(self.document.profile(), text)?);
+                self.status =
+                    "Renamed FILE draft only; path, settings and provenance are unchanged.".into();
             }
             EditAction::SaveAs => {
                 if text.trim().is_empty() {

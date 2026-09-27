@@ -1,0 +1,38 @@
+# SYNTHETIC offline selection example, not a USB capture or device backup.
+# The runtime-shaped label below demonstrates the fixed-target rule only.
+# No mouse settings were read; omitted settings remain unknown/preserved.
+name = "Resolution example (synthetic)"
+device = "pulsefire-raid"
+partial = true
+
+[[macros]]
+source_id = "ab"
+name = "Example AB, 20 ms"
+playback = "once"
+
+[[macros.events]]
+type = "key-down"
+key = "a"
+delay_ms = 20
+
+[[macros.events]]
+type = "key-up"
+key = "a"
+delay_ms = 20
+
+[[macros.events]]
+type = "key-down"
+key = "b"
+delay_ms = 20
+
+[[macros.events]]
+type = "key-up"
+key = "b"
+delay_ms = 20
+
+[[unresolved_button_assignments]]
+source_id = "runtime:button5"
+
+[[unresolved_button_assignments]]
+source_id = "opaque-legacy-example"
+macro_source_id = "legacy-macro-hint"

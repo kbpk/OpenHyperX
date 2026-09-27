@@ -47,6 +47,69 @@ fn demo_renders_without_terminal_or_hardware_and_is_labeled_as_demo() {
 }
 
 #[test]
+fn every_offline_view_renders_from_the_actual_executable_without_a_terminal_or_mouse() {
+    for (view, expected) in [
+        ("performance", "X=800 Y=800"),
+        ("buttons", "wheel-tilt-right"),
+        ("macros", "File timeline including last delay: 80 ms"),
+        ("lighting", "logo: #0000FF"),
+        ("profiles", "Save to mouse: UNAVAILABLE OFFLINE"),
+    ] {
+        let output = cli(&[
+            "--demo", "--render", "--view", view, "--width", "120", "--height", "40",
+        ]);
+        assert!(output.status.success(), "{view}: {output:?}");
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(
+            text.contains(expected) && text.contains("OFFLINE"),
+            "{view}: {text}"
+        );
+        if view == "profiles" {
+            for label in ["Browse F2", "Name F3", "Copy NEW F4", "Unresolved F5"] {
+                assert!(text.contains(label), "{label}: {text}");
+            }
+        }
+    }
+    assert!(!cli(&["--demo", "--render", "--view", "firmware"])
+        .status
+        .success());
+    assert!(!cli(&["--demo", "--check", "--view", "macros"])
+        .status
+        .success());
+}
+
+#[test]
+fn unresolved_example_is_visible_but_not_ready_and_headless_inspection_never_changes_it() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/profiles/pulsefire-raid-unresolved.toml");
+    let before = fs::read(&path).unwrap();
+    let output = cli(&[
+        path.to_str().unwrap(),
+        "--render",
+        "--view",
+        "profiles",
+        "--width",
+        "120",
+        "--height",
+        "40",
+    ]);
+    assert!(output.status.success(), "{output:?}");
+    let text = String::from_utf8(output.stdout).unwrap();
+    for label in [
+        "synthetic",
+        "NOT READY",
+        "runtime:button5",
+        "opaque-legacy-example",
+        "Unresolved F5",
+        "no HID access",
+    ] {
+        assert!(text.contains(label), "{label}: {text}");
+    }
+    assert!(!cli(&[path.to_str().unwrap(), "--check"]).status.success());
+    assert_eq!(fs::read(path).unwrap(), before);
+}
+
+#[test]
 fn offline_checks_accept_supported_examples_but_do_not_open_interactive_terminal() {
     assert!(cli(&["--demo", "--check"]).status.success());
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

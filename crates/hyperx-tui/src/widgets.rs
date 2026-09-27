@@ -21,6 +21,11 @@ pub enum Action {
     Control(usize),
     BindingCategory(i8),
     BindingChoice(usize),
+    Macro(usize),
+    MacroRow(usize),
+    MacroInputChoice(usize),
+    FileEntry(usize),
+    ResolutionChoice(usize),
     Stage(usize),
     Slider(usize),
     AdjustDpi { index: usize, delta: i64 },
@@ -194,6 +199,32 @@ impl App {
                 self.drag = None;
             }
             Action::Stage(index) => self.selected_stage = index,
+            Action::FileEntry(index) => {
+                if let Some(Modal::Files(browser)) = &mut self.modal {
+                    browser.select(index);
+                }
+            }
+            Action::ResolutionChoice(index) => {
+                if let Some(Modal::Resolution(picker)) = &mut self.modal {
+                    picker.select(index);
+                }
+            }
+            Action::Macro(index) => {
+                self.selected_macro = index;
+                self.open_macro(false);
+            }
+            Action::MacroRow(index) => {
+                if let Some(Modal::Macro(editor)) = &mut self.modal {
+                    if editor.prompt.is_none() && index < editor.draft.definition.events.len() {
+                        editor.selected = index;
+                    }
+                }
+            }
+            Action::MacroInputChoice(index) => {
+                if let Some(Modal::Macro(editor)) = &mut self.modal {
+                    editor.select_input(index);
+                }
+            }
             Action::Control(index) => {
                 self.selected_control = index;
                 self.open_binding_picker();
@@ -325,6 +356,10 @@ impl App {
                     }
                 }
                 Some(Modal::Binding(picker)) => picker.move_selection(if down { 3 } else { -3 }),
+                Some(Modal::Macro(editor)) => editor.move_selection(if down { 3 } else { -3 }),
+                Some(Modal::Files(browser)) => browser.move_selection(if down { 3 } else { -3 }),
+                Some(Modal::Resolution(picker)) => picker.move_selection(if down { 3 } else { -3 }),
+                Some(Modal::MacroDelete { .. }) => {}
                 Some(Modal::Confirm { .. }) => {}
                 None => {
                     if let Some(Hit {
@@ -334,6 +369,11 @@ impl App {
                     {
                         let step = self.caps().map_or(0, |caps| i64::from(caps.step));
                         self.change_dpi(index, if down { -step } else { step });
+                    } else if self.tab == 2 {
+                        self.macros_key(KeyEvent::new(
+                            if down { KeyCode::Down } else { KeyCode::Up },
+                            KeyModifiers::NONE,
+                        ));
                     } else {
                         self.scroll = if down {
                             self.scroll.saturating_add(1)
@@ -357,7 +397,14 @@ impl App {
                     self.drag_dpi(index, hit.area, event.column);
                 }
                 Action::EditorCursor { top, left } => {
-                    if let Some(Modal::Editor { editor, .. }) = &mut self.modal {
+                    let editor = match &mut self.modal {
+                        Some(Modal::Editor { editor, .. }) => Some(editor),
+                        Some(Modal::Macro(editor)) => editor.text_editor_mut(),
+                        Some(Modal::Files(browser)) => browser.editor_mut(),
+                        Some(Modal::Resolution(picker)) => picker.editor_mut(),
+                        _ => None,
+                    };
+                    if let Some(editor) = editor {
                         editor.selected = false;
                         editor.row = (usize::from(top)
                             + usize::from(event.row.saturating_sub(hit.area.y)))

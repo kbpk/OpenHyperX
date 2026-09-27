@@ -7,7 +7,10 @@ use hyperx_app::{parse_profile, ProfileDocument, ProfileSection};
 use ratatui::{backend::TestBackend, Terminal};
 
 mod bindings;
+mod macros;
 mod mouse;
+mod profiles;
+mod resolution;
 
 fn app() -> App {
     App::new(

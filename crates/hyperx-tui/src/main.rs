@@ -19,10 +19,36 @@ use ratatui::{backend::TestBackend, Terminal};
 mod app;
 mod bindings;
 mod editor;
+mod files;
+mod macro_view;
+mod macros;
+mod profiles;
 mod render;
+mod resolution;
+mod resolution_view;
 #[cfg(test)]
 mod tests;
 mod widgets;
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum View {
+    Performance,
+    Buttons,
+    Macros,
+    Lighting,
+    Profiles,
+}
+impl View {
+    fn index(self) -> usize {
+        match self {
+            Self::Performance => 0,
+            Self::Buttons => 1,
+            Self::Macros => 2,
+            Self::Lighting => 3,
+            Self::Profiles => 4,
+        }
+    }
+}
 
 #[derive(Parser)]
 #[command(version, about = "OpenHyperX offline profile editor; never opens HID")]
@@ -39,6 +65,9 @@ struct Cli {
     /// Validate the input offline and exit; no terminal initialization.
     #[arg(long)]
     check: bool,
+    /// Start on an offline view; also selects the view for --render smoke tests.
+    #[arg(long, value_enum, conflicts_with = "check")]
+    view: Option<View>,
     #[arg(long, default_value = "100", requires = "render", value_parser = clap::value_parser!(u16).range(20..=300))]
     width: u16,
     #[arg(long, default_value = "30", requires = "render", value_parser = clap::value_parser!(u16).range(8..=100))]
@@ -62,6 +91,7 @@ fn main() -> Result<()> {
         })
     };
     let mut app = app::App::new(document, cli.demo);
+    app.tab = cli.view.map_or(0, View::index);
     if cli.check {
         let result = hyperx_app::validate_profile(app.document.profile());
         println!("Offline profile check; no HID device was discovered or opened.");

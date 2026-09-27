@@ -33,7 +33,15 @@ impl App {
         let profile = self.document.profile();
         let readiness = hyperx_app::validate_profile(profile);
         let mode = if self.demo { "DEMO DATA" } else { "FILE DRAFT" };
-        frame.render_widget(Paragraph::new(format!("OpenHyperX | OFFLINE | {mode} | {}\nTarget {:?} | profile {:?} | NOT connected/read from mouse", if self.document.dirty() { "UNSAVED" } else { "unchanged" }, profile.device, profile.name)).style(Style::default().fg(Color::Cyan)), areas[0]);
+        let local_macro = matches!(&self.modal, Some(Modal::Macro(editor)) if editor.dirty());
+        let draft_state = if local_macro {
+            "LOCAL MACRO DRAFT"
+        } else if self.document.dirty() {
+            "UNSAVED"
+        } else {
+            "unchanged"
+        };
+        frame.render_widget(Paragraph::new(format!("OpenHyperX | OFFLINE | {mode} | {draft_state}\nTarget {:?} | profile {:?} | NOT connected/read from mouse", profile.device, profile.name)).style(Style::default().fg(Color::Cyan)), areas[0]);
         frame.render_widget(Block::default().borders(Borders::ALL), areas[1]);
         let tab_row = areas[1].inner(Margin {
             horizontal: 1,
@@ -56,7 +64,7 @@ impl App {
             );
             offset += width;
         }
-        if !matches!(self.tab, 0 | 1 | 3) {
+        if !matches!(self.tab, 0..=3) {
             let content = self.content();
             self.scroll = self.scroll.min(
                 content
@@ -70,17 +78,12 @@ impl App {
             self.render_performance(frame, areas[2]);
         } else if self.tab == 1 {
             self.render_buttons(frame, areas[2]);
+        } else if self.tab == 2 {
+            self.render_macros(frame, areas[2]);
         } else if self.tab == 3 {
             self.render_lighting(frame, areas[2]);
         } else {
-            let content = self.content();
-            frame.render_widget(
-                Paragraph::new(safe_text(&content))
-                    .block(Block::default().borders(Borders::ALL).title(TABS[self.tab]))
-                    .scroll((self.scroll, 0))
-                    .wrap(Wrap { trim: false }),
-                areas[2],
-            );
+            self.render_profiles(frame, areas[2]);
         }
         let validation = readiness.error.map_or_else(
             || "Offline supplied-field validation: OK (not hardware verification)".into(),
@@ -135,6 +138,26 @@ impl App {
             });
             frame.render_widget(Clear, area);
             match modal {
+                Modal::Resolution(picker) => {
+                    crate::resolution_view::render(frame, area, picker, &mut self.hits)
+                }
+                Modal::Files(browser) => {
+                    crate::profiles::render_browser(frame, area, browser, &mut self.hits)
+                }
+                Modal::Macro(editor) => crate::macro_view::render_editor(
+                    frame,
+                    area,
+                    editor,
+                    self.document.profile(),
+                    &mut self.hits,
+                ),
+                Modal::MacroDelete { original, error } => crate::macro_view::render_delete(
+                    frame,
+                    area,
+                    original,
+                    error.as_deref(),
+                    &mut self.hits,
+                ),
                 Modal::Binding(picker) => {
                     crate::bindings::render_picker(frame, area, picker, &mut self.hits);
                 }
@@ -224,6 +247,15 @@ impl App {
                     }
                 }
             }
+            if matches!(
+                modal,
+                Modal::Resolution(_)
+                    | Modal::Files(_)
+                    | Modal::Macro(_)
+                    | Modal::MacroDelete { .. }
+            ) {
+                return;
+            }
             let row = ratatui::layout::Rect::new(
                 area.x + 1,
                 area.y + area.height
@@ -238,6 +270,12 @@ impl App {
             use crossterm::event::KeyCode;
             frame.render_widget(Clear, row);
             let buttons = match modal {
+                Modal::Resolution(_)
+                | Modal::Files(_)
+                | Modal::Macro(_)
+                | Modal::MacroDelete { .. } => {
+                    unreachable!("specialized dialogs draw their own nested actions")
+                }
                 Modal::Confirm { .. } => vec![
                     ("[Yes: discard]", KeyCode::Char('y')),
                     ("[Cancel]", KeyCode::Esc),
