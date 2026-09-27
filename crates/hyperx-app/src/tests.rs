@@ -34,6 +34,314 @@ fn example() -> SoftwareProfile {
     .unwrap()
 }
 
+fn library_macro(id: &str) -> NamedMacro {
+    NamedMacro {
+        source_id: id.into(),
+        name: "Shift A with individual delays".into(),
+        definition: MacroDefinition {
+            playback: MacroPlayback::Once,
+            events: vec![
+                MacroEvent::KeyDown {
+                    key: "left_shift".into(),
+                    delay_ms: 0,
+                },
+                MacroEvent::KeyDown {
+                    key: "A".into(),
+                    delay_ms: 37,
+                },
+                MacroEvent::KeyUp {
+                    key: "A".into(),
+                    delay_ms: 12,
+                },
+                MacroEvent::KeyUp {
+                    key: "left_shift".into(),
+                    delay_ms: 9999,
+                },
+            ],
+        },
+    }
+}
+
+#[test]
+fn macro_library_edits_preserve_chords_delays_and_every_other_profile_field() {
+    use ProfileValueEdit as E;
+    let mut original = unresolved();
+    original.polling = Some(SoftwarePollingProfile { hz: 123 });
+    let definition = library_macro("new-chord");
+    let edited = edit_profile_value(
+        &original,
+        E::MacroCreate {
+            definition: definition.clone(),
+        },
+    )
+    .unwrap();
+    let mut expected = original.clone();
+    expected.macros.push(definition.clone());
+    assert_eq!(edited, expected);
+    assert_eq!(
+        parse_profile(&encode_profile(&edited).unwrap()).unwrap(),
+        edited
+    );
+    validate_button_binding(
+        &edited,
+        "button4",
+        &SoftwareButtonBinding::Macro {
+            id: "new-chord".into(),
+        },
+    )
+    .unwrap();
+    let mut changed = definition;
+    changed.name = "Renamed chord".into();
+    changed.definition.playback = MacroPlayback::ToggleRepeat;
+    changed.definition.events.swap(1, 2);
+    let replaced = edit_profile_value(
+        &edited,
+        E::MacroReplace {
+            source_id: "new-chord".into(),
+            definition: changed.clone(),
+            confirm_references: false,
+        },
+    )
+    .unwrap();
+    expected.macros.last_mut().unwrap().clone_from(&changed);
+    assert_eq!(replaced, expected);
+    let removed = edit_profile_value(
+        &replaced,
+        E::MacroRemove {
+            source_id: "new-chord".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(removed, original);
+}
+
+#[test]
+fn macro_library_requires_reference_consent_and_never_silently_resolves_imports() {
+    use ProfileValueEdit as E;
+    let mut original = example();
+    original.buttons.insert(
+        "button4".into(),
+        SoftwareButtonBinding::Macro { id: "ab".into() },
+    );
+    original
+        .unresolved_button_assignments
+        .push(UnresolvedButtonAssignment {
+            source_id: "opaque-import".into(),
+            macro_source_id: Some("ab".into()),
+        });
+    let references = macro_references(&original, "ab");
+    assert_eq!(
+        references,
+        [
+            "control: button4",
+            "control: button5",
+            "unresolved source: opaque-import"
+        ]
+    );
+    let replacement = library_macro("ab");
+    assert!(edit_profile_value(
+        &original,
+        E::MacroReplace {
+            source_id: "ab".into(),
+            definition: replacement.clone(),
+            confirm_references: false,
+        }
+    )
+    .is_err());
+    assert!(edit_profile_value(
+        &original,
+        E::MacroRemove {
+            source_id: "ab".into()
+        }
+    )
+    .is_err());
+    let edited = edit_profile_value(
+        &original,
+        E::MacroReplace {
+            source_id: "ab".into(),
+            definition: replacement.clone(),
+            confirm_references: true,
+        },
+    )
+    .unwrap();
+    let mut expected = original.clone();
+    *expected
+        .macros
+        .iter_mut()
+        .find(|entry| entry.source_id == "ab")
+        .unwrap() = replacement;
+    assert_eq!(edited, expected);
+    let same = edited
+        .macros
+        .iter()
+        .find(|entry| entry.source_id == "ab")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        edit_profile_value(
+            &edited,
+            E::MacroReplace {
+                source_id: "ab".into(),
+                definition: same,
+                confirm_references: false,
+            }
+        )
+        .unwrap(),
+        edited
+    );
+    // Even a currently missing definition's ID is reserved by its references.
+    original
+        .unresolved_button_assignments
+        .push(UnresolvedButtonAssignment {
+            source_id: "second-import".into(),
+            macro_source_id: Some("missing".into()),
+        });
+    assert!(edit_profile_value(
+        &original,
+        E::MacroCreate {
+            definition: library_macro("missing")
+        }
+    )
+    .is_err());
+    original.buttons.insert(
+        "button6".into(),
+        SoftwareButtonBinding::Macro {
+            id: "missing-button".into(),
+        },
+    );
+    assert!(edit_profile_value(
+        &original,
+        E::MacroCreate {
+            definition: library_macro("missing-button")
+        }
+    )
+    .is_err());
+}
+
+#[test]
+fn incomplete_macro_drafts_remain_files_not_executable_assignments() {
+    use ProfileValueEdit as E;
+    let original = example();
+    let mut definition = library_macro("unfinished");
+    definition.definition.events.truncate(1);
+    let edited = edit_profile_value(
+        &original,
+        E::MacroCreate {
+            definition: definition.clone(),
+        },
+    )
+    .unwrap();
+    assert!(validate_button_binding(
+        &edited,
+        "button4",
+        &SoftwareButtonBinding::Macro {
+            id: "unfinished".into()
+        }
+    )
+    .is_err());
+    // The file data model is wider than the capture-backed encoder. Do not
+    // truncate imported timelines or conflate a file save with hardware support.
+    definition.definition.events = vec![
+        MacroEvent::KeyDown {
+            key: "unknown-imported-key".into(),
+            delay_ms: u16::MAX
+        };
+        15
+    ];
+    let edited = edit_profile_value(
+        &edited,
+        E::MacroReplace {
+            source_id: "unfinished".into(),
+            definition: definition.clone(),
+            confirm_references: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(edited.macros.last().unwrap(), &definition);
+    let choices = profile_binding_choices(&edited, "button4");
+    assert!(choices.iter().any(
+        |entry| matches!(&entry.binding, SoftwareButtonBinding::Macro { id } if id == "unfinished")
+            && entry.error.is_some()
+    ));
+    let files = Files::new();
+    let path = files.path("unfinished.toml");
+    save_profile_new(&path, &edited, &[]).unwrap();
+    assert_eq!(load_profile(&path).unwrap(), edited);
+    assert_eq!(edited.buttons, original.buttons);
+}
+
+#[test]
+fn macro_library_rejects_ambiguous_identity_invalid_names_and_oversized_storage() {
+    use ProfileValueEdit as E;
+    let original = example();
+    for id in ["ab", "", " ", "bad\u{1b}id", &"x".repeat(257)] {
+        assert!(edit_profile_value(
+            &original,
+            E::MacroCreate {
+                definition: library_macro(id)
+            }
+        )
+        .is_err());
+    }
+    for name in ["", "\t", "bad\nname", &"a".repeat(129)] {
+        let mut definition = library_macro("new");
+        definition.name = name.into();
+        assert!(edit_profile_value(&original, E::MacroCreate { definition }).is_err());
+    }
+    assert!(edit_profile_value(
+        &original,
+        E::MacroReplace {
+            source_id: "ab".into(),
+            definition: library_macro("new-id"),
+            confirm_references: true,
+        }
+    )
+    .is_err());
+    assert!(edit_profile_value(
+        &original,
+        E::MacroRemove {
+            source_id: "missing".into()
+        }
+    )
+    .is_err());
+    let mut ambiguous = original.clone();
+    ambiguous.macros.push(ambiguous.macros[0].clone());
+    for edit in [
+        E::MacroRemove {
+            source_id: "ab".into(),
+        },
+        E::MacroReplace {
+            source_id: "ab".into(),
+            definition: library_macro("ab"),
+            confirm_references: true,
+        },
+    ] {
+        assert!(edit_profile_value(&ambiguous, edit).is_err());
+    }
+    let mut definition = library_macro("large");
+    definition.definition.events = vec![MacroEvent::KeyDown {
+        key: "x".repeat(MAX_PROFILE_BYTES),
+        delay_ms: 20,
+    }];
+    assert!(edit_profile_value(&original, E::MacroCreate { definition }).is_err());
+    assert_eq!(original, example());
+}
+
+#[test]
+fn macro_input_metadata_is_semantic_and_model_scoped() {
+    let keys = macro_keyboard_names("pulsefire-raid");
+    assert_eq!(keys.len(), 120);
+    assert!(keys
+        .iter()
+        .all(|key| key.parse::<hyperx_core::KeyboardUsage>().is_ok()));
+    assert_eq!(
+        macro_mouse_button_names("pulsefire-raid"),
+        ["left", "right", "middle"]
+    );
+    assert!(macro_keyboard_names("unknown").is_empty());
+    assert!(macro_mouse_button_names("unknown").is_empty());
+}
+
 #[test]
 fn typed_controls_preserve_unrelated_settings_and_provenance() {
     use ProfileValueEdit as E;
@@ -489,4 +797,169 @@ fn model_metadata_and_encoding_capabilities_are_available_without_discovery() {
     );
     assert!(device_descriptor("pulsefire-raid").is_some());
     assert!(device_descriptor("unknown").is_none());
+}
+
+#[test]
+fn binding_choices_cover_named_actions_and_all_canonical_keyboard_usages() {
+    use hyperx_core::KeyboardUsage;
+    use std::collections::BTreeSet;
+    let profile = example();
+    for control in profile_controls(&profile.device) {
+        let choices = profile_binding_choices(&profile, control.id);
+        if control.primary {
+            assert!(choices.is_empty());
+            continue;
+        }
+        let mut keys = BTreeSet::new();
+        let mut ordinary = 0;
+        for choice in &choices {
+            if !matches!(choice.binding, SoftwareButtonBinding::Macro { .. }) {
+                ordinary += 1;
+                assert!(choice.error.is_none(), "{}: {:?}", control.id, choice);
+                validate_button_binding(&profile, control.id, &choice.binding).unwrap();
+            }
+            if let SoftwareButtonBinding::Keyboard { key } = &choice.binding {
+                assert!(
+                    keys.insert(key.parse::<KeyboardUsage>().unwrap().0),
+                    "duplicate key {key}"
+                );
+            }
+        }
+        assert_eq!(ordinary, 144); // 10 mouse + 7 media + 6 shortcuts + disabled + 120 keys
+        assert_eq!(keys, (0x04..=0x73).chain(0xE0..=0xE7).collect());
+    }
+    assert!(profile_binding_choices(&profile, "unknown").is_empty());
+}
+
+#[test]
+fn typed_binding_edits_preserve_other_fields_and_distinguish_omission_from_disabled() {
+    use ProfileValueEdit::ButtonBinding as E;
+    let mut original = unresolved();
+    original.polling = Some(SoftwarePollingProfile { hz: 123 }); // unrelated invalid draft
+    let modified = edit_profile_value(
+        &original,
+        E {
+            control: "button7".into(),
+            binding: Some(SoftwareButtonBinding::Keyboard {
+                key: "RETURN".into(),
+            }),
+        },
+    )
+    .unwrap();
+    let mut expected = original.clone();
+    expected.buttons.insert(
+        "button7".into(),
+        SoftwareButtonBinding::Keyboard {
+            key: "RETURN".into(),
+        },
+    );
+    assert_eq!(modified, expected); // importing/picking never normalizes aliases
+    assert!(validate_profile(&modified).error.is_some());
+    let disabled = edit_profile_value(
+        &modified,
+        E {
+            control: "button7".into(),
+            binding: Some(SoftwareButtonBinding::Disabled {}),
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        disabled.buttons["button7"],
+        SoftwareButtonBinding::Disabled {}
+    ));
+    let omitted = edit_profile_value(
+        &disabled,
+        E {
+            control: "button7".into(),
+            binding: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(omitted, original);
+    assert_eq!(
+        encode_profile(&omitted).unwrap(),
+        encode_profile(&original).unwrap()
+    );
+}
+
+#[test]
+fn binding_validation_rejects_primary_targets_bad_keys_and_ambiguous_macros_atomically() {
+    use ProfileValueEdit::ButtonBinding as E;
+    let original = example();
+    for (control, binding) in [
+        ("left-click", Some(SoftwareButtonBinding::Disabled {})),
+        ("right-click", None),
+        ("unknown", None),
+        (
+            "button4",
+            Some(SoftwareButtonBinding::Keyboard { key: "a+b".into() }),
+        ),
+        (
+            "button4",
+            Some(SoftwareButtonBinding::Macro {
+                id: "missing".into(),
+            }),
+        ),
+        (
+            "dpi",
+            Some(SoftwareButtonBinding::Macro { id: "ab".into() }),
+        ),
+    ] {
+        assert!(edit_profile_value(
+            &original,
+            E {
+                control: control.into(),
+                binding
+            }
+        )
+        .is_err());
+    }
+    let mut duplicate = original.clone();
+    duplicate.macros.push(duplicate.macros[0].clone());
+    assert!(edit_profile_value(
+        &duplicate,
+        E {
+            control: "button4".into(),
+            binding: Some(SoftwareButtonBinding::Macro { id: "ab".into() })
+        }
+    )
+    .is_err());
+    assert!(profile_binding_choices(&duplicate, "button4")
+        .iter()
+        .filter(|choice| matches!(choice.binding, SoftwareButtonBinding::Macro { .. }))
+        .all(|choice| choice.error.is_some()));
+}
+
+#[test]
+fn macro_binding_choices_gate_playback_and_timelines_per_target() {
+    use ProfileValueEdit::ButtonBinding as E;
+    let mut profile = example();
+    profile.macros[0].definition.playback = MacroPlayback::ToggleRepeat;
+    let binding = SoftwareButtonBinding::Macro { id: "ab".into() };
+    for (control, legal) in [("button4", true), ("button5", false), ("dpi", false)] {
+        let choices = profile_binding_choices(&profile, control);
+        let choice = choices
+            .iter()
+            .find(|choice| choice.binding == binding)
+            .unwrap();
+        assert_eq!(choice.error.is_none(), legal);
+        assert_eq!(
+            edit_profile_value(
+                &profile,
+                E {
+                    control: control.into(),
+                    binding: Some(binding.clone())
+                }
+            )
+            .is_ok(),
+            legal
+        );
+    }
+    profile.macros[0].definition.events.pop(); // unbalanced down/up must not become assignable
+    assert!(validate_button_binding(&profile, "button4", &binding).is_err());
+    let unknown = SoftwareProfile {
+        device: "unknown".into(),
+        ..Default::default()
+    };
+    assert!(profile_binding_choices(&unknown, "button4").is_empty());
 }

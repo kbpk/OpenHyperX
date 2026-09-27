@@ -1,8 +1,8 @@
 //! Typed file edits for UI controls, with no transport or device session.
 use anyhow::{bail, Context, Result};
 use hyperx_core::{
-    DpiStage, PrimaryButtonLayout, RgbColor, SoftwareDpiProfile, SoftwareLightingMode,
-    SoftwareLightingProfile, SoftwarePollingProfile, SoftwareProfile,
+    DpiStage, NamedMacro, PrimaryButtonLayout, RgbColor, SoftwareButtonBinding, SoftwareDpiProfile,
+    SoftwareLightingMode, SoftwareLightingProfile, SoftwarePollingProfile, SoftwareProfile,
 };
 
 use crate::{device_descriptor, encode_profile};
@@ -27,6 +27,25 @@ pub enum ProfileValueEdit {
     ActiveStage(Option<usize>),
     Polling(Option<u16>),
     PrimaryButtons(Option<PrimaryButtonLayout>),
+    /// None omits one file assignment; it is not Disabled or a factory reset.
+    ButtonBinding {
+        control: String,
+        binding: Option<SoftwareButtonBinding>,
+    },
+    /// Add a fresh library entry, never satisfy an existing unresolved reference.
+    MacroCreate {
+        definition: NamedMacro,
+    },
+    /// Keep identity stable; replacing a referenced timeline requires consent.
+    MacroReplace {
+        source_id: String,
+        definition: NamedMacro,
+        confirm_references: bool,
+    },
+    /// Referenced definitions cannot be deleted; first explicitly omit bindings.
+    MacroRemove {
+        source_id: String,
+    },
     SolidZone {
         zone: String,
         color: RgbColor,
@@ -114,6 +133,34 @@ pub fn edit_profile_value(
             edited.polling = hz.map(|hz| SoftwarePollingProfile { hz });
         }
         ProfileValueEdit::PrimaryButtons(layout) => edited.primary_buttons = layout,
+        ProfileValueEdit::ButtonBinding { control, binding } => {
+            let target = crate::profile_controls(&profile.device)
+                .into_iter()
+                .find(|target| target.id == control)
+                .context("unknown physical control")?;
+            if target.primary {
+                bail!("use the coupled primary-button layout for left/right click");
+            }
+            if let Some(binding) = binding {
+                crate::validate_button_binding(profile, &control, &binding)?;
+                edited.buttons.insert(control, binding);
+            } else {
+                edited.buttons.remove(&control);
+            }
+            // Explicit binding edits do not resolve/erase source provenance or
+            // unrelated invalid fields; those have their own explicit actions.
+        }
+        ProfileValueEdit::MacroCreate { definition } => {
+            crate::macros::create(&mut edited, definition)?;
+        }
+        ProfileValueEdit::MacroReplace {
+            source_id,
+            definition,
+            confirm_references,
+        } => crate::macros::replace(&mut edited, &source_id, definition, confirm_references)?,
+        ProfileValueEdit::MacroRemove { source_id } => {
+            crate::macros::remove(&mut edited, &source_id)?;
+        }
         ProfileValueEdit::SolidZone { zone, color } => {
             if !descriptor
                 .capabilities

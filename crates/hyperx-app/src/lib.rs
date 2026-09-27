@@ -21,6 +21,10 @@ pub const MAX_PROFILE_BYTES: usize = 1024 * 1024;
 
 mod controls;
 pub use controls::{edit_profile_value, ProfileValueEdit};
+mod bindings;
+pub use bindings::{profile_binding_choices, validate_button_binding, ProfileBindingChoice};
+mod macros;
+pub use macros::{macro_keyboard_names, macro_mouse_button_names, macro_references};
 
 /// Validation is offline encoding support, never proof of device state or playback.
 #[derive(Clone, Debug, Eq, PartialEq)]
