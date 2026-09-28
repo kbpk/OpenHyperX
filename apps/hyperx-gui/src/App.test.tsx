@@ -25,6 +25,14 @@ function fakeBackend(initial = structuredClone(fixture) as Snapshot) {
       }
       if (command === "gui_save_profile")
         current = { ...current, dirty: false, revision: current.revision + 1 };
+      if (command === "gui_overwrite_profile")
+        current = {
+          ...current,
+          dirty: false,
+          revision: current.revision + 1,
+          recovery_path:
+            "/profiles/profile.toml.openhyperx-backup-0001/profile.toml",
+        };
       if (command === "gui_reset") {
         current = { ...current, dirty: false, revision: current.revision + 1 };
       }
@@ -343,6 +351,50 @@ describe("offline profile UI", () => {
         ([command]) => command.includes("mouse") || command.includes("apply"),
       ),
     ).toBe(false);
+  });
+  it("requires a separate FILE-overwrite review and shows the recovery path", async () => {
+    const initial = structuredClone(fixture) as Snapshot;
+    initial.origin = "file";
+    initial.path = "/profiles/profile.toml";
+    initial.dirty = true;
+    const backend = fakeBackend(initial);
+    render(<App backend={backend} />);
+    await screen.findByRole("slider", { name: "Stage 1 DPI slider" });
+    await userEvent.click(screen.getByRole("button", { name: "Profiles" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Overwrite opened FILE…" }),
+    );
+    expect(backend.request).not.toHaveBeenCalledWith(
+      "gui_overwrite_profile",
+      expect.anything(),
+    );
+    expect(
+      screen.getByText(/exact old bytes, including comments/i),
+    ).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(backend.request).not.toHaveBeenCalledWith(
+      "gui_overwrite_profile",
+      expect.anything(),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Overwrite opened FILE…" }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "Overwrite FILE and keep recovery copy",
+      }),
+    );
+    await waitFor(() =>
+      expect(backend.request).toHaveBeenCalledWith("gui_overwrite_profile", {
+        expectedRevision: 0,
+        confirmed: true,
+      }),
+    );
+    expect(
+      await screen.findByText(
+        "/profiles/profile.toml.openhyperx-backup-0001/profile.toml",
+      ),
+    ).toBeTruthy();
   });
   it("makes the browser preview read-only", async () => {
     render(<App />);

@@ -257,7 +257,9 @@ export default function App({
   const [client] = useState(() => new GuiClient(backend));
   const [state, setState] = useState<SessionState>(client.state);
   const [page, setPage] = useState<Page>("Performance");
-  const [modal, setModal] = useState<"review" | "add" | "discard" | null>(null);
+  const [modal, setModal] = useState<
+    "review" | "add" | "discard" | "overwrite" | null
+  >(null);
   const [replacement, setReplacement] = useState<"open" | "empty" | "demo">(
     "empty",
   );
@@ -299,7 +301,12 @@ export default function App({
   async function request(command: string, args?: Record<string, unknown>) {
     try {
       if (
-        ["gui_save_profile", "gui_open_profile", "gui_reset"].includes(command)
+        [
+          "gui_save_profile",
+          "gui_overwrite_profile",
+          "gui_open_profile",
+          "gui_reset",
+        ].includes(command)
       )
         await draftGuardQueue.current;
       await client.request(command, args);
@@ -834,6 +841,12 @@ export default function App({
                               : "Unsaved new draft")}
                         </dd>
                       </div>
+                      {snapshot.recovery_path && (
+                        <div>
+                          <dt>Latest FILE recovery copy</dt>
+                          <dd>{snapshot.recovery_path}</dd>
+                        </div>
+                      )}
                       <div>
                         <dt>Target model</dt>
                         <dd>{profile.device}</dd>
@@ -890,6 +903,17 @@ export default function App({
                         <Icon name="open" />
                         Open TOML
                       </button>
+                      <button
+                        disabled={
+                          disabled ||
+                          macroDraft ||
+                          !snapshot.path ||
+                          !snapshot.dirty
+                        }
+                        onClick={() => setModal("overwrite")}
+                      >
+                        Overwrite opened FILE…
+                      </button>
                     </div>
                   </section>
                   <UnresolvedAssignments
@@ -925,10 +949,10 @@ export default function App({
                     </button>
                   </section>
                   <div className="notice">
-                    Save creates a new file, including drafts that are not ready
-                    for hardware. Existing files are never overwritten. Save to
-                    mouse is a separate operation and is unavailable in this
-                    GUI.
+                    Save new file never overwrites. Overwrite opened FILE is a
+                    separate confirmed action that keeps the exact old file in a
+                    recovery directory and refuses external edits. Neither
+                    action saves to mouse; hardware writes remain unavailable.
                   </div>
                 </>
               )}
@@ -1024,6 +1048,39 @@ export default function App({
               onClick={() => void doReplace(replacement, true)}
             >
               Discard and continue
+            </button>
+          </div>
+        </Dialog>
+      )}
+      {modal === "overwrite" && snapshot && (
+        <Dialog title="Overwrite opened FILE?" close={() => setModal(null)}>
+          <p>
+            This replaces only the file at <code>{snapshot.path}</code>. The
+            exact old bytes, including comments, will remain in a numbered
+            recovery directory. If another program changed this file since it
+            was opened or saved, the operation will be refused.
+          </p>
+          <p className="subtle">
+            A crash or I/O failure may require restoring from that directory.
+            This does not save anything to the mouse.
+          </p>
+          {state.error && <div className="notice error">{state.error}</div>}
+          <div className="dialog-actions">
+            <button onClick={() => setModal(null)}>Cancel</button>
+            <button
+              className="primary"
+              disabled={
+                state.busy || macroDraft || !snapshot.path || !snapshot.dirty
+              }
+              onClick={() =>
+                void request("gui_overwrite_profile", { confirmed: true }).then(
+                  (saved) => {
+                    if (saved) setModal(null);
+                  },
+                )
+              }
+            >
+              Overwrite FILE and keep recovery copy
             </button>
           </div>
         </Dialog>

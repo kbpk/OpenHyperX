@@ -30,6 +30,8 @@ pub struct Snapshot {
     pub revision: u64,
     pub origin: Origin,
     pub path: Option<String>,
+    /// Latest FILE-only recovery copy from a confirmed overwrite.
+    pub recovery_path: Option<String>,
     pub dirty: bool,
     pub profile: SoftwareProfile,
     pub readiness: Readiness,
@@ -185,6 +187,7 @@ pub struct Session {
     revision: u64,
     local_draft: bool,
     local_draft_generation: u64,
+    recovery_path: Option<String>,
 }
 
 impl Default for Session {
@@ -205,6 +208,7 @@ impl Session {
             revision: 0,
             local_draft: false,
             local_draft_generation: 0,
+            recovery_path: None,
         }
     }
     pub fn demo() -> Result<Self> {
@@ -216,6 +220,7 @@ impl Session {
             revision: 0,
             local_draft: false,
             local_draft_generation: 0,
+            recovery_path: None,
         })
     }
     pub fn dirty(&self) -> bool {
@@ -343,6 +348,7 @@ impl Session {
                 .document
                 .path()
                 .map(|path| path.to_string_lossy().into_owned()),
+            recovery_path: self.recovery_path.clone(),
             dirty: self.dirty(),
             profile: profile.clone(),
             macro_keys: macro_keyboard_names(&profile.device),
@@ -463,6 +469,7 @@ impl Session {
         let next = if demo { Self::demo()? } else { Self::empty() };
         self.document = next.document;
         self.origin = next.origin;
+        self.recovery_path = None;
         self.revision += 1;
         Ok(self.snapshot())
     }
@@ -473,6 +480,7 @@ impl Session {
         let document = ProfileDocument::open(path)?;
         self.document = document;
         self.origin = Origin::File;
+        self.recovery_path = None;
         self.revision += 1;
         Ok(self.snapshot())
     }
@@ -480,6 +488,20 @@ impl Session {
         self.check_save(expected)?;
         self.document.save_as(path)?;
         self.origin = Origin::File;
+        self.recovery_path = None;
+        self.revision += 1;
+        Ok(self.snapshot())
+    }
+    /// Explicit FILE overwrite, never an onboard/hardware operation. The
+    /// desktop adapter passes no path from the WebView; only this session's
+    /// already-opened/saved file can be replaced.
+    pub fn overwrite_file(&mut self, expected: u64, confirmed: bool) -> Result<Snapshot> {
+        self.check_save(expected)?;
+        if !confirmed {
+            bail!("explicit confirmation is required to overwrite the FILE profile");
+        }
+        let backup = self.document.save_overwrite_with_backup()?;
+        self.recovery_path = Some(backup.to_string_lossy().into_owned());
         self.revision += 1;
         Ok(self.snapshot())
     }

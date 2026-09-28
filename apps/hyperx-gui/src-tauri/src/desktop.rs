@@ -112,6 +112,17 @@ async fn gui_save_profile(
     })
 }
 
+#[tauri::command]
+fn gui_overwrite_profile(
+    state: State<'_, Managed>,
+    expected_revision: u64,
+    confirmed: bool,
+) -> Result<Snapshot, String> {
+    with_session(&state, |session| {
+        session.overwrite_file(expected_revision, confirmed)
+    })
+}
+
 pub fn run(demo: bool) {
     let session = if demo {
         Session::demo().expect("bundled demo must parse")
@@ -121,7 +132,7 @@ pub fn run(demo: bool) {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Managed { session: Mutex::new(session), close_pending: AtomicBool::new(false) })
-        .invoke_handler(tauri::generate_handler![gui_snapshot, gui_edit, gui_set_local_draft, gui_reset, gui_open_profile, gui_save_profile])
+        .invoke_handler(tauri::generate_handler![gui_snapshot, gui_edit, gui_set_local_draft, gui_reset, gui_open_profile, gui_save_profile, gui_overwrite_profile])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.state::<Managed>();

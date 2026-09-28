@@ -23,10 +23,7 @@ impl Files {
 }
 impl Drop for Files {
     fn drop(&mut self) {
-        for file in fs::read_dir(&self.0).unwrap() {
-            fs::remove_file(file.unwrap().path()).unwrap();
-        }
-        fs::remove_dir(&self.0).unwrap();
+        fs::remove_dir_all(&self.0).unwrap();
     }
 }
 
@@ -119,6 +116,51 @@ fn safe_new_file_save_rebaselines_only_on_success_and_never_overwrites() {
     assert!(session.dirty());
     assert_eq!(session.snapshot().revision, 3);
     assert_eq!(fs::read_to_string(&path).unwrap(), contents);
+}
+
+#[test]
+fn recoverable_overwrite_requires_confirmation_and_exposes_old_file_path() {
+    let files = Files::new();
+    let path = files.path("profile.toml");
+    let mut session = Session::demo().unwrap();
+    session.save_new(0, &path).unwrap();
+    let original = fs::read(&path).unwrap();
+    session.edit(1, Edit::Polling { hz: Some(500) }).unwrap();
+    assert!(session.overwrite_file(2, false).is_err());
+    assert!(session.overwrite_file(1, true).is_err());
+    assert_eq!(fs::read(&path).unwrap(), original);
+    let saved = session.overwrite_file(2, true).unwrap();
+    assert!(!saved.dirty);
+    assert_eq!(saved.revision, 3);
+    assert_eq!(saved.profile.polling.unwrap().hz, 500);
+    let backup = PathBuf::from(saved.recovery_path.unwrap());
+    assert_eq!(fs::read(backup).unwrap(), original);
+    assert_eq!(
+        hyperx_app::load_profile(&path).unwrap().polling.unwrap().hz,
+        500
+    );
+}
+
+#[test]
+fn recoverable_overwrite_refuses_external_edits_and_preserves_gui_draft() {
+    let files = Files::new();
+    let path = files.path("profile.toml");
+    let mut session = Session::demo().unwrap();
+    session.save_new(0, &path).unwrap();
+    session.edit(1, Edit::Polling { hz: Some(500) }).unwrap();
+    fs::write(
+        &path,
+        format!(
+            "# externally edited\n{}",
+            fs::read_to_string(&path).unwrap()
+        ),
+    )
+    .unwrap();
+    let external = fs::read(&path).unwrap();
+    assert!(session.overwrite_file(2, true).is_err());
+    assert_eq!(fs::read(&path).unwrap(), external);
+    assert!(session.snapshot().dirty);
+    assert!(session.snapshot().recovery_path.is_none());
 }
 #[test]
 fn incomplete_imports_remain_partial_and_inspectable_without_defaults() {

@@ -2,6 +2,7 @@
   "revision": 0,
   "origin": "demo",
   "path": null,
+  "recovery_path": null,
   "dirty": false,
   "profile": {
     "name": "Raid example",

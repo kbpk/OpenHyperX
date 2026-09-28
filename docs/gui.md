@@ -21,7 +21,8 @@ service, firmware updater, shell plugin or global keyboard hook is included.
   timelines with individual delays, add/remove/reorder and Once/Toggle/Hold
   playback, without collapsing chords. Referenced replacements need confirmation.
 - Lighting: independent wheel/logo Solid colors, palette and Off per zone.
-- Profiles: naming, native TOML open/save dialogs, validation and baseline diff.
+- Profiles: naming, native TOML open/Save NEW dialogs, explicitly confirmed
+  recoverable FILE overwrite, validation and baseline diff.
 - Imported provenance: inspect unresolved source IDs, explicitly choose a legal
   physical target and existing library macro, or deliberately omit one source
   entry. A separate confirmation precedes either file edit; no source hint
@@ -47,9 +48,18 @@ an empty partial draft; `--demo` loads the visibly labeled bundled example.
 The browser preview is **read-only**, using the same bundled Rust snapshot.
 It has no substitute JavaScript profile encoder or device implementation.
 
-Save creates a **new** file using the existing app-layer `create_new` writer;
-it never overwrites existing files, even after a native overwrite confirmation.
-Save may preserve an invalid/partial draft and does not grant hardware readiness.
+Save new file uses the app-layer `create_new` writer and never overwrites.
+Profiles also offers a separate **Overwrite opened FILE** action only for a
+dirty, previously opened/saved document. Its own review dialog names the
+exact path; the native backend requires explicit confirmation and never accepts
+an arbitrary frontend path. The shared app layer refuses symlinked, read-only,
+non-regular or externally changed files, writes a complete replacement
+snapshot, then moves the old bytes into a numbered sibling recovery directory
+before installing the new file. The exact recovery path remains visible in
+Profiles after success. A crash/I/O failure may leave the original path absent
+or incomplete; inspect the recovery directory before retrying. This action is
+FILE-only and never Save to mouse. Either save may preserve an invalid/partial
+draft and does not grant hardware readiness.
 Failed edits, loads and saves preserve the last successful document/baseline.
 Replacing a dirty document and closing a dirty native window require confirmation.
 
@@ -278,7 +288,8 @@ Sources: [Rust IPC](https://v2.tauri.app/develop/calling-rust/),
 - [x] Editable macro timeline with target-specific limits and library management.
 - [x] Partial/unresolved import inspection and explicit resolution/omission controls.
 - [ ] Keyboard navigation/operator tests of native dialogs and WebView2.
-- [ ] Undo/recovery and a deliberate recoverable overwrite workflow.
+- [x] Deliberate recoverable overwrite of an opened FILE with a separate review.
+- [ ] Session undo/recovery for unsaved draft edits.
 - [ ] Connected app facade **only after** usable hardware baseline/readback is restored.
 - [ ] Separate Preview, Apply and confirmed Save to mouse; no reports in React.
 - [ ] Installer, signing and releases after native behavior is validated.

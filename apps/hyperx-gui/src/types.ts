@@ -58,6 +58,7 @@ export interface Snapshot {
   revision: number;
   origin: Origin;
   path: string | null;
+  recovery_path: string | null;
   dirty: boolean;
   profile: Profile;
   readiness: { error: string | null; warnings: string[] };
