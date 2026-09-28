@@ -162,6 +162,33 @@ fn recoverable_overwrite_refuses_external_edits_and_preserves_gui_draft() {
     assert!(session.snapshot().dirty);
     assert!(session.snapshot().recovery_path.is_none());
 }
+
+#[test]
+fn gui_undo_redo_are_revision_checked_whole_file_draft_edits() {
+    let mut session = Session::demo().unwrap();
+    let original = session.snapshot().profile;
+    let edited = session
+        .edit(
+            0,
+            Edit::Name {
+                name: "Edited name".into(),
+            },
+        )
+        .unwrap();
+    assert!(edited.can_undo && !edited.can_redo);
+    assert!(session.undo_file_edit(0).is_err());
+    session.set_local_draft(true);
+    assert!(session.undo_file_edit(1).is_err());
+    session.set_local_draft(false);
+    let undone = session.undo_file_edit(1).unwrap();
+    assert_eq!(undone.profile, original);
+    assert!(!undone.dirty && undone.can_redo);
+    let redone = session.redo_file_edit(2).unwrap();
+    assert_eq!(redone.profile.name, "Edited name");
+    assert!(redone.dirty && redone.can_undo);
+    assert!(session.redo_file_edit(3).is_err());
+    assert_eq!(session.snapshot().revision, 3);
+}
 #[test]
 fn incomplete_imports_remain_partial_and_inspectable_without_defaults() {
     let files = Files::new();

@@ -304,6 +304,8 @@ export default function App({
         [
           "gui_save_profile",
           "gui_overwrite_profile",
+          "gui_undo_file_edit",
+          "gui_redo_file_edit",
           "gui_open_profile",
           "gui_reset",
         ].includes(command)
@@ -884,6 +886,18 @@ export default function App({
                       )}
                     </dl>
                     <div className="inline-actions">
+                      <button
+                        disabled={disabled || macroDraft || !snapshot.can_undo}
+                        onClick={() => void request("gui_undo_file_edit")}
+                      >
+                        Undo file edit
+                      </button>
+                      <button
+                        disabled={disabled || macroDraft || !snapshot.can_redo}
+                        onClick={() => void request("gui_redo_file_edit")}
+                      >
+                        Redo file edit
+                      </button>
                       <button
                         disabled={disabled || macroDraft}
                         onClick={() => replace("empty")}

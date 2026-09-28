@@ -33,6 +33,8 @@ pub struct Snapshot {
     /// Latest FILE-only recovery copy from a confirmed overwrite.
     pub recovery_path: Option<String>,
     pub dirty: bool,
+    pub can_undo: bool,
+    pub can_redo: bool,
     pub profile: SoftwareProfile,
     pub readiness: Readiness,
     pub changes: Changes,
@@ -350,6 +352,8 @@ impl Session {
                 .map(|path| path.to_string_lossy().into_owned()),
             recovery_path: self.recovery_path.clone(),
             dirty: self.dirty(),
+            can_undo: self.document.can_undo(),
+            can_redo: self.document.can_redo(),
             profile: profile.clone(),
             macro_keys: macro_keyboard_names(&profile.device),
             macro_mouse_buttons: macro_mouse_button_names(&profile.device),
@@ -502,6 +506,28 @@ impl Session {
         }
         let backup = self.document.save_overwrite_with_backup()?;
         self.recovery_path = Some(backup.to_string_lossy().into_owned());
+        self.revision += 1;
+        Ok(self.snapshot())
+    }
+    pub fn undo_file_edit(&mut self, expected: u64) -> Result<Snapshot> {
+        self.check_revision(expected)?;
+        if self.local_draft {
+            bail!("update or discard the local macro timeline before undoing a file edit");
+        }
+        if !self.document.undo() {
+            bail!("no file draft edit to undo");
+        }
+        self.revision += 1;
+        Ok(self.snapshot())
+    }
+    pub fn redo_file_edit(&mut self, expected: u64) -> Result<Snapshot> {
+        self.check_revision(expected)?;
+        if self.local_draft {
+            bail!("update or discard the local macro timeline before redoing a file edit");
+        }
+        if !self.document.redo() {
+            bail!("no file draft edit to redo");
+        }
         self.revision += 1;
         Ok(self.snapshot())
     }

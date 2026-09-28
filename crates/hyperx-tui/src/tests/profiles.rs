@@ -67,6 +67,35 @@ fn set_field(app: &mut App, text: &str) {
 }
 
 #[test]
+fn undo_redo_use_whole_file_snapshots_without_touching_disk_or_hid() {
+    let files = Files::new();
+    let path = files.profile("undo.toml");
+    let on_disk = fs::read(&path).unwrap();
+    let mut app = App::new(ProfileDocument::open(&path).unwrap(), false);
+    app.tab = 4;
+    let original = app.document.profile().clone();
+    let mut changed = original.clone();
+    changed.name = "Unsaved rename".into();
+    app.document.replace(changed.clone());
+    click(&mut app, |action| {
+        matches!(action, Action::Key(KeyCode::Char('u')))
+    });
+    assert_eq!(app.document.profile(), &original);
+    assert!(!app.document.dirty());
+    app.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL));
+    assert_eq!(app.document.profile(), &changed);
+    assert!(app.document.dirty());
+    assert_eq!(fs::read(&path).unwrap(), on_disk);
+    app.handle_key(key(KeyCode::Char('u')));
+    assert_eq!(app.document.profile(), &original);
+    click(&mut app, |action| {
+        matches!(action, Action::Key(KeyCode::Char('U')))
+    });
+    assert_eq!(app.document.profile(), &changed);
+    assert_eq!(fs::read(&path).unwrap(), on_disk);
+}
+
+#[test]
 fn overwrite_file_requires_explicit_confirmation_and_keeps_recovery_copy() {
     let files = Files::new();
     let path = files.profile("original.toml");

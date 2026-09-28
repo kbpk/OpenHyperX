@@ -33,6 +33,22 @@ function fakeBackend(initial = structuredClone(fixture) as Snapshot) {
           recovery_path:
             "/profiles/profile.toml.openhyperx-backup-0001/profile.toml",
         };
+      if (command === "gui_undo_file_edit")
+        current = {
+          ...current,
+          dirty: false,
+          can_undo: false,
+          can_redo: true,
+          revision: current.revision + 1,
+        };
+      if (command === "gui_redo_file_edit")
+        current = {
+          ...current,
+          dirty: true,
+          can_undo: true,
+          can_redo: false,
+          revision: current.revision + 1,
+        };
       if (command === "gui_reset") {
         current = { ...current, dirty: false, revision: current.revision + 1 };
       }
@@ -395,6 +411,36 @@ describe("offline profile UI", () => {
         "/profiles/profile.toml.openhyperx-backup-0001/profile.toml",
       ),
     ).toBeTruthy();
+  });
+  it("offers revision-checked file undo and redo without hardware commands", async () => {
+    const initial = structuredClone(fixture) as Snapshot;
+    initial.can_undo = true;
+    initial.dirty = true;
+    const backend = fakeBackend(initial);
+    render(<App backend={backend} />);
+    await screen.findByRole("slider", { name: "Stage 1 DPI slider" });
+    await userEvent.click(screen.getByRole("button", { name: "Profiles" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Undo file edit" }),
+    );
+    await waitFor(() =>
+      expect(backend.request).toHaveBeenCalledWith("gui_undo_file_edit", {
+        expectedRevision: 0,
+      }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Redo file edit" }),
+    );
+    await waitFor(() =>
+      expect(backend.request).toHaveBeenCalledWith("gui_redo_file_edit", {
+        expectedRevision: 1,
+      }),
+    );
+    expect(
+      backend.request.mock.calls.some(
+        ([command]) => command.includes("mouse") || command.includes("apply"),
+      ),
+    ).toBe(false);
   });
   it("makes the browser preview read-only", async () => {
     render(<App />);

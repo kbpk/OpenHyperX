@@ -371,7 +371,11 @@ pub struct ProfileDocument {
     baseline: SoftwareProfile,
     baseline_file: Option<Vec<u8>>,
     path: Option<PathBuf>,
+    undo: Vec<SoftwareProfile>,
+    redo: Vec<SoftwareProfile>,
 }
+
+const MAX_UNDO_STATES: usize = 32;
 
 #[cfg(test)]
 mod tests;
@@ -383,6 +387,8 @@ impl ProfileDocument {
             profile,
             baseline_file: None,
             path: None,
+            undo: Vec::new(),
+            redo: Vec::new(),
         }
     }
     pub fn open(path: &Path) -> Result<Self> {
@@ -404,7 +410,36 @@ impl ProfileDocument {
         self.profile != self.baseline
     }
     pub fn replace(&mut self, profile: SoftwareProfile) {
-        self.profile = profile;
+        if self.profile == profile {
+            return;
+        }
+        self.undo
+            .push(std::mem::replace(&mut self.profile, profile));
+        if self.undo.len() > MAX_UNDO_STATES {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
+    }
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+    pub fn undo(&mut self) -> bool {
+        let Some(previous) = self.undo.pop() else {
+            return false;
+        };
+        self.redo
+            .push(std::mem::replace(&mut self.profile, previous));
+        true
+    }
+    pub fn redo(&mut self) -> bool {
+        let Some(next) = self.redo.pop() else {
+            return false;
+        };
+        self.undo.push(std::mem::replace(&mut self.profile, next));
+        true
     }
     pub fn diff(&self) -> Result<SoftwareProfileDiff> {
         diff_software_profiles(&self.baseline, &self.profile).map_err(|error| anyhow!(error))

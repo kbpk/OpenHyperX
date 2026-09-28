@@ -182,6 +182,14 @@ uses canonical typed TOML. A crash or I/O failure may leave the original path
 absent or incomplete, so inspect the recovery directory before retrying. An
 error leaves the draft dirty. This is a FILE operation, never Save to mouse.
 
+`u` / Ctrl+Z and `U` / Ctrl+Y undo and redo up to 32 complete FILE-draft
+edits. The Profiles buttons offer the same actions by mouse. A new edit after
+undo drops the redo branch. Undo can return exactly to the opened/saved
+baseline; after saving, the baseline changes but earlier draft snapshots remain
+available. Full profiles are retained, including unknown/partial source
+provenance; no omitted setting is guessed or filled. History lives only in the
+running session, does not touch disk or USB and does not survive restart.
+
 The browser lists directories first, then `.toml` files (case-insensitive
 extension), without recursively scanning or parsing their contents. Click a row
 or use arrows/PageUp/PageDown/Home/End to preview. Enter opens a directory or,
@@ -287,6 +295,7 @@ invented and no settings are sent to the mouse.
 | F2 / F3 / F4 in Profiles | browse files / rename draft / copy draft to NEW file |
 | F5 in Profiles | open unresolved source/target/library selector |
 | F6 in Profiles | review recoverable overwrite of the opened FILE; `y` confirms |
+| u / Ctrl+Z, U / Ctrl+Y | undo / redo one complete FILE-draft edit; no disk or mouse write |
 | Type/paste, arrows/click, Enter in source selector | filter, preview, advance explicit choice |
 | Delete in source list | review provenance-only omission |
 | F1 in source selector | complete scrollable reason; Esc returns |

@@ -60,6 +60,13 @@ Profiles after success. A crash/I/O failure may leave the original path absent
 or incomplete; inspect the recovery directory before retrying. This action is
 FILE-only and never Save to mouse. Either save may preserve an invalid/partial
 draft and does not grant hardware readiness.
+
+Profiles also has Undo/Redo file edit controls backed by the shared bounded
+32-snapshot document history. They restore complete typed drafts, including
+partial/import provenance, and keep the opened/saved FILE baseline for dirty
+and diff calculations. They are revision-checked, disabled while a local macro
+timeline is pending and do not write disk or USB. A new edit after undo clears
+the redo branch; history is in memory and is lost when the app exits.
 Failed edits, loads and saves preserve the last successful document/baseline.
 Replacing a dirty document and closing a dirty native window require confirmation.
 
@@ -289,7 +296,8 @@ Sources: [Rust IPC](https://v2.tauri.app/develop/calling-rust/),
 - [x] Partial/unresolved import inspection and explicit resolution/omission controls.
 - [ ] Keyboard navigation/operator tests of native dialogs and WebView2.
 - [x] Deliberate recoverable overwrite of an opened FILE with a separate review.
-- [ ] Session undo/recovery for unsaved draft edits.
+- [x] Bounded in-session undo/redo for complete FILE drafts.
+- [ ] Recovery of unsaved draft edits after app/process restart.
 - [ ] Connected app facade **only after** usable hardware baseline/readback is restored.
 - [ ] Separate Preview, Apply and confirmed Save to mouse; no reports in React.
 - [ ] Installer, signing and releases after native behavior is validated.

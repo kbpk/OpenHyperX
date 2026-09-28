@@ -137,11 +137,20 @@ impl App {
             ],
             &mut self.hits,
         );
+        buttons(
+            frame,
+            row(inner, 2),
+            &[
+                ("[Undo u / Ctrl+Z]", KeyCode::Char('u')),
+                ("[Redo U / Ctrl+Y]", KeyCode::Char('U')),
+            ],
+            &mut self.hits,
+        );
         let body = Rect::new(
             inner.x,
-            inner.y.saturating_add(2).min(inner.bottom()),
+            inner.y.saturating_add(3).min(inner.bottom()),
             inner.width,
-            inner.height.saturating_sub(2),
+            inner.height.saturating_sub(3),
         );
         frame.render_widget(
             Paragraph::new(safe_text(&self.content()))

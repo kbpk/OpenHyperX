@@ -60,6 +60,8 @@ export interface Snapshot {
   path: string | null;
   recovery_path: string | null;
   dirty: boolean;
+  can_undo: boolean;
+  can_redo: boolean;
   profile: Profile;
   readiness: { error: string | null; warnings: string[] };
   changes: { settings: Change[]; metadata: Change[]; error: string | null };

@@ -317,6 +317,29 @@ impl App {
             self.modal = Some(modal);
             return;
         }
+        let undo = key.code == KeyCode::Char('u')
+            || (key.code == KeyCode::Char('z') && key.modifiers.contains(KeyModifiers::CONTROL));
+        let redo = key.code == KeyCode::Char('U')
+            || (key.code == KeyCode::Char('y') && key.modifiers.contains(KeyModifiers::CONTROL));
+        if undo || redo {
+            let changed = if undo {
+                self.document.undo()
+            } else {
+                self.document.redo()
+            };
+            self.status = if changed {
+                format!(
+                    "{} one complete FILE draft edit; no disk or device write.",
+                    if undo { "Undid" } else { "Redid" }
+                )
+            } else {
+                format!(
+                    "No FILE draft edit to {}.",
+                    if undo { "undo" } else { "redo" }
+                )
+            };
+            return;
+        }
         if self.profiles_key(key)
             || self.macros_key(key)
             || self.bindings_key(key)

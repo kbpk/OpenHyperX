@@ -942,6 +942,72 @@ fn document_diff_and_save_baseline_track_file_changes_not_hardware() {
 }
 
 #[test]
+fn document_undo_redo_preserves_full_profile_and_file_baseline() {
+    let files = Files::new();
+    let path = files.path("undo.toml");
+    let mut original = example();
+    original
+        .unresolved_button_assignments
+        .push(UnresolvedButtonAssignment {
+            source_id: "opaque:source".into(),
+            macro_source_id: Some("unknown-timeline".into()),
+        });
+    save_profile_new(&path, &original, &[]).unwrap();
+    let mut document = ProfileDocument::open(&path).unwrap();
+    assert!(!document.can_undo() && !document.can_redo());
+    let mut edited = original.clone();
+    edited.name = "First edit".into();
+    document.replace(edited.clone());
+    let mut second = edited.clone();
+    second.buttons.remove("button4");
+    document.replace(second.clone());
+    assert!(document.can_undo() && !document.can_redo());
+    assert!(document.undo());
+    assert_eq!(document.profile(), &edited);
+    assert!(document.dirty() && document.can_redo());
+    assert!(document.undo());
+    assert_eq!(document.profile(), &original);
+    assert!(!document.dirty());
+    assert!(!document.undo());
+    assert!(document.redo());
+    assert_eq!(document.profile(), &edited);
+    assert!(document.redo());
+    assert_eq!(document.profile(), &second);
+    assert!(!document.redo());
+    document.save_overwrite_with_backup().unwrap();
+    assert!(!document.dirty());
+    assert!(document.undo());
+    assert!(document.dirty());
+    assert_eq!(document.profile(), &edited);
+    assert_eq!(
+        document.profile().unresolved_button_assignments,
+        original.unresolved_button_assignments
+    );
+    assert_eq!(load_profile(&path).unwrap(), second);
+}
+
+#[test]
+fn document_new_edit_discards_redo_and_history_is_bounded() {
+    let mut document = ProfileDocument::from_profile(example());
+    for index in 0..40 {
+        let mut edited = document.profile().clone();
+        edited.name = format!("Edit {index}");
+        document.replace(edited);
+    }
+    let mut count = 0;
+    while document.undo() {
+        count += 1;
+    }
+    assert_eq!(count, MAX_UNDO_STATES);
+    assert!(document.can_redo());
+    let mut branch = document.profile().clone();
+    branch.name = "Other branch".into();
+    document.replace(branch);
+    assert!(!document.can_redo());
+    assert!(!document.redo());
+}
+
+#[test]
 fn overwrite_preserves_exact_old_file_and_requires_a_fresh_file_baseline() {
     let files = Files::new();
     let path = files.path("custom.toml");

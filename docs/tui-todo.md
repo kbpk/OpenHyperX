@@ -34,7 +34,8 @@ must reuse `hyperx-app`; completing GUI work must not remove terminal features.
 - [x] Explicit unresolved-entry selectors without TOML, with distinct resolve/omit confirmation.
 - [x] Better diff presentation and a validation summary linked to the offending section/field path.
 - [x] Deliberate FILE overwrite with explicit confirmation, stale-file refusal and a recovery copy; Save NEW stays the default.
-- [ ] Session recovery/undo without guessing missing device settings or stripping provenance.
+- [x] Bounded in-session undo/redo of complete FILE drafts without stripping provenance.
+- [ ] Recovery of an unsaved session after app/process restart.
 
 ## Connected mode — blocked on hardware evidence
 

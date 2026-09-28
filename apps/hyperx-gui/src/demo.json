@@ -4,6 +4,8 @@
   "path": null,
   "recovery_path": null,
   "dirty": false,
+  "can_undo": false,
+  "can_redo": false,
   "profile": {
     "name": "Raid example",
     "device": "pulsefire-raid",
