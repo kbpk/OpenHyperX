@@ -36,7 +36,8 @@ must reuse `hyperx-app`; completing GUI work must not remove terminal features.
 - [x] Better diff presentation and a validation summary linked to the offending section/field path.
 - [x] Deliberate FILE overwrite with explicit confirmation, stale-file refusal and a recovery copy; Save NEW stays the default.
 - [x] Bounded in-session undo/redo of complete FILE drafts without stripping provenance.
-- [ ] Recovery of an unsaved session after app/process restart.
+- [x] Recover accepted FILE document edits after restart from an explicit private snapshot.
+- [ ] Include uncommitted modal fields and macro timelines in crash recovery; add snapshot management UI.
 
 ## Connected mode — blocked on hardware evidence
 

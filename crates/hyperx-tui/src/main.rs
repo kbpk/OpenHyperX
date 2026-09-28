@@ -12,7 +12,7 @@ use crossterm::{
     },
     execute,
 };
-use hyperx_app::{parse_profile, ProfileDocument};
+use hyperx_app::{parse_profile, DraftRecoveryStore, ProfileDocument, RecoveryClient};
 use hyperx_core::SoftwareProfile;
 use ratatui::{backend::TestBackend, Terminal};
 
@@ -56,11 +56,20 @@ impl View {
 #[command(version, about = "OpenHyperX offline profile editor; never opens HID")]
 struct Cli {
     /// Open an existing OpenHyperX TOML profile, not a live device.
-    #[arg(conflicts_with = "demo")]
+    #[arg(conflicts_with_all = ["demo", "recover", "list_recovery"])]
     file: Option<PathBuf>,
     /// Load example settings, clearly labeled as demo rather than device state.
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["recover", "list_recovery"])]
     demo: bool,
+    /// Restore exactly this previously listed TUI draft snapshot; no device access.
+    #[arg(long, conflicts_with = "list_recovery")]
+    recover: Option<PathBuf>,
+    /// List TUI crash-recovery snapshots without restoring or deleting them.
+    #[arg(long, conflicts_with_all = ["render", "check", "view"])]
+    list_recovery: bool,
+    /// Private directory for offline draft snapshots (default: user app-state directory).
+    #[arg(long)]
+    recovery_dir: Option<PathBuf>,
     /// Render one frame as plain text without requiring an interactive terminal.
     #[arg(long, conflicts_with = "check")]
     render: bool,
@@ -78,7 +87,45 @@ struct Cli {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let document = if let Some(path) = &cli.file {
+    let store = || -> Result<DraftRecoveryStore> {
+        let directory = cli
+            .recovery_dir
+            .clone()
+            .map(Ok)
+            .unwrap_or_else(DraftRecoveryStore::default_directory)?;
+        DraftRecoveryStore::new(&directory, RecoveryClient::Tui)
+    };
+    let mut recovery = if cli.list_recovery || cli.recover.is_some() {
+        Some(store()?)
+    } else {
+        None
+    };
+    if cli.list_recovery {
+        let recovery = recovery.as_ref().expect("created for listing");
+        let paths = recovery.list()?;
+        println!("Offline TUI recovery snapshots (no HID access):");
+        for path in &paths {
+            match recovery.load(path) {
+                Ok(document) => println!(
+                    "{:?} | profile {:?} | original FILE {:?}",
+                    path,
+                    document.profile().name,
+                    document.path()
+                ),
+                Err(error) => println!("{:?} | UNREADABLE: {error:#}", path),
+            }
+        }
+        if paths.is_empty() {
+            println!("No TUI recovery snapshots.");
+        }
+        return Ok(());
+    }
+    let document = if let Some(path) = &cli.recover {
+        recovery
+            .as_mut()
+            .expect("created for restore")
+            .adopt(path)?
+    } else if let Some(path) = &cli.file {
         ProfileDocument::open(path)?
     } else if cli.demo {
         ProfileDocument::from_profile(parse_profile(include_str!(
@@ -93,6 +140,11 @@ fn main() -> Result<()> {
         })
     };
     let mut app = app::App::new(document, cli.demo);
+    if cli.recover.is_some() {
+        app.status =
+            "RECOVERED FILE draft; unsaved. Save NEW or confirm FILE overwrite; no HID access."
+                .into();
+    }
     app.tab = cli.view.map_or(0, View::index);
     if cli.check {
         let result = hyperx_app::validate_profile(app.document.profile());
@@ -123,6 +175,15 @@ fn main() -> Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         bail!("interactive TUI needs a terminal; run in Windows Terminal or use --demo --render / --check for offline smoke tests");
     }
+    let mut recovery = recovery.map_or_else(store, Ok)?;
+    if cli.recover.is_none() {
+        let count = recovery.list()?.len();
+        if count > 0 {
+            app.status = format!(
+                "{count} prior TUI draft snapshot(s). Use --list-recovery then --recover PATH; no HID access."
+            );
+        }
+    }
     // Ratatui's run wrapper restores raw mode/alternate screen on success,
     // returned errors and panic. Our additional paste mode has its own guard.
     ratatui::run(|terminal| -> Result<()> {
@@ -136,14 +197,75 @@ fn main() -> Result<()> {
         execute!(io::stdout(), EnableBracketedPaste, EnableMouseCapture)?;
         while !app.quit {
             terminal.draw(|frame| app.render(frame))?;
-            match event::read()? {
-                Event::Key(key) => app.handle_key(key),
-                Event::Paste(text) => app.handle_paste(&text),
-                Event::Mouse(mouse) => app.handle_mouse(mouse),
-                Event::Resize(_, _) => app.clear_mouse_layout(),
-                _ => {}
-            }
+            handle_event(&mut app, &mut recovery, event::read()?);
         }
         Ok(())
     })
+}
+
+fn handle_event(app: &mut app::App, recovery: &mut DraftRecoveryStore, event: Event) {
+    let before_profile = app.document.profile().clone();
+    let before_path = app.document.path().map(std::path::Path::to_path_buf);
+    let before_dirty = app.document.dirty();
+    match event {
+        Event::Key(key) => app.handle_key(key),
+        Event::Paste(text) => app.handle_paste(&text),
+        Event::Mouse(mouse) => app.handle_mouse(mouse),
+        Event::Resize(_, _) => app.clear_mouse_layout(),
+        _ => {}
+    }
+    if app.document.profile() != &before_profile
+        || app.document.path() != before_path.as_deref()
+        || app.document.dirty() != before_dirty
+    {
+        if let Err(error) = recovery.capture(&app.document) {
+            app.status = format!(
+                "RECOVERY SNAPSHOT FAILED: {error:#}. FILE draft is still in memory; save NEW now."
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use std::{
+        fs,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    use hyperx_app::{parse_profile, DraftRecoveryStore, ProfileDocument, RecoveryClient};
+
+    use super::{app, handle_event};
+
+    #[test]
+    fn committed_tui_edits_autosnapshot_and_reverting_to_baseline_clears_it() {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let directory = std::env::temp_dir().join(format!(
+            "openhyperx-tui-autosnapshot-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mut store = DraftRecoveryStore::new(&directory, RecoveryClient::Tui).unwrap();
+        let profile = parse_profile(include_str!(
+            "../../../examples/profiles/pulsefire-raid.toml"
+        ))
+        .unwrap();
+        let mut app = app::App::new(ProfileDocument::from_profile(profile), true);
+        handle_event(
+            &mut app,
+            &mut store,
+            Event::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)),
+        );
+        assert!(app.document.dirty());
+        assert_eq!(store.list().unwrap().len(), 1);
+        handle_event(
+            &mut app,
+            &mut store,
+            Event::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)),
+        );
+        assert!(!app.document.dirty());
+        assert!(store.list().unwrap().is_empty());
+        fs::remove_dir_all(directory).unwrap();
+    }
 }

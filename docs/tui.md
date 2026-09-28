@@ -21,6 +21,25 @@ If launching directly from WSL would give the Windows executable redirected
 stdin/stdout, use Windows Terminal instead. The TUI refuses noninteractive
 streams rather than hanging. Linux/macOS can run their native executable.
 
+The interactive TUI automatically writes a private offline recovery snapshot
+after each accepted FILE draft edit. It preserves the original file baseline
+and exact bytes for the stale-file overwrite check. A normal Save NEW or
+confirmed FILE overwrite clears this session's snapshot. Recovery never reads
+or writes the mouse. To inspect and explicitly restore an older draft:
+
+```powershell
+hyperx-tui --list-recovery
+hyperx-tui --recover 'PATH printed by --list-recovery'
+```
+
+The path must name a TUI snapshot inside the private recovery directory
+(`%LOCALAPPDATA%\OpenHyperX\draft-recovery` on Windows). Portable setups may
+pass `--recovery-dir PATH` to both commands and the interactive editor. A
+broken snapshot stays on disk and is reported as unreadable, not silently
+deleted. Only edits accepted into the complete profile document are captured;
+unfinished text fields and macro-editor timelines remain local to their modal
+and are not yet crash-recoverable. `--render` and `--check` do not autosave.
+
 `--demo` loads the repository example with a DEMO DATA badge. A file loads FILE
 DRAFT settings, not live state. No arguments create an empty partial target
 profile with no DPI/polling/binding/lighting defaults. Suggested size is 100x30.

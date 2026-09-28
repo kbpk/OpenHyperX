@@ -1,3 +1,4 @@
+use hyperx_app::{parse_profile, DraftRecoveryStore, ProfileDocument, RecoveryClient};
 use std::{
     fs,
     path::PathBuf,
@@ -167,4 +168,66 @@ fn arguments_reject_invalid_sizes_conflicts_and_missing_files() {
     ] {
         assert!(!cli(&args).status.success(), "{args:?}");
     }
+}
+
+#[test]
+fn actual_executable_lists_and_renders_an_explicit_recovered_file_draft() {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let root = std::env::temp_dir().join(format!(
+        "openhyperx-tui-recovery-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let directory = root.join("private");
+    let mut store = DraftRecoveryStore::new(&directory, RecoveryClient::Tui).unwrap();
+    let profile = parse_profile(include_str!(
+        "../../../examples/profiles/pulsefire-raid.toml"
+    ))
+    .unwrap();
+    let mut document = ProfileDocument::from_profile(profile);
+    let mut edited = document.profile().clone();
+    edited.name = "Recovered after restart".into();
+    document.replace(edited);
+    let snapshot = store.capture(&document).unwrap().unwrap();
+    let listed = cli(&[
+        "--list-recovery",
+        "--recovery-dir",
+        directory.to_str().unwrap(),
+    ]);
+    assert!(listed.status.success(), "{listed:?}");
+    let listing = String::from_utf8(listed.stdout).unwrap();
+    assert!(listing.contains("Recovered after restart") && listing.contains("no HID access"));
+    let rendered = cli(&[
+        "--recover",
+        snapshot.to_str().unwrap(),
+        "--recovery-dir",
+        directory.to_str().unwrap(),
+        "--render",
+        "--view",
+        "profiles",
+    ]);
+    assert!(rendered.status.success(), "{rendered:?}");
+    let text = String::from_utf8(rendered.stdout).unwrap();
+    for label in [
+        "RECOVERED FILE draft",
+        "UNSAVED",
+        "Recovered after restart",
+        "OFFLINE",
+    ] {
+        assert!(text.contains(label), "{label}: {text}");
+    }
+    assert!(
+        snapshot.exists(),
+        "read-only rendering must retain the snapshot"
+    );
+    assert!(!cli(&[
+        "--recover",
+        root.join("unrelated.toml").to_str().unwrap(),
+        "--recovery-dir",
+        directory.to_str().unwrap(),
+        "--render",
+    ])
+    .status
+    .success());
+    fs::remove_dir_all(root).unwrap();
 }

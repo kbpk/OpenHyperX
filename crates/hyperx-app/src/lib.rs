@@ -26,6 +26,8 @@ mod document_save;
 pub use bindings::{profile_binding_choices, validate_button_binding, ProfileBindingChoice};
 mod macros;
 pub use macros::{macro_keyboard_names, macro_mouse_button_names, macro_references};
+mod recovery;
+pub use recovery::{DraftRecoveryStore, RecoveryClient};
 mod resolution;
 pub use resolution::{macro_resolution_targets, MacroResolutionTarget};
 
