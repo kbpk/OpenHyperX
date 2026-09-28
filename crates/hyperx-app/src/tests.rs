@@ -124,10 +124,7 @@ impl Files {
 }
 impl Drop for Files {
     fn drop(&mut self) {
-        for file in fs::read_dir(&self.0).unwrap() {
-            fs::remove_file(file.unwrap().path()).unwrap();
-        }
-        fs::remove_dir(&self.0).unwrap();
+        fs::remove_dir_all(&self.0).unwrap();
     }
 }
 
@@ -942,6 +939,96 @@ fn document_diff_and_save_baseline_track_file_changes_not_hardware() {
         ProfileDocument::open(&destination).unwrap().profile(),
         document.profile()
     );
+}
+
+#[test]
+fn overwrite_preserves_exact_old_file_and_requires_a_fresh_file_baseline() {
+    let files = Files::new();
+    let path = files.path("custom.toml");
+    let original = format!(
+        "# user comment and formatting\n{}",
+        encode_profile(&example()).unwrap()
+    );
+    fs::write(&path, &original).unwrap();
+    let mut document = ProfileDocument::open(&path).unwrap();
+    let mut edited = document.profile().clone();
+    edited.name = "Edited file".into();
+    document.replace(edited.clone());
+    let backup = document.save_overwrite_with_backup().unwrap();
+    assert_eq!(fs::read(&backup).unwrap(), original.as_bytes());
+    assert_eq!(load_profile(&path).unwrap(), edited);
+    assert!(!document.dirty());
+    assert_eq!(document.path(), Some(path.as_path()));
+    assert!(backup.parent().unwrap().join("replacement.toml").exists());
+    assert!(document.save_overwrite_with_backup().is_err());
+
+    let mut next = document.profile().clone();
+    next.name = "Second edit".into();
+    document.replace(next.clone());
+    let second_backup = document.save_overwrite_with_backup().unwrap();
+    assert_ne!(backup, second_backup);
+    assert_eq!(load_profile(&second_backup).unwrap(), edited);
+    assert_eq!(load_profile(&path).unwrap(), next);
+}
+
+#[test]
+fn overwrite_refuses_external_changes_and_keeps_document_dirty() {
+    let files = Files::new();
+    let path = files.path("stale.toml");
+    save_profile_new(&path, &example(), &[]).unwrap();
+    let mut document = ProfileDocument::open(&path).unwrap();
+    let mut edited = document.profile().clone();
+    edited.name = "My draft".into();
+    document.replace(edited);
+    fs::write(
+        &path,
+        format!("# external edit\n{}", encode_profile(&example()).unwrap()),
+    )
+    .unwrap();
+    let current = fs::read(&path).unwrap();
+    let error = document
+        .save_overwrite_with_backup()
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("changed on disk"), "{error}");
+    assert_eq!(fs::read(&path).unwrap(), current);
+    assert!(document.dirty());
+    assert_eq!(fs::read_dir(&files.0).unwrap().count(), 1);
+}
+
+#[test]
+fn overwrite_requires_an_existing_regular_file_and_never_overwrites_a_symlink() {
+    let files = Files::new();
+    let mut unnamed = ProfileDocument::from_profile(example());
+    let mut edited = unnamed.profile().clone();
+    edited.name = "Edited".into();
+    unnamed.replace(edited);
+    assert!(unnamed.save_overwrite_with_backup().is_err());
+
+    let path = files.path("missing.toml");
+    save_profile_new(&path, &example(), &[]).unwrap();
+    let mut document = ProfileDocument::open(&path).unwrap();
+    let mut edited = document.profile().clone();
+    edited.name = "Edited".into();
+    document.replace(edited);
+    fs::remove_file(&path).unwrap();
+    assert!(document.save_overwrite_with_backup().is_err());
+    assert!(!path.exists());
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        let target = files.path("target.toml");
+        save_profile_new(&target, &example(), &[]).unwrap();
+        let link = files.path("link.toml");
+        symlink(&target, &link).unwrap();
+        let mut linked = ProfileDocument::open(&link).unwrap();
+        let mut edited = linked.profile().clone();
+        edited.name = "Edited".into();
+        linked.replace(edited);
+        assert!(linked.save_overwrite_with_backup().is_err());
+        assert_eq!(load_profile(&target).unwrap(), example());
+    }
 }
 
 #[test]

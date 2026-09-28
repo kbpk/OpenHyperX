@@ -169,6 +169,19 @@ including unsaved edits, macro definitions and unresolved/source fields. The
 original file stays untouched. After a successful copy, the new file becomes
 the document's path and clean file baseline; copying is not a device backup.
 
+F6 / Overwrite FILE is available only for an opened or previously saved file
+with unsaved draft edits. It shows the exact target path and requires `y` in a
+separate confirmation. The app compares the file's **exact bytes** with the
+opened/saved baseline, refusing changes made by another process, symlinks,
+non-regular files and read-only files. It writes a complete replacement
+snapshot first, moves the original into a numbered sibling directory such as
+`profile.toml.openhyperx-backup-0001/profile.toml`, then creates the new file
+without overwriting any path that appeared in the meantime. The old bytes,
+including comments/formatting, stay in that recovery directory; the new file
+uses canonical typed TOML. A crash or I/O failure may leave the original path
+absent or incomplete, so inspect the recovery directory before retrying. An
+error leaves the draft dirty. This is a FILE operation, never Save to mouse.
+
 The browser lists directories first, then `.toml` files (case-insensitive
 extension), without recursively scanning or parsing their contents. Click a row
 or use arrows/PageUp/PageDown/Home/End to preview. Enter opens a directory or,
@@ -273,6 +286,7 @@ invented and no settings are sent to the mouse.
 | Enter / Esc in macro field | accept field into local macro draft / cancel field |
 | F2 / F3 / F4 in Profiles | browse files / rename draft / copy draft to NEW file |
 | F5 in Profiles | open unresolved source/target/library selector |
+| F6 in Profiles | review recoverable overwrite of the opened FILE; `y` confirms |
 | Type/paste, arrows/click, Enter in source selector | filter, preview, advance explicit choice |
 | Delete in source list | review provenance-only omission |
 | F1 in source selector | complete scrollable reason; Esc returns |
@@ -354,9 +368,11 @@ binding remains. See [software profiles](profile-format.md).
 
 `s` serializes before `create_new`; an existing destination is refused. A failed
 save retains the document and file baseline. A successful save establishes a
-new FILE baseline for dirty/diff state, not a device-state read. Comments and
-original formatting are not retained; typed source/partial/unresolved metadata
-is. An I/O failure may leave an incomplete new file and reports that possibility.
+new FILE baseline for dirty/diff state, not a device-state read. F6 is a separate,
+confirmed overwrite operation with an old-file recovery copy. The saved file's
+comments and original formatting are not retained; typed
+source/partial/unresolved metadata is. An I/O failure may leave an incomplete
+new file and reports that possibility.
 Partial/unsupported drafts can be saved for later work; passing offline
 validation is not a permission to access hardware or evidence that composed
 runtime apply was fixed. Save to mouse remains unavailable.

@@ -325,6 +325,19 @@ impl App {
                 true,
             ),
             KeyCode::F(4) => self.open_browser(Mode::SaveNew),
+            KeyCode::F(6) => {
+                if !self.document.dirty() {
+                    self.status = "No unsaved FILE changes to overwrite.".into();
+                } else if let Some(path) = self.document.path() {
+                    self.modal = Some(Modal::Overwrite {
+                        path: path.to_path_buf(),
+                        error: None,
+                    });
+                    self.drag = None;
+                } else {
+                    self.status = "No opened/saved file path; use Copy NEW first.".into();
+                }
+            }
             _ => return false,
         }
         true

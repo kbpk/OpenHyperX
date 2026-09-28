@@ -22,6 +22,7 @@ pub const MAX_PROFILE_BYTES: usize = 1024 * 1024;
 mod controls;
 pub use controls::{edit_profile_value, ProfileValueEdit};
 mod bindings;
+mod document_save;
 pub use bindings::{profile_binding_choices, validate_button_binding, ProfileBindingChoice};
 mod macros;
 pub use macros::{macro_keyboard_names, macro_mouse_button_names, macro_references};
@@ -85,14 +86,22 @@ pub fn profile_controls(device: &str) -> Vec<ProfileControl> {
         .collect()
 }
 
-pub fn read_text(path: &Path) -> Result<String> {
+fn read_profile_bytes(path: &Path) -> Result<Vec<u8>> {
     let file = fs::File::open(path)
         .with_context(|| format!("failed to open software profile {}", path.display()))?;
-    let mut text = String::new();
+    let mut bytes = Vec::new();
     file.take((MAX_PROFILE_BYTES + 1) as u64)
-        .read_to_string(&mut text)
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("failed to read software profile {}", path.display()))?;
+    if bytes.len() > MAX_PROFILE_BYTES {
+        bail!("software profile exceeds the 1 MiB limit");
+    }
+    Ok(bytes)
+}
+
+pub fn read_text(path: &Path) -> Result<String> {
+    let text = String::from_utf8(read_profile_bytes(path)?)
         .with_context(|| format!("failed to read UTF-8 software profile {}", path.display()))?;
-    check_size(&text)?;
     Ok(text.trim_start_matches('\u{feff}').to_owned())
 }
 
@@ -150,7 +159,10 @@ pub fn rename_profile(profile: &SoftwareProfile, name: &str) -> Result<SoftwareP
 /// Even a semantically unsupported draft can be saved offline. No apply implied.
 /// Serialize first, then create exclusively. I/O errors may leave an incomplete
 /// NEW file; never delete or overwrite a preexisting file while handling them.
-pub fn save_profile_new(path: &Path, profile: &SoftwareProfile, comments: &[String]) -> Result<()> {
+fn encoded_profile_with_comments(
+    profile: &SoftwareProfile,
+    comments: &[String],
+) -> Result<Vec<u8>> {
     let mut text = String::new();
     for comment in comments {
         for line in comment.lines() {
@@ -159,14 +171,22 @@ pub fn save_profile_new(path: &Path, profile: &SoftwareProfile, comments: &[Stri
     }
     text.push_str(&encode_profile(profile)?);
     check_size(&text)?;
+    Ok(text.into_bytes())
+}
+
+fn write_profile_new_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut file = fs::OpenOptions::new().write(true).create_new(true).open(path)
         .with_context(|| format!("cannot create {}; destination must be a new file (existing files are never overwritten)", path.display()))?;
-    file.write_all(text.as_bytes()).with_context(|| {
+    file.write_all(bytes).with_context(|| {
         format!(
             "failed to write {}; an incomplete output may remain, inspect it before use",
             path.display()
         )
     })
+}
+
+pub fn save_profile_new(path: &Path, profile: &SoftwareProfile, comments: &[String]) -> Result<()> {
+    write_profile_new_bytes(path, &encoded_profile_with_comments(profile, comments)?)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -349,6 +369,7 @@ pub fn omit_unresolved_assignment(
 pub struct ProfileDocument {
     profile: SoftwareProfile,
     baseline: SoftwareProfile,
+    baseline_file: Option<Vec<u8>>,
     path: Option<PathBuf>,
 }
 
@@ -360,11 +381,16 @@ impl ProfileDocument {
         Self {
             baseline: profile.clone(),
             profile,
+            baseline_file: None,
             path: None,
         }
     }
     pub fn open(path: &Path) -> Result<Self> {
-        let mut document = Self::from_profile(load_profile(path)?);
+        let bytes = read_profile_bytes(path)?;
+        let text = std::str::from_utf8(&bytes)
+            .with_context(|| format!("failed to read UTF-8 software profile {}", path.display()))?;
+        let mut document = Self::from_profile(parse_profile(text)?);
+        document.baseline_file = Some(bytes);
         document.path = Some(path.into());
         Ok(document)
     }
@@ -384,12 +410,13 @@ impl ProfileDocument {
         diff_software_profiles(&self.baseline, &self.profile).map_err(|error| anyhow!(error))
     }
     pub fn save_as(&mut self, path: &Path) -> Result<()> {
-        save_profile_new(
-            path,
+        let bytes = encoded_profile_with_comments(
             &self.profile,
             &["Offline application profile; not a device backup or an onboard save.".into()],
         )?;
+        write_profile_new_bytes(path, &bytes)?;
         self.baseline = self.profile.clone();
+        self.baseline_file = Some(bytes);
         self.path = Some(path.into());
         Ok(())
     }

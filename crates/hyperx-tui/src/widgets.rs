@@ -392,7 +392,7 @@ impl App {
                 Some(Modal::Files(browser)) => browser.move_selection(if down { 3 } else { -3 }),
                 Some(Modal::Resolution(picker)) => picker.move_selection(if down { 3 } else { -3 }),
                 Some(Modal::MacroDelete { .. }) => {}
-                Some(Modal::Confirm { .. }) => {}
+                Some(Modal::Confirm { .. } | Modal::Overwrite { .. }) => {}
                 None => {
                     if let Some(Hit {
                         action: Action::Slider(index),

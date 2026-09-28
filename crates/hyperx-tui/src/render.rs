@@ -173,6 +173,25 @@ impl App {
                     ),
                     area,
                 ),
+                Modal::Overwrite { path, error } => {
+                    let mut message = format!(
+                        "Overwrite only this FILE?\n{}\n\nThe old bytes (including comments) will stay in a numbered recovery directory. A changed or symlinked file is refused. A crash may require manual recovery from that directory. This is NOT Save to mouse.\n\ny: confirm | n/Esc: cancel",
+                        path.display()
+                    );
+                    if let Some(error) = error {
+                        message.push_str(&format!("\n\nFAILED: {error}"));
+                    }
+                    frame.render_widget(
+                        Paragraph::new(safe_text(&message))
+                            .block(
+                                Block::default()
+                                    .borders(Borders::ALL)
+                                    .title("Overwrite FILE with recovery"),
+                            )
+                            .wrap(Wrap { trim: false }),
+                        area,
+                    );
+                }
                 Modal::Viewer {
                     title,
                     text,
@@ -292,6 +311,10 @@ impl App {
                 }
                 Modal::Confirm { .. } => vec![
                     ("[Yes: discard]", KeyCode::Char('y')),
+                    ("[Cancel]", KeyCode::Esc),
+                ],
+                Modal::Overwrite { .. } => vec![
+                    ("[Yes: overwrite FILE]", KeyCode::Char('y')),
                     ("[Cancel]", KeyCode::Esc),
                 ],
                 Modal::Viewer { jump, .. } => {
@@ -491,7 +514,7 @@ impl App {
                             .map_or_else(|| "<unknown>".into(), inline)
                     ));
                 }
-                text.push_str("\nUnresolved entries block apply; r resolves an explicit target/library macro.\nx deliberately omits one entry; no source ID is guessed into a physical target.\ns writes a NEW TOML file, never overwrites. Comments are not preserved.\nSave to mouse: UNAVAILABLE OFFLINE. No device discovered/opened.\n");
+                text.push_str("\nUnresolved entries block apply; r resolves an explicit target/library macro.\nx deliberately omits one entry; no source ID is guessed into a physical target.\ns writes a NEW TOML file; F6 overwrites only an opened FILE after confirmation, keeping old bytes in a recovery directory.\nSave to mouse: UNAVAILABLE OFFLINE. No device discovered/opened.\n");
             }
         }
         text

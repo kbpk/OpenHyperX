@@ -131,7 +131,10 @@ impl App {
         buttons(
             frame,
             row(inner, 1),
-            &[("[Unresolved F5]", KeyCode::F(5))],
+            &[
+                ("[Unresolved F5]", KeyCode::F(5)),
+                ("[Overwrite FILE F6]", KeyCode::F(6)),
+            ],
             &mut self.hits,
         );
         let body = Rect::new(

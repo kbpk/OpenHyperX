@@ -46,6 +46,10 @@ pub enum Modal {
     Confirm {
         open: bool,
     },
+    Overwrite {
+        path: std::path::PathBuf,
+        error: Option<String>,
+    },
 }
 
 pub struct App {
@@ -236,6 +240,28 @@ impl App {
                         return;
                     }
                     KeyCode::Char('n') | KeyCode::Esc => return,
+                    _ => {}
+                },
+                Modal::Overwrite { path, error } => match key.code {
+                    KeyCode::Esc | KeyCode::Char('n') => return,
+                    KeyCode::Char('y') => {
+                        if self.document.path() != Some(path.as_path()) {
+                            *error = Some(
+                                "File path changed; reopen the overwrite confirmation.".into(),
+                            );
+                        } else {
+                            match self.document.save_overwrite_with_backup() {
+                                Ok(backup) => {
+                                    self.status = format!(
+                                        "FILE overwritten with recovery copy at {}. No mouse settings changed.",
+                                        backup.display()
+                                    );
+                                    return;
+                                }
+                                Err(failure) => *error = Some(format!("{failure:#}")),
+                            }
+                        }
+                    }
                     _ => {}
                 },
                 Modal::Viewer { scroll, jump, .. } => match key.code {

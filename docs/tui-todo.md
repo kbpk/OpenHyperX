@@ -33,7 +33,7 @@ must reuse `hyperx-app`; completing GUI work must not remove terminal features.
 - [x] Bounded file browser, direct draft naming and safe NEW-file copying.
 - [x] Explicit unresolved-entry selectors without TOML, with distinct resolve/omit confirmation.
 - [x] Better diff presentation and a validation summary linked to the offending section/field path.
-- [ ] Deliberate safe overwrite workflow with recovery; current Save NEW stays the default.
+- [x] Deliberate FILE overwrite with explicit confirmation, stale-file refusal and a recovery copy; Save NEW stays the default.
 - [ ] Session recovery/undo without guessing missing device settings or stripping provenance.
 
 ## Connected mode — blocked on hardware evidence

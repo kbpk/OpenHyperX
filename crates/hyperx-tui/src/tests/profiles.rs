@@ -65,6 +65,63 @@ fn set_field(app: &mut App, text: &str) {
     let editor = browser.editor_mut().unwrap();
     *editor = Editor::new(text, true);
 }
+
+#[test]
+fn overwrite_file_requires_explicit_confirmation_and_keeps_recovery_copy() {
+    let files = Files::new();
+    let path = files.profile("original.toml");
+    let old = fs::read(&path).unwrap();
+    let mut app = App::new(ProfileDocument::open(&path).unwrap(), false);
+    app.tab = 4;
+    let mut edited = app.document.profile().clone();
+    edited.name = "Overwritten draft".into();
+    app.document.replace(edited.clone());
+    app.handle_key(key(KeyCode::F(6)));
+    assert!(matches!(app.modal, Some(Modal::Overwrite { .. })));
+    app.handle_key(key(KeyCode::Char('n')));
+    assert!(app.modal.is_none());
+    assert_eq!(fs::read(&path).unwrap(), old);
+    assert!(app.document.dirty());
+
+    click(&mut app, |action| {
+        matches!(action, Action::Key(KeyCode::F(6)))
+    });
+    click(&mut app, |action| {
+        matches!(action, Action::Key(KeyCode::Char('y')))
+    });
+    assert!(app.modal.is_none());
+    assert!(!app.document.dirty());
+    assert_eq!(hyperx_app::load_profile(&path).unwrap(), edited);
+    let backup = files.path("original.toml.openhyperx-backup-0001/original.toml");
+    assert_eq!(fs::read(&backup).unwrap(), old);
+    assert!(app.status.contains("No mouse settings changed"));
+}
+
+#[test]
+fn overwrite_file_rejects_stale_disk_state_without_losing_the_draft() {
+    let files = Files::new();
+    let path = files.profile("stale.toml");
+    let mut app = App::new(ProfileDocument::open(&path).unwrap(), false);
+    app.tab = 4;
+    let mut edited = app.document.profile().clone();
+    edited.name = "Local edit".into();
+    app.document.replace(edited);
+    fs::write(
+        &path,
+        format!("# external change\n{}", fs::read_to_string(&path).unwrap()),
+    )
+    .unwrap();
+    let external = fs::read(&path).unwrap();
+    app.handle_key(key(KeyCode::F(6)));
+    app.handle_key(key(KeyCode::Char('y')));
+    assert!(
+        matches!(&app.modal, Some(Modal::Overwrite { error: Some(error), .. }) if error.contains("changed on disk"))
+    );
+    assert_eq!(fs::read(&path).unwrap(), external);
+    assert!(app.document.dirty());
+    app.handle_key(key(KeyCode::Esc));
+    assert!(app.modal.is_none());
+}
 fn click(app: &mut App, action: impl Fn(&Action) -> bool) {
     screen(app, 120, 40);
     let Hit { area, .. } = app
