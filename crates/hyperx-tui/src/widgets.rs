@@ -2,11 +2,11 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use hyperx_app::{device_descriptor, edit_profile_value, ProfileValueEdit};
-use hyperx_core::{DpiCapabilities, PrimaryButtonLayout};
+use hyperx_core::{DpiCapabilities, PrimaryButtonLayout, RgbColor};
 use ratatui::{
     layout::{Position, Rect},
     style::{Color, Style},
-    text::Line,
+    text::{Line, Span},
     widgets::{Block, Borders, Gauge, Paragraph},
     Frame,
 };
@@ -80,6 +80,34 @@ impl App {
             } else {
                 Color::Cyan
             })),
+            area,
+        );
+        self.hits.push(Hit { area, action });
+    }
+    fn color_button(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        label: String,
+        color: RgbColor,
+        action: Action,
+    ) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+        // Keep the exact hex value visible even when truecolor is unsupported.
+        // An outlined, neutral swatch makes explicit black distinguishable from
+        // an unknown/missing color on dark terminal backgrounds.
+        let (swatch, swatch_color) = if color == RgbColor::BLACK {
+            ("□", Color::Gray)
+        } else {
+            ("■", Color::Rgb(color.red, color.green, color.blue))
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(label, Style::default().fg(Color::Cyan)),
+                Span::styled(swatch, Style::default().fg(swatch_color)),
+            ])),
             area,
         );
         self.hits.push(Hit { area, action });
@@ -490,12 +518,12 @@ impl App {
                     Action::Value(ProfileValueEdit::ActiveStage(Some(index))),
                     false,
                 );
-                self.button(
+                self.color_button(
                     frame,
                     sub(row, part + 12, 10),
-                    &format!("[{}]", stage.color),
+                    format!("[{}]", stage.color),
+                    stage.color,
                     Action::ColorInput(index),
-                    false,
                 );
             }
             if let Some(row) = form_row(inner, row_number + 1, self.scroll) {
@@ -575,8 +603,13 @@ impl App {
                 || "No supplied active stage".into(),
                 |value| {
                     format!(
-                        "Active: {:?}; source active: {:?} (provenance)",
-                        value.active_stage, value.source_active_stage
+                        "Active: {}; source active: {} (provenance)",
+                        value
+                            .active_stage
+                            .map_or_else(|| "<not present>".into(), |stage| stage.to_string()),
+                        value
+                            .source_active_stage
+                            .map_or_else(|| "<not present>".into(), |stage| stage.to_string())
                     )
                 },
             );
@@ -607,8 +640,11 @@ impl App {
         if let Some(row) = form_row(inner, after + 6, self.scroll) {
             frame.render_widget(
                 Paragraph::new(format!(
-                    "Primary layout: {:?} (coupled pair)",
-                    self.document.profile().primary_buttons
+                    "Primary layout: {} (coupled pair)",
+                    self.document
+                        .profile()
+                        .primary_buttons
+                        .map_or_else(|| "<not present>".into(), |layout| layout.to_string())
                 )),
                 row,
             );
@@ -658,20 +694,27 @@ impl App {
         for (index, descriptor) in zones.iter().enumerate() {
             let zone = descriptor.id;
             if let Some(row) = form_row(inner, index as u16 * 2 + 2, self.scroll) {
-                let label = lighting
+                let color = lighting
                     .as_ref()
                     .and_then(|value| value.zones.get(zone))
-                    .map_or_else(
-                        || format!("{zone}: <not present / not read>"),
-                        |color| format!("{zone}: {color}"),
+                    .copied();
+                if let Some(color) = color {
+                    self.color_button(
+                        frame,
+                        row,
+                        format!("[{zone}: {color}] "),
+                        color,
+                        Action::ZoneColor(zone),
                     );
-                self.button(
-                    frame,
-                    row,
-                    &format!("[{label}]"),
-                    Action::ZoneColor(zone),
-                    false,
-                );
+                } else {
+                    self.button(
+                        frame,
+                        row,
+                        &format!("[{zone}: <not present / not read>]"),
+                        Action::ZoneColor(zone),
+                        false,
+                    );
+                }
             }
         }
         if lighting.is_none() {

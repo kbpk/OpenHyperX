@@ -58,6 +58,12 @@ for exact input. Changing one stage never changes another stage or its color.
 Independent imported X/Y values remain visible; editing a stage's DPI explicitly
 sets both axes to the entered value.
 
+Supplied DPI and lighting colors have truecolor terminal swatches beside their
+exact `#RRGGBB` text. Explicit black uses a neutral outlined swatch so it is
+visible on dark backgrounds; missing colors have no swatch and remain marked
+`<not present / not read>`. A terminal without truecolor still shows the hex
+value and retains the same clickable color editor.
+
 Click a stage label to select it for keyboard edits, Activate to choose it as
 the file's active stage, or its hex color to edit that color. Add level asks for
 an explicit DPI value and states that the new color is white (editable afterward).

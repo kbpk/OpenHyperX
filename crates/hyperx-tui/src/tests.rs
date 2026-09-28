@@ -4,7 +4,7 @@ use crate::{
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use hyperx_app::{parse_profile, ProfileDocument, ProfileSection};
-use ratatui::{backend::TestBackend, Terminal};
+use ratatui::{backend::TestBackend, style::Color, Terminal};
 
 mod bindings;
 mod macros;
@@ -108,6 +108,35 @@ fn every_tab_uses_readable_values_and_explicit_unknowns_instead_of_debug_enums()
         assert!(!value.contains("Mouse {"), "{value}");
         assert!(!value.contains("KeyDown"), "{value}");
     }
+}
+
+#[test]
+fn interactive_colors_keep_hex_text_and_use_distinct_visible_swatches() {
+    let mut app = app();
+    let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.render(frame)).unwrap();
+    let cells = &terminal.backend().buffer().content;
+    assert!(cells
+        .iter()
+        .any(|cell| cell.symbol() == "■" && cell.fg == Color::Rgb(0x2B, 0, 0xFF)));
+    let performance = cells.iter().map(|cell| cell.symbol()).collect::<String>();
+    assert!(performance.contains("[#2B00FF]■"));
+    assert!(performance.contains("Active: 0; source active: <not present>"));
+    assert!(performance.contains("Primary layout: Standard"));
+    assert!(!performance.contains("Some("));
+
+    app.tab = 3;
+    terminal.draw(|frame| app.render(frame)).unwrap();
+    let cells = &terminal.backend().buffer().content;
+    assert!(cells
+        .iter()
+        .any(|cell| cell.symbol() == "■" && cell.fg == Color::Rgb(0, 0, 0xFF)));
+    assert!(cells
+        .iter()
+        .any(|cell| cell.symbol() == "□" && cell.fg == Color::Gray));
+    let lighting = cells.iter().map(|cell| cell.symbol()).collect::<String>();
+    assert!(lighting.contains("[logo: #0000FF] ■"));
+    assert!(lighting.contains("[wheel: #000000] □"));
 }
 
 #[test]
