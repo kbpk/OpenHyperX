@@ -309,12 +309,12 @@ impl App {
         true
     }
     pub(crate) fn render_buttons(&mut self, frame: &mut Frame, area: Rect) {
-        frame.render_widget(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Buttons - click / Up, Down; Enter or F2 edits"),
-            area,
-        );
+        let title = if area.width < 70 {
+            "Buttons: ↑/↓ select · Enter edit"
+        } else {
+            "Buttons - click / Up, Down; Enter or F2 edits"
+        };
+        frame.render_widget(Block::default().borders(Borders::ALL).title(title), area);
         let inner = area.inner(Margin {
             horizontal: 1,
             vertical: 1,

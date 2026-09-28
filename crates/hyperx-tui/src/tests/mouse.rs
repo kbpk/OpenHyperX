@@ -383,15 +383,19 @@ fn mouse_scrolling_narrow_viewports_never_targets_hidden_controls() {
             .count()
             == 5
     );
+    assert!(app
+        .hits
+        .iter()
+        .any(|hit| matches!(hit.action, Action::Slider(0))));
     assert!(!app
         .hits
         .iter()
-        .any(|hit| matches!(hit.action, Action::Slider(_))));
+        .any(|hit| matches!(hit.action, Action::Slider(4))));
     let mut found = false;
     for _ in 0..25 {
         // Scroll over the label, not the bar: the wheel over a DPI bar changes
         // its value; elsewhere it scrolls the viewport.
-        mouse(&mut app, MouseEventKind::ScrollDown, 2, 6);
+        mouse(&mut app, MouseEventKind::ScrollDown, 2, 4);
         screen(&mut app, 45, 12);
         if let Some(slider) = app
             .hits

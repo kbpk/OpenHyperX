@@ -66,6 +66,55 @@ fn every_tab_renders_model_data_and_offline_status_without_usb_details() {
 }
 
 #[test]
+fn compact_footer_keeps_every_global_mouse_action_visible() {
+    let mut app = app();
+    let output = screen(&mut app, 45, 12);
+    assert!(output.contains("[s NEW]") && output.contains("[e Edit]"));
+    assert!(output.contains("row 1"));
+    app.scroll = 1;
+    assert!(screen(&mut app, 45, 12).contains("row 2"));
+    for code in ['o', 's', 'v', 'd', 'e', 'm', 'r', 'x', 'q'] {
+        assert!(
+            app.hits.iter().any(|hit| matches!(hit.action, crate::widgets::Action::Key(KeyCode::Char(value)) if value == code)),
+            "missing compact action {code}"
+        );
+    }
+}
+
+#[test]
+fn narrow_panels_keep_short_titles_and_visible_scroll_position() {
+    let mut app = app();
+    for (tab, title, marker) in [
+        (0, "Performance:", "row 1"),
+        (1, "Buttons:", "row 1"),
+        (2, "Macros:", "macro 1/1"),
+        (3, "Lighting:", "row 1"),
+        (4, "Profiles:", "row 1"),
+    ] {
+        app.tab = tab;
+        app.scroll = 0;
+        let output = screen(&mut app, 45, 12);
+        assert!(output.contains(title), "{title}: {output}");
+        assert!(output.contains(marker), "{marker}: {output}");
+    }
+    for number in 2..=6 {
+        assert!(
+            app.hits.iter().any(|hit| matches!(
+                hit.action,
+                crate::widgets::Action::Key(KeyCode::F(value)) if value == number
+            )),
+            "profile action F{number} must be clickable at 45x12"
+        );
+    }
+    for code in ['u', 'U'] {
+        assert!(app.hits.iter().any(|hit| matches!(
+            hit.action,
+            crate::widgets::Action::Key(KeyCode::Char(value)) if value == code
+        )));
+    }
+}
+
+#[test]
 fn empty_profiles_show_unknown_or_omitted_values_not_defaults() {
     let mut app = App::new(
         ProfileDocument::from_profile(
@@ -192,6 +241,7 @@ fn unsupported_values_remain_visible_and_fail_validation_without_discarding_draf
     app.handle_key(accept());
     assert_eq!(app.document.profile().polling.unwrap().hz, 2000);
     assert!(screen(&mut app, 120, 35).contains("NOT READY"));
+    assert!(screen(&mut app, 45, 12).contains("NOT READY"));
     app.tab = 4;
     app.handle_key(key(KeyCode::Char('v')));
     assert!(

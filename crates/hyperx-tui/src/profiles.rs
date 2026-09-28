@@ -108,12 +108,12 @@ fn field(frame: &mut Frame, area: Rect, editor: &Editor, hits: &mut Vec<Hit>) {
 
 impl App {
     pub(crate) fn render_profiles(&mut self, frame: &mut Frame, area: Rect) {
-        frame.render_widget(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Profiles - FILE operations only"),
-            area,
-        );
+        let title = if area.width < 70 {
+            "Profiles: F2-F6 actions · ↑/↓ scroll"
+        } else {
+            "Profiles - FILE operations only"
+        };
+        frame.render_widget(Block::default().borders(Borders::ALL).title(title), area);
         let inner = area.inner(Margin {
             horizontal: 1,
             vertical: 1,

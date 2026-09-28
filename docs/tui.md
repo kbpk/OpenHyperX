@@ -23,8 +23,11 @@ streams rather than hanging. Linux/macOS can run their native executable.
 
 `--demo` loads the repository example with a DEMO DATA badge. A file loads FILE
 DRAFT settings, not live state. No arguments create an empty partial target
-profile with no DPI/polling/binding/lighting defaults. Suggested size is 100x30;
-small windows display a resize notice instead of panicking. `--view` selects
+profile with no DPI/polling/binding/lighting defaults. Suggested size is 100x30.
+The main views adapt down to 45x12: short tab/panel labels, a one-line header,
+all global action buttons, and a bottom-border `row N` or `macro N/M` position
+hint remain visible. At smaller sizes the TUI shows a resize notice instead of
+panicking. Editors and file dialogs may require more room (see below). `--view` selects
 performance, buttons, macros, lighting or profiles on startup and in `--render`;
 it cannot be combined with validation-only `--check`.
 

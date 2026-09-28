@@ -100,12 +100,12 @@ fn text_field(frame: &mut Frame, area: Rect, editor: &Editor, hits: &mut Vec<Hit
 
 impl App {
     pub(crate) fn render_macros(&mut self, frame: &mut Frame, area: Rect) {
-        frame.render_widget(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Macros - Up/Down select; Enter/F2 edit; Insert new"),
-            area,
-        );
+        let title = if area.width < 70 {
+            "Macros: ↑/↓ select · Enter edit"
+        } else {
+            "Macros - Up/Down select; Enter/F2 edit; Insert new"
+        };
+        frame.render_widget(Block::default().borders(Borders::ALL).title(title), area);
         let inner = area.inner(Margin {
             horizontal: 1,
             vertical: 1,

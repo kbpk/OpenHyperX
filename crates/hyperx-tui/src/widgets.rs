@@ -459,12 +459,12 @@ impl App {
         }
     }
     pub(crate) fn render_performance(&mut self, frame: &mut Frame, area: Rect) {
-        frame.render_widget(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Performance - click/drag; arrows: DPI step; F2 value; F3 color"),
-            area,
-        );
+        let title = if area.width < 70 {
+            "Performance: ←/→ DPI · ↑/↓ scroll"
+        } else {
+            "Performance - click/drag; arrows: DPI step; F2 value; F3 color"
+        };
+        frame.render_widget(Block::default().borders(Borders::ALL).title(title), area);
         let inner = area.inner(ratatui::layout::Margin {
             horizontal: 1,
             vertical: 1,
@@ -675,12 +675,12 @@ impl App {
         }
     }
     pub(crate) fn render_lighting(&mut self, frame: &mut Frame, area: Rect) {
-        frame.render_widget(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Lighting - Solid colors in file; click to edit"),
-            area,
-        );
+        let title = if area.width < 70 {
+            "Lighting: F2/F3 color · ↑/↓ scroll"
+        } else {
+            "Lighting - Solid colors in file; click to edit"
+        };
+        frame.render_widget(Block::default().borders(Borders::ALL).title(title), area);
         let inner = area.inner(ratatui::layout::Margin {
             horizontal: 1,
             vertical: 1,

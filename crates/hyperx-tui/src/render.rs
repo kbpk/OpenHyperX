@@ -1,6 +1,6 @@
 use hyperx_core::{MacroEvent, MacroPlayback, PrimaryButtonLayout, SoftwareButtonBinding};
 use ratatui::{
-    layout::{Constraint, Layout, Margin},
+    layout::{Constraint, Layout, Margin, Rect},
     style::{Color, Style},
     text::Line,
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
@@ -22,14 +22,26 @@ impl App {
             frame.render_widget(Paragraph::new("OpenHyperX OFFLINE\nTerminal too small: use at least 45x12.\nNo HID access / Save to mouse unavailable."), frame.area());
             return;
         }
-        let areas = Layout::vertical([
-            Constraint::Length(2),
-            Constraint::Length(3),
-            Constraint::Min(1),
-            Constraint::Length(2),
-            Constraint::Length(2),
-        ])
-        .split(frame.area());
+        let compact_height = frame.area().height < 18;
+        let areas = if compact_height {
+            Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(1),
+                Constraint::Length(1),
+                Constraint::Length(2),
+            ])
+            .split(frame.area())
+        } else {
+            Layout::vertical([
+                Constraint::Length(2),
+                Constraint::Length(3),
+                Constraint::Min(1),
+                Constraint::Length(2),
+                Constraint::Length(2),
+            ])
+            .split(frame.area())
+        };
         let profile = self.document.profile();
         let readiness = hyperx_app::validate_profile(profile);
         let mode = if self.demo { "DEMO DATA" } else { "FILE DRAFT" };
@@ -41,12 +53,26 @@ impl App {
         } else {
             "unchanged"
         };
-        frame.render_widget(Paragraph::new(format!("OpenHyperX | OFFLINE | {mode} | {draft_state}\nTarget {} | profile {} | NOT connected/read from mouse", inline(&profile.device), inline(&profile.name))).style(Style::default().fg(Color::Cyan)), areas[0]);
-        frame.render_widget(Block::default().borders(Borders::ALL), areas[1]);
-        let tab_row = areas[1].inner(Margin {
-            horizontal: 1,
-            vertical: 1,
-        });
+        let header = if compact_height {
+            format!("OpenHyperX OFFLINE | {mode} | {draft_state}")
+        } else {
+            format!("OpenHyperX | OFFLINE | {mode} | {draft_state}\nTarget {} | profile {} | NOT connected/read from mouse", inline(&profile.device), inline(&profile.name))
+        };
+        frame.render_widget(
+            Paragraph::new(header).style(Style::default().fg(Color::Cyan)),
+            areas[0],
+        );
+        if !compact_height {
+            frame.render_widget(Block::default().borders(Borders::ALL), areas[1]);
+        }
+        let tab_row = if compact_height {
+            areas[1]
+        } else {
+            areas[1].inner(Margin {
+                horizontal: 1,
+                vertical: 1,
+            })
+        };
         let mut offset = 0;
         let labels = if tab_row.width < 55 {
             ["Perf", "Btns", "Macros", "Lights", "Profiles"]
@@ -85,32 +111,88 @@ impl App {
         } else {
             self.render_profiles(frame, areas[2]);
         }
+        // A fixed border hint stays visible when the content itself scrolls
+        // out of a compact viewport. It uses the post-clamp position produced
+        // by the active view and never creates a hidden mouse target.
+        let scroll_label = if self.tab == 2 {
+            format!(
+                "macro {}/{}",
+                if self.document.profile().macros.is_empty() {
+                    0
+                } else {
+                    self.selected_macro + 1
+                },
+                self.document.profile().macros.len()
+            )
+        } else {
+            format!("row {}", usize::from(self.scroll) + 1)
+        };
+        let scroll_width = Line::raw(&scroll_label).width().min(u16::MAX as usize) as u16 + 2;
+        let panel = areas[2];
+        if panel.width > scroll_width + 2 && panel.height >= 2 {
+            frame.render_widget(
+                Paragraph::new(format!(" {scroll_label} "))
+                    .style(Style::default().fg(Color::Yellow)),
+                Rect::new(
+                    panel.right() - scroll_width - 1,
+                    panel.bottom() - 1,
+                    scroll_width,
+                    1,
+                ),
+            );
+        }
+        let has_validation_error = readiness.error.is_some();
         let validation = readiness.error.map_or_else(
             || "Offline supplied-field validation: OK (not hardware verification)".into(),
             |error| format!("NOT READY: {error}"),
         );
         frame.render_widget(
-            Paragraph::new(format!("{validation}\n{}", safe_text(&self.status))),
+            Paragraph::new(if compact_height {
+                if has_validation_error {
+                    validation
+                } else {
+                    safe_text(&self.status)
+                }
+            } else {
+                format!("{validation}\n{}", safe_text(&self.status))
+            }),
             areas[3],
         );
-        for (line, buttons) in [
-            vec![
-                ("[o Open]", 'o'),
-                ("[s Save NEW]", 's'),
-                ("[v Validate]", 'v'),
-                ("[d Diff]", 'd'),
-                ("[e TOML]", 'e'),
-            ],
-            vec![
-                ("[m Macro]", 'm'),
-                ("[r Resolve]", 'r'),
-                ("[x Omit]", 'x'),
-                ("[q Quit]", 'q'),
-            ],
-        ]
-        .iter()
-        .enumerate()
-        {
+        let compact = areas[4].width < 65;
+        let actions = if compact {
+            [
+                vec![
+                    ("[o Open]", 'o'),
+                    ("[s NEW]", 's'),
+                    ("[v Check]", 'v'),
+                    ("[d Diff]", 'd'),
+                    ("[e Edit]", 'e'),
+                ],
+                vec![
+                    ("[m Macro]", 'm'),
+                    ("[r Resolve]", 'r'),
+                    ("[x Omit]", 'x'),
+                    ("[q Quit]", 'q'),
+                ],
+            ]
+        } else {
+            [
+                vec![
+                    ("[o Open]", 'o'),
+                    ("[s Save NEW]", 's'),
+                    ("[v Validate]", 'v'),
+                    ("[d Diff]", 'd'),
+                    ("[e TOML]", 'e'),
+                ],
+                vec![
+                    ("[m Macro]", 'm'),
+                    ("[r Resolve]", 'r'),
+                    ("[x Omit]", 'x'),
+                    ("[q Quit]", 'q'),
+                ],
+            ]
+        };
+        for (line, buttons) in actions.iter().enumerate() {
             let mut offset = 0;
             for (label, key) in buttons {
                 let row = ratatui::layout::Rect::new(

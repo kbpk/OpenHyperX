@@ -8,7 +8,8 @@ must reuse `hyperx-app`; completing GUI work must not remove terminal features.
 - [ ] Consistent spacing, panel hierarchy, selected/focused states and short labels.
 - [x] Replace debug `Some(...)`/enum output with readable values and explicit unknowns.
 - [x] Color swatches/palette, with text values retained for accessibility.
-- [ ] Responsive layouts, visible scroll position and all actions reachable in small windows.
+- [x] Main views retain visible scroll position and mouse actions at the 45x12 minimum.
+- [ ] Extend compact layouts to editors/dialogs and verify keyboard/mouse reachability there.
 - [ ] Review keyboard shortcuts and focus navigation alongside mouse controls.
 - [ ] Native Windows Terminal operator smoke test for mouse, paste and restoration.
 
