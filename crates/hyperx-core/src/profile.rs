@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt};
 
 use crate::{
     DpiStage, MacroDefinition, MouseFunction, MultimediaFunction, PrimaryButtonLayout, RgbColor,
@@ -52,6 +52,19 @@ pub enum SoftwareButtonBinding {
     Macro { id: String },
 }
 
+impl fmt::Display for SoftwareButtonBinding {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Mouse { action } => write!(formatter, "Mouse: {action}"),
+            Self::Keyboard { key } => write!(formatter, "Keyboard: {}", key.escape_debug()),
+            Self::Multimedia { action } => write!(formatter, "Multimedia: {action}"),
+            Self::WindowsShortcut { action } => write!(formatter, "Windows shortcut: {action}"),
+            Self::Disabled {} => formatter.write_str("Disabled"),
+            Self::Macro { id } => write!(formatter, "Macro reference: {}", id.escape_debug()),
+        }
+    }
+}
+
 /// Zone IDs belong to the device's public capabilities, not USB offsets.
 /// Drivers must reject partial zone updates when current colors cannot be read.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -65,6 +78,14 @@ pub struct SoftwareLightingProfile {
 #[serde(rename_all = "kebab-case")]
 pub enum SoftwareLightingMode {
     Solid,
+}
+
+impl fmt::Display for SoftwareLightingMode {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Solid => formatter.write_str("Solid"),
+        }
+    }
 }
 
 /// DPI data in a portable software profile.

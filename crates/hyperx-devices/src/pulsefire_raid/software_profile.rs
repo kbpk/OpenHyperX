@@ -28,8 +28,14 @@ pub struct PulsefireRaidSoftwareProfile {
 
 #[derive(Debug, Error)]
 pub enum PulsefireRaidProfileError {
-    #[error("invalid software profile: {0}")]
-    InvalidInput(String),
+    #[error("invalid software profile: {message}")]
+    InvalidInput { field: String, message: String },
+    #[error("{source}")]
+    InvalidField {
+        field: String,
+        #[source]
+        source: PulsefireRaidError,
+    },
     #[error(transparent)]
     Driver(#[from] PulsefireRaidError),
     #[error("runtime apply stopped at {step}: {source}; earlier changes may remain; no automatic retry or rollback was attempted")]
@@ -40,6 +46,18 @@ pub enum PulsefireRaidProfileError {
     },
     #[error("runtime readback differs from the planned image: {0}; no RGB was sent and no automatic retry or rollback was attempted")]
     ReadbackMismatch(PulsefireRaidProfileReadbackDiff),
+}
+
+impl PulsefireRaidProfileError {
+    /// Exact file field when offline validation can identify one. Runtime I/O
+    /// failures intentionally have no file location and must not be guessed.
+    pub fn field(&self) -> Option<&str> {
+        match self {
+            Self::InvalidInput { field, .. } => Some(field),
+            Self::InvalidField { field, .. } => Some(field),
+            Self::Driver(_) | Self::ApplyStep { .. } | Self::ReadbackMismatch(_) => None,
+        }
+    }
 }
 
 /// Raw offsets include the report ID at offset zero. Differences preserve the
@@ -110,8 +128,21 @@ pub struct PulsefireRaidProfilePreview {
     pub warnings: Vec<String>,
 }
 
-fn invalid(message: impl Into<String>) -> PulsefireRaidProfileError {
-    PulsefireRaidProfileError::InvalidInput(message.into())
+fn invalid_at(field: impl Into<String>, message: impl Into<String>) -> PulsefireRaidProfileError {
+    PulsefireRaidProfileError::InvalidInput {
+        field: field.into(),
+        message: message.into(),
+    }
+}
+
+fn invalid_source(
+    field: impl Into<String>,
+    source: PulsefireRaidError,
+) -> PulsefireRaidProfileError {
+    PulsefireRaidProfileError::InvalidField {
+        field: field.into(),
+        source,
+    }
 }
 
 impl PulsefireRaidSoftwareProfile {
@@ -120,10 +151,13 @@ impl PulsefireRaidSoftwareProfile {
     /// than silently dropping requested bindings during an otherwise valid apply.
     pub fn new(profile: &SoftwareProfile) -> Result<Self, PulsefireRaidProfileError> {
         if profile.device != PULSEFIRE_RAID.id {
-            return Err(invalid(format!("unsupported device {:?}", profile.device)));
+            return Err(invalid_at(
+                "device",
+                format!("unsupported device {:?}", profile.device),
+            ));
         }
         if !profile.unresolved_button_assignments.is_empty() {
-            return Err(invalid("unresolved button assignments remain (Legacy source targets or unreadable capture macros); resolve them into [buttons] or explicitly remove them to preserve omitted controls before applying"));
+            return Err(invalid_at("unresolved_button_assignments", "unresolved button assignments remain (Legacy source targets or unreadable capture macros); resolve them into [buttons] or explicitly remove them to preserve omitted controls before applying"));
         }
         let mut warnings = Vec::new();
         if profile.partial {
@@ -132,25 +166,29 @@ impl PulsefireRaidSoftwareProfile {
         }
         if let Some(dpi) = &profile.dpi {
             if !(1..=usize::from(PULSEFIRE_RAID_DPI.max_stages)).contains(&dpi.stages.len()) {
-                return Err(invalid("DPI must contain 1..=5 stages"));
+                return Err(invalid_at("dpi.stages", "DPI must contain 1..=5 stages"));
             }
             if dpi
                 .active_stage
                 .is_some_and(|active| active >= dpi.stages.len())
             {
-                return Err(invalid(
+                return Err(invalid_at(
+                    "dpi.active_stage",
                     "DPI active_stage is a zero-based index and must reference a supplied stage",
                 ));
             }
-            for stage in &dpi.stages {
+            for (index, stage) in dpi.stages.iter().enumerate() {
                 PULSEFIRE_RAID_DPI
                     .validate(stage.x)
-                    .map_err(PulsefireRaidError::from)?;
+                    .map_err(PulsefireRaidError::from)
+                    .map_err(|source| invalid_source(format!("dpi.stages[{index}].x"), source))?;
                 PULSEFIRE_RAID_DPI
                     .validate(stage.y)
-                    .map_err(PulsefireRaidError::from)?;
+                    .map_err(PulsefireRaidError::from)
+                    .map_err(|source| invalid_source(format!("dpi.stages[{index}].y"), source))?;
                 if stage.x != stage.y {
-                    return Err(invalid(
+                    return Err(invalid_at(
+                        format!("dpi.stages[{index}]"),
                         "independent X/Y DPI writes are not hardware-confirmed; use equal axes",
                     ));
                 }
@@ -169,14 +207,17 @@ impl PulsefireRaidSoftwareProfile {
                     .hz
                     .to_string()
                     .parse::<PollingRate>()
-                    .map_err(|error| invalid(error.to_string()))
+                    .map_err(|error| invalid_at("polling.hz", error.to_string()))
             })
             .transpose()?;
 
         let mut ids = BTreeSet::new();
-        for named in &profile.macros {
+        for (index, named) in profile.macros.iter().enumerate() {
             if named.source_id.trim().is_empty() || !ids.insert(named.source_id.as_str()) {
-                return Err(invalid("macro IDs must be nonempty and unique"));
+                return Err(invalid_at(
+                    format!("macros[{index}].source_id"),
+                    "macro IDs must be nonempty and unique",
+                ));
             }
             // Button 4 is the captured superset of runtime playback modes.
             // This validates unused library definitions too, not an upload or
@@ -185,30 +226,32 @@ impl PulsefireRaidSoftwareProfile {
             PulsefireRaidRuntimeAssignment::macro_timeline(
                 PulsefireRaidControl::Button4,
                 named.definition.clone(),
-            )?;
+            )
+            .map_err(|source| invalid_source(format!("macros[{index}]"), source))?;
         }
         let mut used_ids = BTreeSet::new();
         let assignments = profile.buttons.iter().map(|(name, binding)| {
-            let control = control_by_id(name).ok_or_else(|| invalid(format!(
+            let control = control_by_id(name).ok_or_else(|| invalid_at(format!("buttons.{name}"), format!(
                 "unknown or primary control {name:?}; use primary_buttons for the coupled left/right pair"
             )))?;
             let ordinary = match binding {
                 SoftwareButtonBinding::Mouse { action } => ButtonBinding::Mouse(*action),
                 SoftwareButtonBinding::Keyboard { key } => ButtonBinding::Keyboard(
-                    key.parse().map_err(|error: hyperx_core::KeyboardUsageParseError| invalid(error.to_string()))?
+                    key.parse().map_err(|error: hyperx_core::KeyboardUsageParseError| invalid_at(format!("buttons.{name}.key"), error.to_string()))?
                 ),
                 SoftwareButtonBinding::Multimedia { action } => ButtonBinding::Multimedia(*action),
                 SoftwareButtonBinding::WindowsShortcut { action } => ButtonBinding::WindowsShortcut(*action),
                 SoftwareButtonBinding::Disabled {} => ButtonBinding::Disabled,
                 SoftwareButtonBinding::Macro { id } => {
                     let named = profile.macros.iter().find(|named| named.source_id == *id)
-                        .ok_or_else(|| invalid(format!("{name} references missing macro {id:?}")))?;
+                        .ok_or_else(|| invalid_at(format!("buttons.{name}.id"), format!("{name} references missing macro {id:?}")))?;
                     used_ids.insert(id.as_str());
                     return PulsefireRaidRuntimeAssignment::macro_timeline(control, named.definition.clone())
-                        .map_err(Into::into);
+                        .map_err(|source| invalid_source(format!("buttons.{name}"), source));
                 }
             };
-            PulsefireRaidRuntimeAssignment::ordinary(control, ordinary).map_err(Into::into)
+            PulsefireRaidRuntimeAssignment::ordinary(control, ordinary)
+                .map_err(|source| invalid_source(format!("buttons.{name}"), source))
         }).collect::<Result<Vec<_>, PulsefireRaidProfileError>>()?;
         for named in &profile.macros {
             if !used_ids.contains(named.source_id.as_str()) {
@@ -227,7 +270,7 @@ impl PulsefireRaidSoftwareProfile {
             // writes both zones, so accepting only one would overwrite an omitted
             // setting with a guessed value. Require both, never default to black.
             if lighting.zones.len() != 2 || !lighting.zones.contains_key("wheel") || !lighting.zones.contains_key("logo") {
-                return Err(invalid("Solid lighting requires exactly wheel and logo zones; current direct colors cannot be read to preserve an omitted zone"));
+                return Err(invalid_at("lighting.zones", "Solid lighting requires exactly wheel and logo zones; current direct colors cannot be read to preserve an omitted zone"));
             }
             warnings.push("Solid RGB is volatile direct lighting; it reverts after keepalive ends. Persist separately with save-to-mouse.".into());
             Ok((lighting.zones["wheel"], lighting.zones["logo"]))
@@ -238,7 +281,10 @@ impl PulsefireRaidSoftwareProfile {
             && assignments.is_empty()
             && lighting.is_none()
         {
-            return Err(invalid("no applicable settings were supplied"));
+            return Err(invalid_at(
+                "profile",
+                "no applicable settings were supplied",
+            ));
         }
         Ok(Self {
             dpi: profile.dpi.clone(),

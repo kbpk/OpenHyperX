@@ -79,7 +79,10 @@ fn fields(profile: &SoftwareProfile) -> Result<(Fields, Fields), SoftwareProfile
         ("partial".into(), profile.partial.to_string()),
     ]);
     if let Some(source) = &profile.source {
-        metadata.insert("source.format".into(), source.format.clone());
+        metadata.insert(
+            "source.format".into(),
+            source.format.escape_debug().to_string(),
+        );
         metadata.insert(
             "source.format_version".into(),
             source.format_version.to_string(),
@@ -104,18 +107,20 @@ fn fields(profile: &SoftwareProfile) -> Result<(Fields, Fields), SoftwareProfile
         settings.insert("polling.hz".into(), polling.hz.to_string());
     }
     if let Some(primary) = profile.primary_buttons {
-        settings.insert("primary_buttons".into(), format!("{primary:?}"));
+        settings.insert("primary_buttons".into(), primary.to_string());
     }
     for (control, binding) in &profile.buttons {
         let value = match binding {
-            SoftwareButtonBinding::Keyboard { key } => format!("keyboard {}", key_value(key)),
-            SoftwareButtonBinding::Macro { id } => format!("macro {id:?}"),
-            other => format!("{other:?}"),
+            SoftwareButtonBinding::Keyboard { key } => format!("Keyboard: {}", key_value(key)),
+            SoftwareButtonBinding::Macro { id } => {
+                format!("Macro reference: {}", id.escape_debug())
+            }
+            other => other.to_string(),
         };
         settings.insert(format!("buttons[{control:?}]"), value);
     }
     if let Some(lighting) = &profile.lighting {
-        settings.insert("lighting.mode".into(), format!("{:?}", lighting.mode));
+        settings.insert("lighting.mode".into(), lighting.mode.to_string());
         for (zone, color) in &lighting.zones {
             settings.insert(format!("lighting.zones[{zone:?}]"), color.to_string());
         }

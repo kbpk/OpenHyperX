@@ -18,6 +18,7 @@ use ratatui::{backend::TestBackend, Terminal};
 
 mod app;
 mod bindings;
+mod diagnostics;
 mod editor;
 mod files;
 mod macro_view;

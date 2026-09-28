@@ -1,5 +1,109 @@
 use super::*;
 use hyperx_core::{MacroEvent, MacroPlayback, UnresolvedButtonAssignment};
+
+#[test]
+fn offline_validation_exposes_typed_file_locations_without_parsing_error_text() {
+    let baseline = parse_profile(include_str!(
+        "../../../examples/profiles/pulsefire-raid.toml"
+    ))
+    .unwrap();
+    assert!(validate_profile(&baseline).field.is_none());
+    let mut cases = Vec::new();
+
+    let mut profile = baseline.clone();
+    profile.device = "unknown-model".into();
+    cases.push((profile, "device"));
+
+    let mut profile = baseline.clone();
+    profile
+        .unresolved_button_assignments
+        .push(UnresolvedButtonAssignment {
+            source_id: "unknown-source".into(),
+            macro_source_id: None,
+        });
+    cases.push((profile, "unresolved_button_assignments"));
+
+    let mut profile = baseline.clone();
+    profile.dpi.as_mut().unwrap().stages.clear();
+    cases.push((profile, "dpi.stages"));
+
+    let mut profile = baseline.clone();
+    profile.dpi.as_mut().unwrap().active_stage = Some(99);
+    cases.push((profile, "dpi.active_stage"));
+
+    let mut profile = baseline.clone();
+    profile.dpi.as_mut().unwrap().stages[0].x = 0;
+    cases.push((profile, "dpi.stages[0].x"));
+
+    let mut profile = baseline.clone();
+    profile.dpi.as_mut().unwrap().stages[0].y = 0;
+    cases.push((profile, "dpi.stages[0].y"));
+
+    let mut profile = baseline.clone();
+    profile.dpi.as_mut().unwrap().stages[0].x = 900;
+    cases.push((profile, "dpi.stages[0]"));
+
+    let mut profile = baseline.clone();
+    profile.polling.as_mut().unwrap().hz = 2000;
+    cases.push((profile, "polling.hz"));
+
+    let mut profile = baseline.clone();
+    profile.macros[0].source_id.clear();
+    cases.push((profile, "macros[0].source_id"));
+
+    let mut profile = baseline.clone();
+    profile.macros[0].definition.events.truncate(1);
+    cases.push((profile, "macros[0]"));
+
+    let mut profile = baseline.clone();
+    profile.buttons.insert(
+        "unknown".into(),
+        hyperx_core::SoftwareButtonBinding::Disabled {},
+    );
+    cases.push((profile, "buttons.unknown"));
+
+    let mut profile = baseline.clone();
+    profile.buttons.insert(
+        "button4".into(),
+        hyperx_core::SoftwareButtonBinding::Keyboard {
+            key: "bad-key".into(),
+        },
+    );
+    cases.push((profile, "buttons.button4.key"));
+
+    let mut profile = baseline.clone();
+    profile.buttons.insert(
+        "button4".into(),
+        hyperx_core::SoftwareButtonBinding::Macro {
+            id: "missing".into(),
+        },
+    );
+    cases.push((profile, "buttons.button4.id"));
+
+    let mut profile = baseline.clone();
+    profile.lighting.as_mut().unwrap().zones.remove("wheel");
+    cases.push((profile, "lighting.zones"));
+
+    let mut profile = baseline.clone();
+    profile.dpi = None;
+    profile.polling = None;
+    profile.primary_buttons = None;
+    profile.buttons.clear();
+    profile.lighting = None;
+    profile.macros.clear();
+    cases.push((profile, "profile"));
+
+    for (profile, expected_field) in cases {
+        let result = validate_profile(&profile);
+        assert!(result.error.is_some(), "{expected_field} was accepted");
+        assert_eq!(
+            result.field.as_deref(),
+            Some(expected_field),
+            "{:?}",
+            result.error
+        );
+    }
+}
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct Files(PathBuf);

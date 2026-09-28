@@ -1,7 +1,4 @@
-use hyperx_core::{
-    MacroEvent, MacroPlayback, MouseFunction, MultimediaFunction, PrimaryButtonLayout,
-    SoftwareButtonBinding, WindowsShortcut,
-};
+use hyperx_core::{MacroEvent, MacroPlayback, PrimaryButtonLayout, SoftwareButtonBinding};
 use ratatui::{
     layout::{Constraint, Layout, Margin},
     style::{Color, Style},
@@ -180,6 +177,7 @@ impl App {
                     title,
                     text,
                     scroll,
+                    ..
                 } => frame.render_widget(
                     Paragraph::new(safe_text(text))
                         .block(Block::default().borders(Borders::ALL).title(title.as_str()))
@@ -283,7 +281,13 @@ impl App {
                     ("[Yes: discard]", KeyCode::Char('y')),
                     ("[Cancel]", KeyCode::Esc),
                 ],
-                Modal::Viewer { .. } => vec![("[Close]", KeyCode::Esc)],
+                Modal::Viewer { jump, .. } => {
+                    let mut actions = vec![("[Close]", KeyCode::Esc)];
+                    if jump.is_some() {
+                        actions.push(("[Go to field g]", KeyCode::Char('g')));
+                    }
+                    actions
+                }
                 Modal::Editor { .. } => vec![
                     ("[Accept draft]", KeyCode::Enter),
                     ("[Cancel]", KeyCode::Esc),
@@ -513,50 +517,10 @@ fn modes(values: &[MacroPlayback]) -> String {
 
 fn format_binding(binding: &SoftwareButtonBinding) -> String {
     match binding {
-        SoftwareButtonBinding::Mouse { action } => format!(
-            "Mouse: {}",
-            match action {
-                MouseFunction::LeftClick => "Left click",
-                MouseFunction::RightClick => "Right click",
-                MouseFunction::MiddleClick => "Middle click",
-                MouseFunction::Back => "Back",
-                MouseFunction::Forward => "Forward",
-                MouseFunction::TiltLeft => "Tilt left",
-                MouseFunction::TiltRight => "Tilt right",
-                MouseFunction::DpiToggle => "DPI toggle",
-                MouseFunction::ScrollUp => "Scroll up",
-                MouseFunction::ScrollDown => "Scroll down",
-            }
-        ),
-        SoftwareButtonBinding::Keyboard { key } => format!("Keyboard: {}", inline(key)),
-        SoftwareButtonBinding::Multimedia { action } => format!(
-            "Multimedia: {}",
-            match action {
-                MultimediaFunction::PlayPause => "Play / pause",
-                MultimediaFunction::Stop => "Stop",
-                MultimediaFunction::NextTrack => "Next track",
-                MultimediaFunction::PreviousTrack => "Previous track",
-                MultimediaFunction::MuteVolume => "Mute volume",
-                MultimediaFunction::VolumeUp => "Volume up",
-                MultimediaFunction::VolumeDown => "Volume down",
-            }
-        ),
-        SoftwareButtonBinding::WindowsShortcut { action } => format!(
-            "Windows shortcut: {}",
-            match action {
-                WindowsShortcut::CycleApps => "Cycle apps",
-                WindowsShortcut::SwitchApps => "Switch apps",
-                WindowsShortcut::Cut => "Cut",
-                WindowsShortcut::Copy => "Copy",
-                WindowsShortcut::Paste => "Paste",
-                WindowsShortcut::Undo => "Undo",
-            }
-        ),
-        SoftwareButtonBinding::Disabled {} => "Disabled".into(),
-        SoftwareButtonBinding::Macro { id } => format!(
-            "Macro reference: {} (timeline from file library)",
-            inline(id)
-        ),
+        SoftwareButtonBinding::Macro { .. } => {
+            format!("{binding} (timeline from file library)")
+        }
+        _ => binding.to_string(),
     }
 }
 

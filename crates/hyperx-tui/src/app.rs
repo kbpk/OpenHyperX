@@ -41,6 +41,7 @@ pub enum Modal {
         title: String,
         text: String,
         scroll: u16,
+        jump: Option<usize>,
     },
     Confirm {
         open: bool,
@@ -237,8 +238,13 @@ impl App {
                     KeyCode::Char('n') | KeyCode::Esc => return,
                     _ => {}
                 },
-                Modal::Viewer { scroll, .. } => match key.code {
+                Modal::Viewer { scroll, jump, .. } => match key.code {
                     KeyCode::Esc | KeyCode::Char('q') => return,
+                    KeyCode::Char('g') if jump.is_some() => {
+                        self.tab = jump.unwrap_or(self.tab);
+                        self.scroll = 0;
+                        return;
+                    }
                     KeyCode::Down | KeyCode::PageDown => {
                         *scroll = scroll.saturating_add(if key.code == KeyCode::PageDown {
                             10
@@ -340,37 +346,21 @@ impl App {
             }
             KeyCode::Char('v') => {
                 let readiness = hyperx_app::validate_profile(self.document.profile());
-                let result = readiness.error.map_or_else(|| "Supplied fields pass offline encoding validation.\nNot hardware verification; composed apply is still experimental.".into(), |error| format!("NOT READY: {error}"));
+                let (text, jump) = crate::diagnostics::validation_view(&readiness);
                 self.modal = Some(Modal::Viewer {
                     title: "Offline validation (Esc close)".into(),
-                    text: format!("{result}\n{}", readiness.warnings.join("\n")),
+                    text,
                     scroll: 0,
+                    jump,
                 });
             }
             KeyCode::Char('d') => match self.document.diff() {
                 Ok(diff) => {
-                    let mut text =
-                        "File changes only; omissions preserve hardware state.\n".to_owned();
-                    for (label, changes) in
-                        [("Settings", diff.settings), ("Metadata", diff.metadata)]
-                    {
-                        text.push_str(&format!("\n{label}:\n"));
-                        if changes.is_empty() {
-                            text.push_str("No differences.\n");
-                        }
-                        for change in changes {
-                            text.push_str(&format!(
-                                "{}: {} -> {}\n",
-                                change.field,
-                                change.before.as_deref().unwrap_or("<not present>"),
-                                change.after.as_deref().unwrap_or("<not present>")
-                            ));
-                        }
-                    }
                     self.modal = Some(Modal::Viewer {
                         title: "Diff against opened/saved file (Esc close)".into(),
-                        text,
+                        text: crate::diagnostics::diff_view(&diff),
                         scroll: 0,
+                        jump: None,
                     });
                 }
                 Err(error) => self.status = error.to_string(),

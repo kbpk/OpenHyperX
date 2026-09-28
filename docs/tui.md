@@ -34,6 +34,14 @@ Imported source IDs and names are displayed as escaped single-line values, so
 control characters cannot masquerade as another terminal row. Model limits are
 declared capabilities, never live measurements.
 
+`d` groups the semantic FILE diff by Performance, Buttons, Macros, Lighting
+and metadata, with separate before/after values. An omitted value is shown as
+`<not present>` and does not mean disabled or reset. `v` shows offline encoding
+readiness and, when validation can identify an exact file field, its field path
+and section. Press `g` in that report to open the section; it does not edit the
+draft or access the mouse. Errors without a known file field are not assigned a
+guessed location.
+
 ## Mouse and direct controls
 
 Mouse capture is enabled only while the interactive TUI runs, and is disabled
@@ -273,6 +281,7 @@ invented and no settings are sent to the mouse.
 | s | save as a NEW path; never overwrite an existing file |
 | v | offline device-encoding validation |
 | d | semantic file diff against opened/last-saved baseline |
+| g in validation report | open the section of a known offending file field |
 | m | import separate macro timeline under a fresh library ID |
 | r | resolve one exact source ID into an explicitly chosen control/macro |
 | x | deliberately omit one exact unresolved source ID |

@@ -32,6 +32,9 @@ pub use resolution::{macro_resolution_targets, MacroResolutionTarget};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProfileReadiness {
     pub error: Option<String>,
+    /// File field responsible for a typed offline-validation error, if known.
+    /// This is not a device register or a claim about hardware state.
+    pub field: Option<String>,
     pub warnings: Vec<String>,
 }
 
@@ -39,9 +42,11 @@ pub fn validate_profile(profile: &SoftwareProfile) -> ProfileReadiness {
     match PulsefireRaidSoftwareProfile::new(profile) {
         Ok(value) => ProfileReadiness {
             error: None,
+            field: None,
             warnings: value.warnings().to_vec(),
         },
         Err(error) => ProfileReadiness {
+            field: error.field().map(str::to_owned),
             error: Some(error.to_string()),
             warnings: Vec::new(),
         },

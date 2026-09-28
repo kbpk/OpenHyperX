@@ -150,9 +150,9 @@ fn section_editor_accepts_valid_drafts_atomically_and_retains_parse_errors() {
     assert_eq!(app.document.profile().polling.unwrap().hz, 500);
     assert_eq!(app.document.profile().buttons, before.buttons);
     app.handle_key(key(KeyCode::Char('d')));
-    assert!(
-        matches!(&app.modal, Some(Modal::Viewer { text, .. }) if text.contains("polling.hz: 1000 -> 500"))
-    );
+    assert!(matches!(&app.modal, Some(Modal::Viewer { text, .. })
+        if text.contains("Performance (")
+            && text.contains("polling.hz\n    before: 1000\n    after:  500")));
 }
 
 #[test]
@@ -163,8 +163,14 @@ fn unsupported_values_remain_visible_and_fail_validation_without_discarding_draf
     app.handle_key(accept());
     assert_eq!(app.document.profile().polling.unwrap().hz, 2000);
     assert!(screen(&mut app, 120, 35).contains("NOT READY"));
+    app.tab = 4;
     app.handle_key(key(KeyCode::Char('v')));
-    assert!(matches!(&app.modal, Some(Modal::Viewer { text, .. }) if text.contains("NOT READY")));
+    assert!(
+        matches!(&app.modal, Some(Modal::Viewer { text, jump: Some(0), .. }) if text.contains("NOT READY") && text.contains("Offending file field: polling.hz"))
+    );
+    app.handle_key(key(KeyCode::Char('g')));
+    assert!(app.modal.is_none());
+    assert_eq!(app.tab, 0);
 }
 
 #[test]

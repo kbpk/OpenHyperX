@@ -28,6 +28,23 @@ pub enum MouseFunction {
     ScrollDown,
 }
 
+impl fmt::Display for MouseFunction {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::LeftClick => "Left click",
+            Self::RightClick => "Right click",
+            Self::MiddleClick => "Middle click",
+            Self::Back => "Back",
+            Self::Forward => "Forward",
+            Self::TiltLeft => "Tilt left",
+            Self::TiltRight => "Tilt right",
+            Self::DpiToggle => "DPI toggle",
+            Self::ScrollUp => "Scroll up",
+            Self::ScrollDown => "Scroll down",
+        })
+    }
+}
+
 /// The two legal, coupled assignments for the physical primary buttons.
 ///
 /// Devices may require both records to be changed in one transaction, so this
@@ -37,6 +54,15 @@ pub enum MouseFunction {
 pub enum PrimaryButtonLayout {
     Standard,
     Swapped,
+}
+
+impl fmt::Display for PrimaryButtonLayout {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Standard => "Standard",
+            Self::Swapped => "Swapped",
+        })
+    }
 }
 
 /// Consumer-control actions exposed by NGENUITY Legacy.
@@ -52,6 +78,20 @@ pub enum MultimediaFunction {
     VolumeDown,
 }
 
+impl fmt::Display for MultimediaFunction {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::PlayPause => "Play / pause",
+            Self::Stop => "Stop",
+            Self::NextTrack => "Next track",
+            Self::PreviousTrack => "Previous track",
+            Self::MuteVolume => "Mute volume",
+            Self::VolumeUp => "Volume up",
+            Self::VolumeDown => "Volume down",
+        })
+    }
+}
+
 /// Named Windows actions exposed by NGENUITY Legacy.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -62,6 +102,19 @@ pub enum WindowsShortcut {
     Copy,
     Paste,
     Undo,
+}
+
+impl fmt::Display for WindowsShortcut {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::CycleApps => "Cycle apps",
+            Self::SwitchApps => "Switch apps",
+            Self::Cut => "Cut",
+            Self::Copy => "Copy",
+            Self::Paste => "Paste",
+            Self::Undo => "Undo",
+        })
+    }
 }
 
 /// A usage ID from the USB HID Keyboard/Keypad usage page (`0x07`).
