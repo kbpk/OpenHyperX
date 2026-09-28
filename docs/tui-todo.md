@@ -7,7 +7,7 @@ must reuse `hyperx-app`; completing GUI work must not remove terminal features.
 
 - [ ] Consistent spacing, panel hierarchy, selected/focused states and short labels.
 - [x] Replace debug `Some(...)`/enum output with readable values and explicit unknowns.
-- [ ] Color swatches/palette, with text values retained for accessibility.
+- [x] Color swatches/palette, with text values retained for accessibility.
 - [ ] Responsive layouts, visible scroll position and all actions reachable in small windows.
 - [ ] Review keyboard shortcuts and focus navigation alongside mouse controls.
 - [ ] Native Windows Terminal operator smoke test for mouse, paste and restoration.

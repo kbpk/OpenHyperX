@@ -31,6 +31,7 @@ pub enum Action {
     AdjustDpi { index: usize, delta: i64 },
     DpiInput(usize),
     ColorInput(usize),
+    PaletteColor(u8),
     AddStage,
     ZoneColor(&'static str),
     Value(ProfileValueEdit),
@@ -219,6 +220,9 @@ impl App {
             Action::Key(key) => self.handle_key(KeyEvent::new(key, KeyModifiers::NONE)),
             Action::AcceptEditor => {
                 self.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))
+            }
+            Action::PaletteColor(number) => {
+                self.handle_key(KeyEvent::new(KeyCode::F(number), KeyModifiers::NONE))
             }
             Action::AdjustDpi { index, delta } => self.change_dpi(index, delta),
             Action::Tab(tab) => {

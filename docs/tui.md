@@ -63,6 +63,10 @@ exact `#RRGGBB` text. Explicit black uses a neutral outlined swatch so it is
 visible on dark backgrounds; missing colors have no swatch and remain marked
 `<not present / not read>`. A terminal without truecolor still shows the hex
 value and retains the same clickable color editor.
+That editor offers eight preview presets, clickable or via F1–F8: Off, White,
+Red, Green, Blue, Yellow, Cyan and Magenta. A preset fills only the hex input;
+type any custom color to replace it, press Enter to accept into the FILE draft,
+or Esc to cancel without changing the draft.
 
 Click a stage label to select it for keyboard edits, Activate to choose it as
 the file's active stage, or its hex color to edit that color. Add level asks for

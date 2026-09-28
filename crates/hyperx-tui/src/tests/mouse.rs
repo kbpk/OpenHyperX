@@ -188,6 +188,61 @@ fn stage_add_activate_remove_and_colors_use_no_toml_editor() {
 }
 
 #[test]
+fn color_palette_mouse_and_keys_only_preview_until_explicit_accept() {
+    let mut app = app();
+    let original = app.document.profile().clone();
+    click(&mut app, |action| matches!(action, Action::ColorInput(0)));
+    click(&mut app, |action| matches!(action, Action::PaletteColor(3)));
+    assert_eq!(app.document.profile(), &original);
+    assert!(matches!(&app.modal, Some(Modal::Editor { editor, .. }) if editor.text() == "#FF0000"));
+    app.handle_key(key(KeyCode::Esc));
+    assert_eq!(app.document.profile(), &original);
+
+    click(&mut app, |action| matches!(action, Action::Tab(3)));
+    click(&mut app, |action| {
+        matches!(action, Action::ZoneColor("wheel"))
+    });
+    app.handle_key(key(KeyCode::F(6)));
+    assert_eq!(app.document.profile(), &original);
+    assert!(matches!(&app.modal, Some(Modal::Editor { editor, .. }) if editor.text() == "#FFFF00"));
+    app.handle_paste("123456");
+    click(&mut app, |action| matches!(action, Action::AcceptEditor));
+    assert!(app.modal.is_none());
+    assert_eq!(
+        app.document.profile().lighting.as_ref().unwrap().zones["wheel"].to_string(),
+        "#123456"
+    );
+    assert_eq!(
+        app.document.profile().lighting.as_ref().unwrap().zones["logo"],
+        original.lighting.unwrap().zones["logo"]
+    );
+}
+
+#[test]
+fn color_palette_has_only_visible_modal_hits_after_resize() {
+    let mut app = app();
+    click(&mut app, |action| matches!(action, Action::ColorInput(0)));
+    screen(&mut app, 45, 12);
+    assert_eq!(
+        app.hits
+            .iter()
+            .filter(|hit| matches!(hit.action, Action::PaletteColor(_)))
+            .count(),
+        8
+    );
+    screen(&mut app, 20, 8);
+    assert!(app.hits.is_empty());
+    screen(&mut app, 45, 12);
+    assert_eq!(
+        app.hits
+            .iter()
+            .filter(|hit| matches!(hit.action, Action::PaletteColor(_)))
+            .count(),
+        8
+    );
+}
+
+#[test]
 fn mouse_modal_blocks_underlying_sliders_and_resize_discards_stale_targets() {
     let mut app = app();
     let slider = hit(&mut app, |action| matches!(action, Action::Slider(0)));

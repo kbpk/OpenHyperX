@@ -268,6 +268,13 @@ impl App {
                     if key.code == KeyCode::Esc {
                         return;
                     }
+                    if crate::color_palette::is_color_action(*action)
+                        && crate::color_palette::preview_key(key.code, editor)
+                    {
+                        *error = None;
+                        self.modal = Some(modal);
+                        return;
+                    }
                     let accept = (key.code == KeyCode::Char('s')
                         && key.modifiers.contains(KeyModifiers::CONTROL))
                         || (key.code == KeyCode::Enter && editor.single_line);

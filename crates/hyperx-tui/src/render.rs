@@ -187,12 +187,21 @@ impl App {
                 ),
                 Modal::Editor {
                     title,
+                    action,
                     editor,
                     error,
-                    ..
                 } => {
-                    let regions =
-                        Layout::vertical([Constraint::Min(3), Constraint::Length(3)]).split(area);
+                    let color = crate::color_palette::is_color_action(*action);
+                    let regions = if color {
+                        Layout::vertical([
+                            Constraint::Min(3),
+                            Constraint::Length(2),
+                            Constraint::Length(3),
+                        ])
+                        .split(area)
+                    } else {
+                        Layout::vertical([Constraint::Min(3), Constraint::Length(3)]).split(area)
+                    };
                     let inner = regions[0].inner(Margin {
                         horizontal: 1,
                         vertical: 1,
@@ -220,11 +229,15 @@ impl App {
                             .scroll((top, left)),
                         regions[0],
                     );
+                    if color {
+                        crate::color_palette::render(frame, regions[1], editor, &mut self.hits);
+                    }
+                    let help_region = if color { regions[2] } else { regions[1] };
                     let help = ratatui::layout::Rect::new(
-                        regions[1].x,
-                        regions[1].y,
-                        regions[1].width,
-                        regions[1].height.saturating_sub(1),
+                        help_region.x,
+                        help_region.y,
+                        help_region.width,
+                        help_region.height.saturating_sub(1),
                     );
                     frame.render_widget(Paragraph::new(safe_text(error.as_deref().unwrap_or("File draft only. Accept updates the draft; Save writes a NEW file. Esc cancels; omitted values do not reset hardware."))).wrap(Wrap { trim: false }), help);
                     self.hits.push(Hit {
