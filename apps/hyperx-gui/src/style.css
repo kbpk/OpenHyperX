@@ -924,6 +924,33 @@ td small {
 .profile-details {
   margin-bottom: 20px;
 }
+.resolution-panel {
+  margin-bottom: 20px;
+}
+.resolution-panel .field-label select {
+  width: min(100%, 520px);
+}
+.resolution-hint,
+.resolution-reasons {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.resolution-reasons summary {
+  cursor: pointer;
+}
+.resolution-reasons p {
+  margin: 10px 0;
+}
+.resolution-actions {
+  margin: 20px 0;
+}
+.resolution-confirm {
+  margin-top: 12px;
+}
+.resolution-confirm p {
+  margin: 10px 0;
+}
 .macro-library {
   min-width: 0;
 }

@@ -16,6 +16,7 @@ import { Icon } from "./icons";
 import { DeviceRender, MouseArt } from "./mouse-art";
 import { ButtonAssignments } from "./button-assignments";
 import { MacroLibrary } from "./macro-library";
+import { UnresolvedAssignments } from "./unresolved-assignments";
 import type { Edit, Page, Snapshot, Stage } from "./types";
 
 const pages: Page[] = [
@@ -869,20 +870,6 @@ export default function App({
                         </div>
                       )}
                     </dl>
-                    {!!profile.unresolved_button_assignments?.length && (
-                      <div className="notice">
-                        {profile.unresolved_button_assignments.map(
-                          (entry, index) => (
-                            <p key={index}>
-                              {entry.source_id}
-                              {entry.macro_source_id
-                                ? ` → macro ${entry.macro_source_id}`
-                                : " — definition or target unknown"}
-                            </p>
-                          ),
-                        )}
-                      </div>
-                    )}
                     <div className="inline-actions">
                       <button
                         disabled={disabled || macroDraft}
@@ -905,6 +892,11 @@ export default function App({
                       </button>
                     </div>
                   </section>
+                  <UnresolvedAssignments
+                    snapshot={snapshot}
+                    disabled={disabled || macroDraft}
+                    edit={edit}
+                  />
                   <section className="panel validation">
                     <div className="section-heading">
                       <h2>Validation</h2>

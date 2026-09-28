@@ -22,6 +22,10 @@ service, firmware updater, shell plugin or global keyboard hook is included.
   playback, without collapsing chords. Referenced replacements need confirmation.
 - Lighting: independent wheel/logo Solid colors, palette and Off per zone.
 - Profiles: naming, native TOML open/save dialogs, validation and baseline diff.
+- Imported provenance: inspect unresolved source IDs, explicitly choose a legal
+  physical target and existing library macro, or deliberately omit one source
+  entry. A separate confirmation precedes either file edit; no source hint
+  automatically selects a macro or button.
 
 The Raid product render uses an unchanged three-view NGENUITY Legacy atlas;
 Device selects Top/Left/Right locally. Buttons overlays separately maintained
@@ -96,6 +100,24 @@ permission to apply it. No global recorder or keyboard hook is implemented.
 Pending local timeline edits survive page navigation, prevent replacing/saving
 the document until committed or discarded, and protect native window close.
 After updating the file draft, use Save new file for disk persistence.
+
+## Resolving imported assignments
+
+Profiles lists unresolved source entries from the file. Selecting a source
+shows the retained macro-source hint, but never treats that hint as a library
+ID or a physical control. Choose a model-declared target and an existing,
+target-valid library macro explicitly. Rejected targets/definitions remain
+inspectable with reasons from `hyperx-app`. Duplicate source IDs cannot be
+resolved by picking a row number; the shared model rejects ambiguity.
+
+**Review resolution** shows the exact source, control and macro before
+**Confirm resolution** assigns the macro in the FILE and removes only that
+unresolved entry. **Review omission** is separate: confirming it deletes only
+one provenance entry, not a binding or macro, and never means Disabled/reset.
+Both actions are revision-checked Rust edits and preserve unrelated settings,
+partial flags and source metadata. A pending local macro timeline disables
+resolution until committed or discarded. Save new file afterward; neither
+action opens HID, applies settings or saves onboard memory.
 
 ## Build on Windows from WSL
 
@@ -254,7 +276,7 @@ Sources: [Rust IPC](https://v2.tauri.app/develop/calling-rust/),
 
 - [x] General binding selectors, legal choices from shared model metadata.
 - [x] Editable macro timeline with target-specific limits and library management.
-- [ ] Partial/unresolved import inspection and explicit resolution/omission controls.
+- [x] Partial/unresolved import inspection and explicit resolution/omission controls.
 - [ ] Keyboard navigation/operator tests of native dialogs and WebView2.
 - [ ] Undo/recovery and a deliberate recoverable overwrite workflow.
 - [ ] Connected app facade **only after** usable hardware baseline/readback is restored.

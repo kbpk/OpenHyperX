@@ -89,6 +89,11 @@ export interface Snapshot {
   binding_choices: BindingChoice[];
   macro_keys: string[];
   macro_mouse_buttons: string[];
+  resolution_sources?: {
+    source_id: string;
+    error: string | null;
+    targets: { id: string; name: string; error: string | null }[];
+  }[];
 }
 export type Edit =
   | { kind: "stage-dpi"; index: number; dpi: number }
@@ -108,6 +113,14 @@ export type Edit =
     }
   | { kind: "macro-remove"; source_id: string }
   | { kind: "solid-zone"; zone: string; color: string }
+  | {
+      kind: "resolve-unresolved";
+      source_id: string;
+      control: string;
+      macro_id: string;
+      confirm: true;
+    }
+  | { kind: "omit-unresolved"; source_id: string; confirm: true }
   | { kind: "name"; name: string };
 export type Page =
   "Device" | "Performance" | "Buttons" | "Macros" | "Lighting" | "Profiles";

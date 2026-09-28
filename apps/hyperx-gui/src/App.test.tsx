@@ -16,8 +16,8 @@ afterEach(cleanup);
 HTMLDialogElement.prototype.showModal = function () {
   this.setAttribute("open", "");
 };
-function fakeBackend() {
-  let current = structuredClone(fixture) as Snapshot;
+function fakeBackend(initial = structuredClone(fixture) as Snapshot) {
+  let current = initial;
   const request = vi.fn(
     async (command: string, args?: Record<string, unknown>) => {
       if (command === "gui_edit") {
@@ -39,6 +39,55 @@ function fakeBackend() {
   };
 }
 describe("offline profile UI", () => {
+  it("exposes explicit imported-assignment resolution in Profiles through typed IPC", async () => {
+    const imported = structuredClone(fixture) as Snapshot;
+    delete imported.profile.buttons?.button4;
+    imported.profile.unresolved_button_assignments = [
+      { source_id: "runtime:button4", macro_source_id: "ab" },
+    ];
+    imported.resolution_sources = [
+      {
+        source_id: "runtime:button4",
+        error: null,
+        targets: [{ id: "button4", name: "Button 4", error: null }],
+      },
+    ];
+    const backend = fakeBackend(imported);
+    render(<App backend={backend} />);
+    await screen.findByRole("slider", { name: "Stage 1 DPI slider" });
+    await userEvent.click(screen.getByRole("button", { name: "Profiles" }));
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Imported source" }),
+      "0",
+    );
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Physical target" }),
+      "button4",
+    );
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Existing library macro" }),
+      "ab",
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Review resolution" }),
+    );
+    expect(backend.request).toHaveBeenCalledTimes(1);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Confirm resolution" }),
+    );
+    await waitFor(() =>
+      expect(backend.request).toHaveBeenCalledWith("gui_edit", {
+        expectedRevision: 0,
+        edit: {
+          kind: "resolve-unresolved",
+          source_id: "runtime:button4",
+          control: "button4",
+          macro_id: "ab",
+          confirm: true,
+        },
+      }),
+    );
+  });
   it("retains uncommitted timelines across navigation/revisions and protects save/reset/native close", async () => {
     const backend = fakeBackend();
     render(<App backend={backend} />);

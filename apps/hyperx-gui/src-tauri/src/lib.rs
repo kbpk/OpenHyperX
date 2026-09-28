@@ -4,8 +4,9 @@ use std::path::Path;
 use anyhow::{bail, Result};
 use hyperx_app::{
     device_descriptor, edit_profile_value, macro_keyboard_names, macro_mouse_button_names,
-    parse_profile, profile_binding_choices, profile_controls, validate_profile,
-    ProfileBindingChoice, ProfileDocument, ProfileValueEdit,
+    macro_resolution_targets, omit_unresolved_assignment, parse_profile, profile_binding_choices,
+    profile_controls, resolve_macro_assignment, validate_profile, ProfileBindingChoice,
+    ProfileDocument, ProfileValueEdit,
 };
 use hyperx_core::{
     MacroPlayback, NamedMacro, PrimaryButtonLayout, RgbColor, SoftwareButtonBinding,
@@ -38,6 +39,20 @@ pub struct Snapshot {
     pub macro_keys: Vec<String>,
     pub macro_mouse_buttons: Vec<String>,
     pub controls: Vec<Control>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub resolution_sources: Vec<ResolutionSource>,
+}
+#[derive(Debug, Serialize)]
+pub struct ResolutionSource {
+    pub source_id: String,
+    pub error: Option<String>,
+    pub targets: Vec<ResolutionTarget>,
+}
+#[derive(Debug, Serialize)]
+pub struct ResolutionTarget {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub error: Option<String>,
 }
 #[derive(Debug, Serialize)]
 pub struct Readiness {
@@ -143,6 +158,16 @@ pub enum Edit {
     },
     Name {
         name: String,
+    },
+    ResolveUnresolved {
+        source_id: String,
+        control: String,
+        macro_id: String,
+        confirm: bool,
+    },
+    OmitUnresolved {
+        source_id: String,
+        confirm: bool,
     },
 }
 
@@ -286,6 +311,31 @@ impl Session {
                 }),
             })
             .collect();
+        let resolution_sources = profile
+            .unresolved_button_assignments
+            .iter()
+            .map(
+                |source| match macro_resolution_targets(profile, &source.source_id) {
+                    Ok(targets) => ResolutionSource {
+                        source_id: source.source_id.clone(),
+                        error: None,
+                        targets: targets
+                            .into_iter()
+                            .map(|target| ResolutionTarget {
+                                id: target.control.id,
+                                name: target.control.name,
+                                error: target.error,
+                            })
+                            .collect(),
+                    },
+                    Err(error) => ResolutionSource {
+                        source_id: source.source_id.clone(),
+                        error: Some(error.to_string()),
+                        targets: Vec::new(),
+                    },
+                },
+            )
+            .collect();
         Snapshot {
             revision: self.revision,
             origin: self.origin,
@@ -329,6 +379,7 @@ impl Session {
             }),
             controls,
             binding_choices,
+            resolution_sources,
         }
     }
     pub fn edit(&mut self, expected: u64, edit: Edit) -> Result<Snapshot> {
@@ -356,6 +407,35 @@ impl Session {
             },
             Edit::MacroRemove { source_id } => ProfileValueEdit::MacroRemove { source_id },
             Edit::SolidZone { zone, color } => ProfileValueEdit::SolidZone { zone, color },
+            Edit::ResolveUnresolved {
+                source_id,
+                control,
+                macro_id,
+                confirm,
+            } => {
+                if !confirm {
+                    bail!("explicit confirmation is required to resolve an imported assignment");
+                }
+                let profile = resolve_macro_assignment(
+                    self.document.profile(),
+                    &source_id,
+                    &control,
+                    &macro_id,
+                    None,
+                )?;
+                self.document.replace(profile);
+                self.revision += 1;
+                return Ok(self.snapshot());
+            }
+            Edit::OmitUnresolved { source_id, confirm } => {
+                if !confirm {
+                    bail!("explicit confirmation is required to omit imported provenance");
+                }
+                let profile = omit_unresolved_assignment(self.document.profile(), &source_id)?;
+                self.document.replace(profile);
+                self.revision += 1;
+                return Ok(self.snapshot());
+            }
             Edit::Name { name } => {
                 let name = name.trim();
                 if name.is_empty() || name.len() > 128 || name.chars().any(char::is_control) {
@@ -446,7 +526,32 @@ pub fn smoke_test() -> Result<()> {
         },
     )?;
     assert!(!snapshot.dirty && snapshot.readiness.error.is_none());
-    println!("OpenHyperX GUI offline smoke passed: typed edits, validation and diff; no WebView or HID initialized.");
+    let mut imported = snapshot.profile;
+    imported.buttons.remove("button4");
+    imported
+        .unresolved_button_assignments
+        .push(hyperx_core::UnresolvedButtonAssignment {
+            source_id: "runtime:button4".into(),
+            macro_source_id: Some("ab".into()),
+        });
+    session.document.replace(imported);
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.resolution_sources.len(), 1);
+    let snapshot = session.edit(
+        snapshot.revision,
+        Edit::ResolveUnresolved {
+            source_id: "runtime:button4".into(),
+            control: "button4".into(),
+            macro_id: "ab".into(),
+            confirm: true,
+        },
+    )?;
+    assert!(snapshot.resolution_sources.is_empty());
+    assert_eq!(
+        snapshot.profile.buttons.get("button4"),
+        Some(&SoftwareButtonBinding::Macro { id: "ab".into() })
+    );
+    println!("OpenHyperX GUI offline smoke passed: typed edits, imported-source resolution, validation and diff; no WebView or HID initialized.");
     Ok(())
 }
 

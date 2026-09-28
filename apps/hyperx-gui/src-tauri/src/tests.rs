@@ -142,6 +142,126 @@ fn incomplete_imports_remain_partial_and_inspectable_without_defaults() {
     assert!(snapshot.profile.dpi.is_none() && snapshot.profile.polling.is_none());
 }
 #[test]
+fn imported_assignment_resolution_requires_explicit_source_target_macro_and_confirmation() {
+    let mut session = Session::demo().unwrap();
+    let mut imported = session.snapshot().profile;
+    imported.buttons.remove("button4");
+    imported
+        .unresolved_button_assignments
+        .push(hyperx_core::UnresolvedButtonAssignment {
+            source_id: "runtime:button4".into(),
+            macro_source_id: Some("ab".into()),
+        });
+    session.document.replace(imported.clone());
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.resolution_sources.len(), 1);
+    let source = &snapshot.resolution_sources[0];
+    assert_eq!(source.source_id, "runtime:button4");
+    assert!(source.error.is_none());
+    assert!(source
+        .targets
+        .iter()
+        .any(|target| target.id == "button4" && target.error.is_none()));
+    assert!(source
+        .targets
+        .iter()
+        .any(|target| target.id == "button5" && target.error.is_some()));
+
+    let chosen = Edit::ResolveUnresolved {
+        source_id: "runtime:button4".into(),
+        control: "button4".into(),
+        macro_id: "ab".into(),
+        confirm: false,
+    };
+    assert!(session.edit(0, chosen).is_err());
+    assert_eq!(session.snapshot().profile, imported);
+    for (source_id, control, macro_id) in [
+        ("runtime:button4", "button5", "ab"),
+        ("runtime:button4", "button4", "missing"),
+        ("missing", "button4", "ab"),
+    ] {
+        assert!(session
+            .edit(
+                0,
+                Edit::ResolveUnresolved {
+                    source_id: source_id.into(),
+                    control: control.into(),
+                    macro_id: macro_id.into(),
+                    confirm: true,
+                }
+            )
+            .is_err());
+        assert_eq!(session.snapshot().profile, imported);
+    }
+    let resolved = session
+        .edit(
+            0,
+            Edit::ResolveUnresolved {
+                source_id: "runtime:button4".into(),
+                control: "button4".into(),
+                macro_id: "ab".into(),
+                confirm: true,
+            },
+        )
+        .unwrap();
+    assert_eq!(resolved.revision, 1);
+    assert!(resolved.resolution_sources.is_empty());
+    assert_eq!(resolved.profile.macros, imported.macros);
+    assert_eq!(resolved.profile.dpi, imported.dpi);
+    assert_eq!(resolved.profile.polling, imported.polling);
+    assert_eq!(resolved.profile.lighting, imported.lighting);
+    assert_eq!(
+        resolved.profile.buttons.get("button4"),
+        Some(&SoftwareButtonBinding::Macro { id: "ab".into() })
+    );
+    assert!(session
+        .edit(
+            0,
+            Edit::OmitUnresolved {
+                source_id: "runtime:button4".into(),
+                confirm: true
+            }
+        )
+        .is_err());
+}
+
+#[test]
+fn omission_removes_only_explicit_provenance_and_never_disables_a_button() {
+    let mut session = Session::demo().unwrap();
+    let mut imported = session.snapshot().profile;
+    imported
+        .unresolved_button_assignments
+        .push(hyperx_core::UnresolvedButtonAssignment {
+            source_id: "opaque-legacy".into(),
+            macro_source_id: Some("ab".into()),
+        });
+    session.document.replace(imported.clone());
+    assert!(session
+        .edit(
+            0,
+            Edit::OmitUnresolved {
+                source_id: "opaque-legacy".into(),
+                confirm: false
+            }
+        )
+        .is_err());
+    assert_eq!(session.snapshot().profile, imported);
+    let omitted = session
+        .edit(
+            0,
+            Edit::OmitUnresolved {
+                source_id: "opaque-legacy".into(),
+                confirm: true,
+            },
+        )
+        .unwrap();
+    assert_eq!(omitted.profile.buttons, imported.buttons);
+    assert_eq!(omitted.profile.macros, imported.macros);
+    assert_eq!(omitted.profile.dpi, imported.dpi);
+    assert!(omitted.profile.unresolved_button_assignments.is_empty());
+    assert_eq!(omitted.revision, 1);
+}
+#[test]
 fn forged_json_edits_are_rejected_before_mutation() {
     for json in [
         r#"{"kind":"raw-send","bytes":[1,2,3]}"#,
@@ -156,6 +276,9 @@ fn forged_json_edits_are_rejected_before_mutation() {
         r#"{"kind":"macro-create","macro":{"source_id":"m","name":"M","playback":"once","events":[{"type":"key-down","key":"a","delay_ms":20,"report":[1,2]}]}}"#,
         r#"{"kind":"macro-replace","source_id":"ab","macro":{"source_id":"ab","name":"M","playback":"once","events":[]}}"#,
         r#"{"kind":"macro-remove","source_id":"ab","confirm_references":true}"#,
+        r#"{"kind":"resolve-unresolved","source_id":"runtime:button4","control":"button4","macro_id":"ab"}"#,
+        r#"{"kind":"resolve-unresolved","source_id":"runtime:button4","control":"button4","macro_id":"ab","confirm":true,"report":[7,3]}"#,
+        r#"{"kind":"omit-unresolved","source_id":"opaque"}"#,
     ] {
         assert!(serde_json::from_str::<Edit>(json).is_err(), "{json}");
     }
