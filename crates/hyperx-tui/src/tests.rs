@@ -81,6 +81,57 @@ fn empty_profiles_show_unknown_or_omitted_values_not_defaults() {
 }
 
 #[test]
+fn every_tab_uses_readable_values_and_explicit_unknowns_instead_of_debug_enums() {
+    let mut app = app();
+    app.tab = 0;
+    let performance = app.content();
+    assert!(performance.contains("Primary layout: Standard"));
+    assert!(performance.contains("Active stage: 0 (zero-based)"));
+    assert!(performance.contains("200–16000 DPI, step 50"));
+    app.tab = 1;
+    let buttons = app.content();
+    assert!(buttons.contains("Mouse: Back"));
+    assert!(buttons.contains("Macro reference: ab"));
+    app.tab = 2;
+    let macros = app.content();
+    assert!(macros.contains("Macro ab: AB, 20 ms | Play once"));
+    assert!(macros.contains("Key down a; then 20 ms"));
+    assert!(macros.contains("runtime Play once, Toggle repeat"));
+    app.tab = 3;
+    assert!(app.content().contains("Mode: Solid"));
+    app.tab = 4;
+    let profiles = app.content();
+    assert!(profiles.contains("Source: <not present>"));
+    assert!(profiles.contains("Opened/saved path: <not saved>"));
+    for value in [performance, buttons, macros, profiles] {
+        assert!(!value.contains("Some("), "{value}");
+        assert!(!value.contains("Mouse {"), "{value}");
+        assert!(!value.contains("KeyDown"), "{value}");
+    }
+}
+
+#[test]
+fn profile_provenance_is_readable_and_cannot_inject_terminal_lines() {
+    let mut profile = app().document.profile().clone();
+    profile.source = Some(hyperx_core::SoftwareProfileSource {
+        format: "ngenuity-legacy-hxp".into(),
+        format_version: 40,
+    });
+    profile
+        .unresolved_button_assignments
+        .push(hyperx_core::UnresolvedButtonAssignment {
+            source_id: "source\nforged".into(),
+            macro_source_id: None,
+        });
+    let mut app = App::new(ProfileDocument::from_profile(profile), false);
+    app.tab = 4;
+    let content = app.content();
+    assert!(content.contains("Source: ngenuity-legacy-hxp (format version 40)"));
+    assert!(content.contains("UNRESOLVED source\\nforged: macro source <unknown>"));
+    assert!(!content.contains("Some("));
+}
+
+#[test]
 fn section_editor_accepts_valid_drafts_atomically_and_retains_parse_errors() {
     let mut app = app();
     let before = app.document.profile().clone();

@@ -1,4 +1,7 @@
-use hyperx_core::MacroEvent;
+use hyperx_core::{
+    MacroEvent, MacroPlayback, MouseFunction, MultimediaFunction, PrimaryButtonLayout,
+    SoftwareButtonBinding, WindowsShortcut,
+};
 use ratatui::{
     layout::{Constraint, Layout, Margin},
     style::{Color, Style},
@@ -41,7 +44,7 @@ impl App {
         } else {
             "unchanged"
         };
-        frame.render_widget(Paragraph::new(format!("OpenHyperX | OFFLINE | {mode} | {draft_state}\nTarget {:?} | profile {:?} | NOT connected/read from mouse", profile.device, profile.name)).style(Style::default().fg(Color::Cyan)), areas[0]);
+        frame.render_widget(Paragraph::new(format!("OpenHyperX | OFFLINE | {mode} | {draft_state}\nTarget {} | profile {} | NOT connected/read from mouse", inline(&profile.device), inline(&profile.name))).style(Style::default().fg(Color::Cyan)), areas[0]);
         frame.render_widget(Block::default().borders(Borders::ALL), areas[1]);
         let tab_row = areas[1].inner(Margin {
             horizontal: 1,
@@ -319,17 +322,20 @@ impl App {
         match self.tab {
             0 => {
                 text.push_str(&format!(
-                    "Polling: {}\nPrimary layout: {:?}\n",
+                    "Polling: {}\nPrimary layout: {}\n",
                     profile.polling.map_or_else(
                         || "<not present>".into(),
                         |value| format!("{} Hz", value.hz)
                     ),
-                    profile.primary_buttons
+                    profile
+                        .primary_buttons
+                        .map_or("<not present>", primary_layout)
                 ));
                 if let Some(dpi) = &profile.dpi {
                     text.push_str(&format!(
-                        "Active stage: {:?} (zero-based); source active: {:?} (provenance)\n",
-                        dpi.active_stage, dpi.source_active_stage
+                        "Active stage: {} (zero-based); source active: {} (unconfirmed provenance)\n",
+                        dpi.active_stage.map_or_else(|| "<not present>".into(), |value| value.to_string()),
+                        dpi.source_active_stage.map_or_else(|| "<not present>".into(), |value| value.to_string())
                     ));
                     for (index, stage) in dpi.stages.iter().enumerate() {
                         text.push_str(&format!(
@@ -341,28 +347,43 @@ impl App {
                     text.push_str("DPI stages: <not present / not read>\n");
                 }
                 if let Some(device) = hyperx_app::device_descriptor(&profile.device) {
-                    text.push_str(&format!(
-                        "\nDeclared model DPI capabilities: {:?}\nNot live device measurements.\n",
-                        device.capabilities.dpi
-                    ));
+                    let limits = device.capabilities.dpi.map_or_else(
+                        || "not declared".into(),
+                        |limits| {
+                            format!(
+                                "{}–{} DPI, step {}, up to {} stages",
+                                limits.minimum, limits.maximum, limits.step, limits.max_stages
+                            )
+                        },
+                    );
+                    text.push_str(&format!("\nDeclared model DPI capabilities: {limits}\nNot live device measurements.\n"));
                 }
             }
             1 => {
                 let controls = hyperx_app::profile_controls(&profile.device);
                 for control in &controls {
                     let value = if control.primary {
-                        format!("coupled pair {:?}", profile.primary_buttons)
-                    } else {
-                        profile.buttons.get(control.id).map_or_else(
-                            || "<not present / not read>".into(),
-                            |value| format!("{value:?}"),
+                        format!(
+                            "coupled pair: {}",
+                            profile
+                                .primary_buttons
+                                .map_or("<not present>", primary_layout)
                         )
+                    } else {
+                        profile
+                            .buttons
+                            .get(control.id)
+                            .map_or_else(|| "<not present / not read>".into(), format_binding)
                     };
                     text.push_str(&format!("{} ({}) -> {value}\n", control.id, control.name));
                 }
                 for (id, value) in &profile.buttons {
                     if !controls.iter().any(|control| control.id == id) {
-                        text.push_str(&format!("UNKNOWN CONTROL {id:?} -> {value:?}\n"));
+                        text.push_str(&format!(
+                            "UNKNOWN CONTROL {} -> {}\n",
+                            inline(id),
+                            format_binding(value)
+                        ));
                     }
                 }
                 text.push_str("\nPrimary buttons are one atomic Standard/Swapped layout.\nMacro references do not reveal hardware timelines.\n");
@@ -375,8 +396,10 @@ impl App {
                 }
                 for named in &profile.macros {
                     text.push_str(&format!(
-                        "Macro {:?}: {:?} | {}\n",
-                        named.source_id, named.name, named.definition.playback
+                        "Macro {}: {} | {}\n",
+                        inline(&named.source_id),
+                        inline(&named.name),
+                        playback(named.definition.playback)
                     ));
                     let mut elapsed = 0u64;
                     for (index, event) in named.definition.events.iter().enumerate() {
@@ -386,7 +409,11 @@ impl App {
                             | MacroEvent::MouseButtonDown { delay_ms, .. }
                             | MacroEvent::MouseButtonUp { delay_ms, .. } => *delay_ms,
                         };
-                        text.push_str(&format!("  {} @ {elapsed} ms: {event:?}\n", index + 1));
+                        text.push_str(&format!(
+                            "  {} @ {elapsed} ms: {}\n",
+                            index + 1,
+                            format_event(event)
+                        ));
                         elapsed += u64::from(delay);
                     }
                     text.push_str(&format!(
@@ -397,10 +424,10 @@ impl App {
                 for control in hyperx_app::profile_controls(&profile.device) {
                     if let Some(caps) = control.macros {
                         text.push_str(&format!(
-                            "{}: runtime {:?}; onboard {:?}; {} events; max delay {} ms\n",
+                            "{}: runtime {}; onboard {}; {} events; max delay {} ms\n",
                             control.id,
-                            caps.runtime_playback,
-                            caps.onboard_playback,
+                            modes(caps.runtime_playback),
+                            modes(caps.onboard_playback),
                             caps.max_events,
                             caps.max_delay_ms
                         ));
@@ -409,9 +436,12 @@ impl App {
             }
             3 => {
                 if let Some(lighting) = &profile.lighting {
-                    text.push_str(&format!("Mode: {:?}\n", lighting.mode));
+                    let mode = match lighting.mode {
+                        hyperx_core::SoftwareLightingMode::Solid => "Solid",
+                    };
+                    text.push_str(&format!("Mode: {mode}\n"));
                     for (zone, color) in &lighting.zones {
-                        text.push_str(&format!("{zone}: {color}\n"));
+                        text.push_str(&format!("{}: {color}\n", inline(zone)));
                     }
                 } else {
                     text.push_str("Lighting: <not present / current colors and effects unknown>\n");
@@ -419,17 +449,131 @@ impl App {
                 text.push_str("\nProfile lighting currently supports Solid with both wheel and logo.\nBlack means off ONLY when explicitly supplied.\nSoftware effects/rainbow are separate runtime commands, not inferred here.\nNo LED changes are sent from this offline editor.\n");
             }
             _ => {
-                text.push_str(&format!("Name: {:?}\nDevice target: {:?}\nPartial: {}\nSource: {:?}\nOpened/saved path: {:?}\n", profile.name, profile.device, profile.partial, profile.source, self.document.path()));
+                let source = profile.source.as_ref().map_or_else(
+                    || "<not present>".into(),
+                    |source| {
+                        format!(
+                            "{} (format version {})",
+                            inline(&source.format),
+                            source.format_version
+                        )
+                    },
+                );
+                let path = self.document.path().map_or_else(
+                    || "<not saved>".into(),
+                    |path| inline(&path.to_string_lossy()),
+                );
+                text.push_str(&format!("Name: {}\nDevice target: {}\nPartial: {}\nSource: {source}\nOpened/saved path: {path}\n", inline(&profile.name), inline(&profile.device), if profile.partial { "yes" } else { "no" }));
                 for assignment in &profile.unresolved_button_assignments {
                     text.push_str(&format!(
-                        "UNRESOLVED {:?}: macro source {:?}\n",
-                        assignment.source_id, assignment.macro_source_id
+                        "UNRESOLVED {}: macro source {}\n",
+                        inline(&assignment.source_id),
+                        assignment
+                            .macro_source_id
+                            .as_deref()
+                            .map_or_else(|| "<unknown>".into(), inline)
                     ));
                 }
                 text.push_str("\nUnresolved entries block apply; r resolves an explicit target/library macro.\nx deliberately omits one entry; no source ID is guessed into a physical target.\ns writes a NEW TOML file, never overwrites. Comments are not preserved.\nSave to mouse: UNAVAILABLE OFFLINE. No device discovered/opened.\n");
             }
         }
         text
+    }
+}
+
+fn inline(value: &str) -> String {
+    value.escape_debug().to_string()
+}
+
+fn primary_layout(layout: PrimaryButtonLayout) -> &'static str {
+    match layout {
+        PrimaryButtonLayout::Standard => "Standard",
+        PrimaryButtonLayout::Swapped => "Swapped",
+    }
+}
+
+fn playback(mode: MacroPlayback) -> &'static str {
+    match mode {
+        MacroPlayback::Once => "Play once",
+        MacroPlayback::ToggleRepeat => "Toggle repeat",
+        MacroPlayback::RepeatWhileHeld => "Hold to repeat",
+    }
+}
+
+fn modes(values: &[MacroPlayback]) -> String {
+    if values.is_empty() {
+        return "not implemented".into();
+    }
+    values
+        .iter()
+        .map(|mode| playback(*mode))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn format_binding(binding: &SoftwareButtonBinding) -> String {
+    match binding {
+        SoftwareButtonBinding::Mouse { action } => format!(
+            "Mouse: {}",
+            match action {
+                MouseFunction::LeftClick => "Left click",
+                MouseFunction::RightClick => "Right click",
+                MouseFunction::MiddleClick => "Middle click",
+                MouseFunction::Back => "Back",
+                MouseFunction::Forward => "Forward",
+                MouseFunction::TiltLeft => "Tilt left",
+                MouseFunction::TiltRight => "Tilt right",
+                MouseFunction::DpiToggle => "DPI toggle",
+                MouseFunction::ScrollUp => "Scroll up",
+                MouseFunction::ScrollDown => "Scroll down",
+            }
+        ),
+        SoftwareButtonBinding::Keyboard { key } => format!("Keyboard: {}", inline(key)),
+        SoftwareButtonBinding::Multimedia { action } => format!(
+            "Multimedia: {}",
+            match action {
+                MultimediaFunction::PlayPause => "Play / pause",
+                MultimediaFunction::Stop => "Stop",
+                MultimediaFunction::NextTrack => "Next track",
+                MultimediaFunction::PreviousTrack => "Previous track",
+                MultimediaFunction::MuteVolume => "Mute volume",
+                MultimediaFunction::VolumeUp => "Volume up",
+                MultimediaFunction::VolumeDown => "Volume down",
+            }
+        ),
+        SoftwareButtonBinding::WindowsShortcut { action } => format!(
+            "Windows shortcut: {}",
+            match action {
+                WindowsShortcut::CycleApps => "Cycle apps",
+                WindowsShortcut::SwitchApps => "Switch apps",
+                WindowsShortcut::Cut => "Cut",
+                WindowsShortcut::Copy => "Copy",
+                WindowsShortcut::Paste => "Paste",
+                WindowsShortcut::Undo => "Undo",
+            }
+        ),
+        SoftwareButtonBinding::Disabled {} => "Disabled".into(),
+        SoftwareButtonBinding::Macro { id } => format!(
+            "Macro reference: {} (timeline from file library)",
+            inline(id)
+        ),
+    }
+}
+
+fn format_event(event: &MacroEvent) -> String {
+    match event {
+        MacroEvent::KeyDown { key, delay_ms } => {
+            format!("Key down {}; then {delay_ms} ms", inline(key))
+        }
+        MacroEvent::KeyUp { key, delay_ms } => {
+            format!("Key up {}; then {delay_ms} ms", inline(key))
+        }
+        MacroEvent::MouseButtonDown { button, delay_ms } => {
+            format!("Mouse {} down; then {delay_ms} ms", inline(button))
+        }
+        MacroEvent::MouseButtonUp { button, delay_ms } => {
+            format!("Mouse {} up; then {delay_ms} ms", inline(button))
+        }
     }
 }
 

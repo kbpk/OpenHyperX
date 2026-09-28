@@ -28,6 +28,12 @@ small windows display a resize notice instead of panicking. `--view` selects
 performance, buttons, macros, lighting or profiles on startup and in `--render`;
 it cannot be combined with validation-only `--check`.
 
+Profile views use readable action/macro names and explicit `<not present>`,
+`<unknown>` or `<not saved>` labels instead of Rust `Some(...)`/enum debug text.
+Imported source IDs and names are displayed as escaped single-line values, so
+control characters cannot masquerade as another terminal row. Model limits are
+declared capabilities, never live measurements.
+
 ## Mouse and direct controls
 
 Mouse capture is enabled only while the interactive TUI runs, and is disabled

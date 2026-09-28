@@ -525,7 +525,7 @@ pub(crate) fn render_delete(
         horizontal: 1,
         vertical: 1,
     });
-    frame.render_widget(Paragraph::new(safe_text(&format!("Delete {:?} ({}) from the file?\nMouse settings remain untouched. Referenced definitions cannot be deleted.\n{}", original.name, original.source_id, error.unwrap_or("y confirms; n/Esc cancels.")))).wrap(Wrap { trim: false }), inner);
+    frame.render_widget(Paragraph::new(safe_text(&format!("Delete {} ({}) from the file?\nMouse settings remain untouched. Referenced definitions cannot be deleted.\n{}", original.name.escape_debug(), original.source_id.escape_debug(), error.unwrap_or("y confirms; n/Esc cancels.")))).wrap(Wrap { trim: false }), inner);
     buttons(
         frame,
         row(inner, inner.height.saturating_sub(1)),
