@@ -115,6 +115,23 @@ fn narrow_panels_keep_short_titles_and_visible_scroll_position() {
 }
 
 #[test]
+fn keyboard_stage_selection_scrolls_selected_dpi_into_compact_view() {
+    let mut app = app();
+    assert!(!screen(&mut app, 45, 12).contains("Stage 2:"));
+    app.handle_key(key(KeyCode::Char(']')));
+    app.handle_key(key(KeyCode::Char(']')));
+    let output = screen(&mut app, 45, 12);
+    assert!(output.contains("Stage 2:"), "{output}");
+    assert!(output.contains("row 7"), "{output}");
+    assert!(app
+        .hits
+        .iter()
+        .any(|hit| matches!(hit.action, crate::widgets::Action::Stage(2))));
+    app.handle_key(key(KeyCode::Char('[')));
+    assert!(screen(&mut app, 45, 12).contains("Stage 1:"));
+}
+
+#[test]
 fn empty_profiles_show_unknown_or_omitted_values_not_defaults() {
     let mut app = App::new(
         ProfileDocument::from_profile(

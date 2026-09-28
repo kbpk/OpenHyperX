@@ -184,9 +184,15 @@ impl App {
                         },
                 );
             }
-            KeyCode::Char('[') => self.selected_stage = self.selected_stage.saturating_sub(1),
+            KeyCode::Char('[') => {
+                self.selected_stage = self.selected_stage.saturating_sub(1);
+                self.scroll =
+                    (self.selected_stage.saturating_mul(3)).min(usize::from(u16::MAX)) as u16;
+            }
             KeyCode::Char(']') => {
-                self.selected_stage = (self.selected_stage + 1).min(count.saturating_sub(1))
+                self.selected_stage = (self.selected_stage + 1).min(count.saturating_sub(1));
+                self.scroll =
+                    (self.selected_stage.saturating_mul(3)).min(usize::from(u16::MAX)) as u16;
             }
             KeyCode::F(2) => self.action(Action::DpiInput(self.selected_stage)),
             KeyCode::F(3) => self.action(Action::ColorInput(self.selected_stage)),
@@ -460,7 +466,7 @@ impl App {
     }
     pub(crate) fn render_performance(&mut self, frame: &mut Frame, area: Rect) {
         let title = if area.width < 70 {
-            "Performance: ←/→ DPI · ↑/↓ scroll"
+            "Performance: [ ] stage · ←/→ DPI"
         } else {
             "Performance - click/drag; arrows: DPI step; F2 value; F3 color"
         };

@@ -30,6 +30,8 @@ hint remain visible. At smaller sizes the TUI shows a resize notice instead of
 panicking. Editors and file dialogs may require more room (see below). `--view` selects
 performance, buttons, macros, lighting or profiles on startup and in `--render`;
 it cannot be combined with validation-only `--check`.
+In Performance, `[` / `]` keeps the keyboard-selected DPI stage on screen even
+when the compact viewport shows only one stage at a time.
 
 Profile views use readable action/macro names and explicit `<not present>`,
 `<unknown>` or `<not saved>` labels instead of Rust `Some(...)`/enum debug text.
