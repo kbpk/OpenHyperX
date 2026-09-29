@@ -325,6 +325,23 @@ impl App {
                 true,
             ),
             KeyCode::F(4) => self.open_browser(Mode::SaveNew),
+            KeyCode::F(7) => {
+                if let Some(store) = &self.recovery {
+                    match crate::recovery_picker::RecoveryPicker::new(store) {
+                        Ok(picker) => {
+                            self.modal = Some(Modal::Recovery(Box::new(picker)));
+                            self.drag = None;
+                        }
+                        Err(error) => {
+                            self.status =
+                                format!("Cannot list offline recovery snapshots: {error:#}")
+                        }
+                    }
+                } else {
+                    self.status =
+                        "Interactive recovery requires an attached offline snapshot store.".into();
+                }
+            }
             KeyCode::F(6) => {
                 if !self.document.dirty() {
                     self.status = "No unsaved FILE changes to overwrite.".into();

@@ -1,4 +1,6 @@
 //! File-client controls. Paths are presentation data, never HID device paths.
+use std::path::Path;
+
 use crossterm::event::KeyCode;
 use ratatui::{
     layout::{Margin, Rect},
@@ -12,6 +14,7 @@ use crate::{
     app::App,
     editor::Editor,
     files::{FileBrowser, Mode, Prompt},
+    recovery_picker::{Confirmation as RecoveryConfirmation, RecoveryPicker},
     render::safe_text,
     widgets::{sub, Action, Hit},
 };
@@ -23,6 +26,153 @@ fn row(area: Rect, y: u16) -> Rect {
         area.width,
         u16::from(y < area.height),
     )
+}
+
+pub(crate) fn render_recovery(
+    frame: &mut Frame,
+    area: Rect,
+    picker: &RecoveryPicker,
+    current_dirty: bool,
+    active: Option<&Path>,
+    hits: &mut Vec<Hit>,
+) {
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Offline TUI recovery - no HID access"),
+        area,
+    );
+    let inner = area.inner(Margin {
+        horizontal: 1,
+        vertical: 1,
+    });
+    if inner.height < 4 {
+        text(
+            frame,
+            inner,
+            "Enlarge terminal for recovery actions; Esc closes.",
+        );
+        return;
+    }
+    if let Some(reason) = picker.confirmation {
+        if let Some(entry) = picker.entries.get(picker.selected) {
+            let action = match reason {
+                RecoveryConfirmation::Restore => "Restore this unsaved FILE draft?",
+                RecoveryConfirmation::Discard => "Permanently discard only this recovery snapshot?",
+            };
+            let explanation = match reason {
+                RecoveryConfirmation::Restore if current_dirty => {
+                    "Current draft stays recoverable. No FILE/USB write."
+                }
+                RecoveryConfirmation::Restore => {
+                    "Current clean view is replaced. No FILE/USB write."
+                }
+                RecoveryConfirmation::Discard => {
+                    "Permanent. Profile files and mouse are untouched."
+                }
+            };
+            frame.render_widget(
+                Paragraph::new(safe_text(&format!(
+                    "{action}\n{explanation}\n\nSnapshot: {}\nProfile: {}",
+                    entry.path.file_name().unwrap_or_default().to_string_lossy(),
+                    entry.profile.as_deref().unwrap_or("UNREADABLE")
+                )))
+                .wrap(Wrap { trim: false }),
+                Rect::new(
+                    inner.x,
+                    inner.y,
+                    inner.width,
+                    inner.height.saturating_sub(2),
+                ),
+            );
+            buttons(
+                frame,
+                row(inner, inner.height - 1),
+                &[
+                    ("[Yes y]", KeyCode::Char('y')),
+                    ("[Cancel n]", KeyCode::Char('n')),
+                ],
+                hits,
+            );
+        }
+        return;
+    }
+    text(
+        frame,
+        row(inner, 0),
+        "Select one snapshot. Restore and discard need confirmation.",
+    );
+    let visible = usize::from(inner.height.saturating_sub(5)).max(1);
+    let start = picker
+        .selected
+        .saturating_sub(visible / 2)
+        .min(picker.entries.len().saturating_sub(visible));
+    if picker.entries.is_empty() {
+        text(frame, row(inner, 1), "No older TUI snapshots.");
+    }
+    for (offset, entry) in picker.entries.iter().enumerate().skip(start).take(visible) {
+        let list_row = row(inner, 1 + (offset - start) as u16);
+        if list_row.height == 0 {
+            break;
+        }
+        let active_label = if active == Some(entry.path.as_path()) {
+            " [ACTIVE]"
+        } else {
+            ""
+        };
+        let label = format!(
+            "{} {}{} · {}",
+            if offset == picker.selected { '>' } else { ' ' },
+            entry.path.file_name().unwrap_or_default().to_string_lossy(),
+            active_label,
+            entry.profile.as_deref().unwrap_or("UNREADABLE")
+        );
+        frame.render_widget(
+            Paragraph::new(single_line(&label)).style(Style::default().fg(
+                if offset == picker.selected {
+                    Color::Yellow
+                } else if entry.error.is_some() {
+                    Color::Red
+                } else {
+                    Color::Gray
+                },
+            )),
+            list_row,
+        );
+        hits.push(Hit {
+            area: list_row,
+            action: Action::RecoveryEntry(offset),
+        });
+    }
+    if let Some(entry) = picker.entries.get(picker.selected) {
+        let detail = entry.error.as_deref().map_or_else(
+            || {
+                format!(
+                    "Original FILE: {}",
+                    entry.original_file.as_ref().map_or_else(
+                        || "none (unsaved profile)".into(),
+                        |path| path.display().to_string()
+                    )
+                )
+            },
+            |error| format!("UNREADABLE: {error}"),
+        );
+        text(frame, row(inner, inner.height - 3), &single_line(&detail));
+    }
+    if let Some(error) = &picker.error {
+        text(frame, row(inner, inner.height - 2), &single_line(error));
+    }
+    buttons(
+        frame,
+        row(inner, inner.height - 1),
+        &[
+            ("[Restore r]", KeyCode::Char('r')),
+            ("[Discard d]", KeyCode::Char('d')),
+            ("[F5 refresh]", KeyCode::F(5)),
+            ("[Esc]", KeyCode::Esc),
+        ],
+        hits,
+    );
 }
 fn text(frame: &mut Frame, area: Rect, value: &str) {
     frame.render_widget(Paragraph::new(safe_text(value)), area);
@@ -109,7 +259,7 @@ fn field(frame: &mut Frame, area: Rect, editor: &Editor, hits: &mut Vec<Hit>) {
 impl App {
     pub(crate) fn render_profiles(&mut self, frame: &mut Frame, area: Rect) {
         let title = if area.width < 70 {
-            "Profiles: F2-F6 actions · ↑/↓ scroll"
+            "Profiles: F2-F7 actions · ↑/↓ scroll"
         } else {
             "Profiles - FILE operations only"
         };
@@ -141,8 +291,9 @@ impl App {
             frame,
             row(inner, 2),
             &[
-                ("[Undo u / Ctrl+Z]", KeyCode::Char('u')),
-                ("[Redo U / Ctrl+Y]", KeyCode::Char('U')),
+                ("[Undo u]", KeyCode::Char('u')),
+                ("[Redo U]", KeyCode::Char('U')),
+                ("[Recovery F7]", KeyCode::F(7)),
             ],
             &mut self.hits,
         );

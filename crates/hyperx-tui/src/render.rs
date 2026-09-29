@@ -236,6 +236,14 @@ impl App {
                 Modal::Files(browser) => {
                     crate::profiles::render_browser(frame, area, browser, &mut self.hits)
                 }
+                Modal::Recovery(picker) => crate::profiles::render_recovery(
+                    frame,
+                    area,
+                    picker,
+                    self.document.dirty(),
+                    self.recovery.as_ref().and_then(|store| store.active_path()),
+                    &mut self.hits,
+                ),
                 Modal::Macro(editor) => crate::macro_view::render_editor(
                     frame,
                     area,
@@ -376,6 +384,7 @@ impl App {
                 modal,
                 Modal::Resolution(_)
                     | Modal::Files(_)
+                    | Modal::Recovery(_)
                     | Modal::Macro(_)
                     | Modal::MacroDelete { .. }
             ) {
@@ -397,6 +406,7 @@ impl App {
             let buttons = match modal {
                 Modal::Resolution(_)
                 | Modal::Files(_)
+                | Modal::Recovery(_)
                 | Modal::Macro(_)
                 | Modal::MacroDelete { .. } => {
                     unreachable!("specialized dialogs draw their own nested actions")

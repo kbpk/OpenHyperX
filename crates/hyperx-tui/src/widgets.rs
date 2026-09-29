@@ -25,6 +25,7 @@ pub enum Action {
     MacroRow(usize),
     MacroInputChoice(usize),
     FileEntry(usize),
+    RecoveryEntry(usize),
     ResolutionChoice(usize),
     Stage(usize),
     Slider(usize),
@@ -242,6 +243,11 @@ impl App {
                     browser.select(index);
                 }
             }
+            Action::RecoveryEntry(index) => {
+                if let Some(Modal::Recovery(picker)) = &mut self.modal {
+                    picker.select(index);
+                }
+            }
             Action::ResolutionChoice(index) => {
                 if let Some(Modal::Resolution(picker)) = &mut self.modal {
                     picker.select(index);
@@ -396,6 +402,7 @@ impl App {
                 Some(Modal::Binding(picker)) => picker.move_selection(if down { 3 } else { -3 }),
                 Some(Modal::Macro(editor)) => editor.move_selection(if down { 3 } else { -3 }),
                 Some(Modal::Files(browser)) => browser.move_selection(if down { 3 } else { -3 }),
+                Some(Modal::Recovery(picker)) => picker.move_selection(if down { 3 } else { -3 }),
                 Some(Modal::Resolution(picker)) => picker.move_selection(if down { 3 } else { -3 }),
                 Some(Modal::MacroDelete { .. }) => {}
                 Some(Modal::Confirm { .. } | Modal::Overwrite { .. }) => {}

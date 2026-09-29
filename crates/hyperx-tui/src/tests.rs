@@ -10,6 +10,7 @@ mod bindings;
 mod macros;
 mod mouse;
 mod profiles;
+mod recovery;
 mod resolution;
 
 fn app() -> App {

@@ -25,6 +25,7 @@ mod files;
 mod macro_view;
 mod macros;
 mod profiles;
+mod recovery_picker;
 mod render;
 mod resolution;
 mod resolution_view;
@@ -196,7 +197,7 @@ fn main() -> Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         bail!("interactive TUI needs a terminal; run in Windows Terminal or use --demo --render / --check for offline smoke tests");
     }
-    let mut recovery = recovery.map_or_else(store, Ok)?;
+    let recovery = recovery.map_or_else(store, Ok)?;
     if cli.recover.is_none() {
         let count = recovery.list()?.len();
         if count > 0 {
@@ -205,6 +206,7 @@ fn main() -> Result<()> {
             );
         }
     }
+    app.recovery = Some(recovery);
     // Ratatui's run wrapper restores raw mode/alternate screen on success,
     // returned errors and panic. Our additional paste mode has its own guard.
     ratatui::run(|terminal| -> Result<()> {
@@ -218,13 +220,13 @@ fn main() -> Result<()> {
         execute!(io::stdout(), EnableBracketedPaste, EnableMouseCapture)?;
         while !app.quit {
             terminal.draw(|frame| app.render(frame))?;
-            handle_event(&mut app, &mut recovery, event::read()?);
+            handle_event(&mut app, event::read()?);
         }
         Ok(())
     })
 }
 
-fn handle_event(app: &mut app::App, recovery: &mut DraftRecoveryStore, event: Event) {
+fn handle_event(app: &mut app::App, event: Event) {
     let before_profile = app.document.profile().clone();
     let before_path = app.document.path().map(std::path::Path::to_path_buf);
     let before_dirty = app.document.dirty();
@@ -239,10 +241,12 @@ fn handle_event(app: &mut app::App, recovery: &mut DraftRecoveryStore, event: Ev
         || app.document.path() != before_path.as_deref()
         || app.document.dirty() != before_dirty
     {
-        if let Err(error) = recovery.capture(&app.document) {
-            app.status = format!(
-                "RECOVERY SNAPSHOT FAILED: {error:#}. FILE draft is still in memory; save NEW now."
-            );
+        if let Some(recovery) = &mut app.recovery {
+            if let Err(error) = recovery.capture(&app.document) {
+                app.status = format!(
+                    "RECOVERY SNAPSHOT FAILED: {error:#}. FILE draft is still in memory; save NEW now."
+                );
+            }
         }
     }
 }
@@ -267,26 +271,25 @@ mod recovery_tests {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
-        let mut store = DraftRecoveryStore::new(&directory, RecoveryClient::Tui).unwrap();
+        let store = DraftRecoveryStore::new(&directory, RecoveryClient::Tui).unwrap();
         let profile = parse_profile(include_str!(
             "../../../examples/profiles/pulsefire-raid.toml"
         ))
         .unwrap();
         let mut app = app::App::new(ProfileDocument::from_profile(profile), true);
+        app.recovery = Some(store);
         handle_event(
             &mut app,
-            &mut store,
             Event::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)),
         );
         assert!(app.document.dirty());
-        assert_eq!(store.list().unwrap().len(), 1);
+        assert_eq!(app.recovery.as_ref().unwrap().list().unwrap().len(), 1);
         handle_event(
             &mut app,
-            &mut store,
             Event::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)),
         );
         assert!(!app.document.dirty());
-        assert!(store.list().unwrap().is_empty());
+        assert!(app.recovery.as_ref().unwrap().list().unwrap().is_empty());
         fs::remove_dir_all(directory).unwrap();
     }
 }

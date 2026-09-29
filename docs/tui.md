@@ -25,7 +25,12 @@ The interactive TUI automatically writes a private offline recovery snapshot
 after each accepted FILE draft edit. It preserves the original file baseline
 and exact bytes for the stale-file overwrite check. A normal Save NEW or
 confirmed FILE overwrite clears this session's snapshot. Recovery never reads
-or writes the mouse. To inspect and explicitly restore an older draft:
+or writes the mouse. In the interactive Profiles tab, **F7 / Recovery** lists
+TUI snapshots. Select one with arrows or the mouse, press **r** to restore or
+**d** to discard, then confirm with **y**. A broken snapshot is visible but
+cannot be restored; the current session's active snapshot cannot be discarded.
+If a dirty draft is replaced by a recovered one, its previous snapshot remains
+available. The command-line equivalents are:
 
 ```powershell
 hyperx-tui --list-recovery
@@ -325,6 +330,7 @@ invented and no settings are sent to the mouse.
 | F2 / F3 / F4 in Profiles | browse files / rename draft / copy draft to NEW file |
 | F5 in Profiles | open unresolved source/target/library selector |
 | F6 in Profiles | review recoverable overwrite of the opened FILE; `y` confirms |
+| F7 in Profiles | manage offline TUI recovery snapshots; explicit restore/discard confirmation |
 | u / Ctrl+Z, U / Ctrl+Y | undo / redo one complete FILE-draft edit; no disk or mouse write |
 | Type/paste, arrows/click, Enter in source selector | filter, preview, advance explicit choice |
 | Delete in source list | review provenance-only omission |

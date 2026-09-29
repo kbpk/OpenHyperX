@@ -1,8 +1,10 @@
 use std::path::Path;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use hyperx_app::{edit_section, section_toml, ProfileDocument, ProfileSection};
+use hyperx_app::{
+    edit_section, section_toml, DraftRecoveryStore, ProfileDocument, ProfileSection, RecoveryClient,
+};
 use serde::Deserialize;
 
 use crate::editor::Editor;
@@ -25,6 +27,7 @@ pub enum EditAction {
 pub enum Modal {
     Resolution(Box<crate::resolution::ResolutionPicker>),
     Files(Box<crate::files::FileBrowser>),
+    Recovery(Box<crate::recovery_picker::RecoveryPicker>),
     Macro(Box<crate::macros::MacroEditor>),
     MacroDelete {
         original: hyperx_core::NamedMacro,
@@ -65,6 +68,7 @@ pub struct App {
     pub selected_macro: usize,
     pub hits: Vec<crate::widgets::Hit>,
     pub drag: Option<(usize, ratatui::layout::Rect)>,
+    pub recovery: Option<DraftRecoveryStore>,
 }
 
 impl App {
@@ -81,6 +85,7 @@ impl App {
             selected_macro: 0,
             hits: Vec::new(),
             drag: None,
+            recovery: None,
             status: "OFFLINE: file edits only; no HID access. Save to mouse is unavailable.".into(),
         }
     }
@@ -140,6 +145,76 @@ impl App {
         };
         if let Some(mut modal) = self.modal.take() {
             match &mut modal {
+                Modal::Recovery(picker) => match picker.key(key) {
+                    crate::recovery_picker::Outcome::Close => return,
+                    crate::recovery_picker::Outcome::Refresh => {
+                        if let Some(store) = &self.recovery {
+                            if let Err(error) = picker.refresh(store) {
+                                picker.error =
+                                    Some(format!("Cannot refresh recovery list: {error:#}"));
+                            }
+                        }
+                    }
+                    crate::recovery_picker::Outcome::Restore(path) => {
+                        let replacement = (|| -> Result<_> {
+                            let store = self
+                                .recovery
+                                .as_mut()
+                                .context("offline recovery store is unavailable")?;
+                            if store.active_path() == Some(path.as_path()) {
+                                bail!("this snapshot is already the current FILE draft");
+                            }
+                            // An earlier autosnapshot may have failed. Never displace an
+                            // unsaved document until its complete current state is safe.
+                            let displaced_dirty = self.document.dirty();
+                            if displaced_dirty {
+                                store.capture(&self.document).context(
+                                    "current FILE draft could not be snapshotted; save NEW before restoring another draft",
+                                )?;
+                            }
+                            let mut next =
+                                DraftRecoveryStore::new(store.directory(), RecoveryClient::Tui)?;
+                            let document = next.adopt(&path)?;
+                            Ok((next, document, displaced_dirty))
+                        })();
+                        match replacement {
+                            Ok((next, document, displaced_dirty)) => {
+                                self.recovery = Some(next);
+                                self.adopt_document(document);
+                                self.status = if displaced_dirty {
+                                    "Restored an offline FILE draft; the displaced unsaved draft remains recoverable. Save NEW or confirm FILE overwrite. No HID access."
+                                } else {
+                                    "Restored an unsaved offline FILE draft. Save NEW or confirm FILE overwrite. No HID access."
+                                }.into();
+                                return;
+                            }
+                            Err(error) => {
+                                picker.error = Some(format!("Cannot restore snapshot: {error:#}"))
+                            }
+                        }
+                    }
+                    crate::recovery_picker::Outcome::Discard(path) => {
+                        if let Some(store) = &self.recovery {
+                            if store.active_path() == Some(path.as_path()) {
+                                picker.error = Some("Cannot discard this session's active unsaved FILE draft snapshot. Save or revert the draft first.".into());
+                            } else {
+                                match store.discard(&path) {
+                                    Ok(()) => {
+                                        self.status = "Discarded only the selected offline recovery snapshot. No profile or mouse state changed.".into();
+                                        if let Err(error) = picker.refresh(store) {
+                                            picker.error = Some(format!("Snapshot was discarded, but the list could not be refreshed: {error:#}"));
+                                        }
+                                    }
+                                    Err(error) => {
+                                        picker.error =
+                                            Some(format!("Cannot discard snapshot: {error:#}"))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    crate::recovery_picker::Outcome::Stay => {}
+                },
                 Modal::Resolution(picker) => match picker.key(key, self.document.profile()) {
                     crate::resolution::Outcome::Close => return,
                     crate::resolution::Outcome::Commit => {
