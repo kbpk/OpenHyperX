@@ -319,9 +319,29 @@ fn tiny_resize_and_all_modal_types_render_without_panics() {
         screen(&mut app, width, height);
         app.handle_key(key(KeyCode::Char('e')));
         screen(&mut app, width, height);
+        if (width, height) == (45, 12) {
+            assert!(app
+                .hits
+                .iter()
+                .any(|hit| matches!(hit.action, crate::widgets::Action::EditorCursor { .. })));
+            assert!(app
+                .hits
+                .iter()
+                .any(|hit| matches!(hit.action, crate::widgets::Action::AcceptEditor)));
+            assert!(app
+                .hits
+                .iter()
+                .any(|hit| matches!(hit.action, crate::widgets::Action::Key(KeyCode::Esc))));
+        }
         app.handle_key(key(KeyCode::Esc));
         app.modal = Some(Modal::Confirm { open: false });
         screen(&mut app, width, height);
+        if (width, height) == (45, 12) {
+            assert!(app
+                .hits
+                .iter()
+                .any(|hit| matches!(hit.action, crate::widgets::Action::Key(KeyCode::Char('y')))));
+        }
         app.modal = None;
         app.handle_key(key(KeyCode::Char('d')));
         screen(&mut app, width, height);

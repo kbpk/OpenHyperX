@@ -206,7 +206,18 @@ fn small_and_resized_binding_modals_never_leak_table_hits_or_panic() {
     let mut app = app();
     select_control(&mut app, "button4");
     for (width, height) in [(120, 40), (45, 12), (45, 18), (60, 30), (20, 8)] {
-        screen(&mut app, width, height);
+        let output = screen(&mut app, width, height);
+        if (width, height) == (45, 12) {
+            assert!(!output.contains("Enlarge terminal"));
+            assert!(app
+                .hits
+                .iter()
+                .any(|hit| matches!(hit.action, Action::BindingChoice(_))));
+            assert!(app
+                .hits
+                .iter()
+                .any(|hit| matches!(hit.action, Action::AcceptEditor)));
+        }
         assert!(!app
             .hits
             .iter()
@@ -219,4 +230,27 @@ fn small_and_resized_binding_modals_never_leak_table_hits_or_panic() {
     }
     app.clear_mouse_layout();
     assert!(app.hits.is_empty());
+}
+
+#[test]
+fn compact_binding_category_mouse_target_changes_only_the_local_preview() {
+    let mut app = app();
+    let original = app.document.profile().clone();
+    select_control(&mut app, "button4");
+    let initial_screen = screen(&mut app, 45, 12);
+    let hit = app
+        .hits
+        .iter()
+        .find(|hit| matches!(hit.action, Action::BindingCategory(1)))
+        .unwrap()
+        .clone();
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: hit.area.x,
+        row: hit.area.y,
+        modifiers: KeyModifiers::NONE,
+    });
+    assert!(matches!(&app.modal, Some(Modal::Binding(_))));
+    assert_ne!(screen(&mut app, 45, 12), initial_screen);
+    assert_eq!(app.document.profile(), &original);
 }

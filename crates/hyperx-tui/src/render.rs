@@ -214,9 +214,19 @@ impl App {
         if let Some(modal) = &self.modal {
             self.hits.clear();
             self.drag = None;
-            let area = frame.area().inner(Margin {
-                horizontal: 2,
-                vertical: 2,
+            let area = frame.area().inner(if compact_height {
+                // A 45x12 terminal has enough room for a 43x10 bordered
+                // dialog if it uses the whole viewport. The previous outer
+                // padding hid every complex dialog's controls at this size.
+                Margin {
+                    horizontal: 0,
+                    vertical: 0,
+                }
+            } else {
+                Margin {
+                    horizontal: 2,
+                    vertical: 2,
+                }
             });
             frame.render_widget(Clear, area);
             match modal {

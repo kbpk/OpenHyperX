@@ -119,6 +119,13 @@ fn source_target_and_macro_are_explicit_previews_until_final_file_confirmation()
     assert_eq!(app.document.profile(), &before);
     let output = screen(&mut app, 120, 40);
     assert!(output.contains("Chosen library ID: ab") && output.contains("Target: button5"));
+    assert!(screen(&mut app, 45, 12).contains("Confirm resolution"));
+    for code in ['y', 'n'] {
+        assert!(app
+            .hits
+            .iter()
+            .any(|hit| matches!(hit.action, Action::Key(KeyCode::Char(value)) if value == code)));
+    }
     app.handle_key(key(KeyCode::Enter));
     assert_eq!(app.document.profile(), &before);
     app.handle_key(key(KeyCode::Char('y')));
@@ -388,8 +395,17 @@ fn small_viewports_unicode_search_mouse_choices_and_release_events_only_preview(
         for hit in &app.hits {
             assert!(hit.area.right() <= width && hit.area.bottom() <= height);
         }
-        if height < 16 {
+        if width < 45 || height < 12 {
             assert!(app.hits.is_empty());
+        } else if (width, height) == (45, 12) {
+            assert!(app
+                .hits
+                .iter()
+                .any(|hit| matches!(hit.action, Action::ResolutionChoice(26))));
+            assert!(app
+                .hits
+                .iter()
+                .any(|hit| matches!(hit.action, Action::Key(KeyCode::Enter))));
         }
         assert!(!app
             .hits

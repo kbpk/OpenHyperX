@@ -365,7 +365,34 @@ fn small_windows_nested_prompts_and_huge_timelines_keep_hits_in_bounds_and_prese
             app.handle_key(key(code));
         }
         for (width, height) in [(120, 40), (45, 12), (45, 18), (60, 30), (20, 8)] {
-            screen(&mut app, width, height);
+            let output = screen(&mut app, width, height);
+            if code == KeyCode::Null && (width, height) == (45, 12) {
+                assert!(!output.contains("Enlarge terminal"));
+                assert!(
+                    output.contains("65535ms"),
+                    "compact row must retain its delay"
+                );
+                assert!(app
+                    .hits
+                    .iter()
+                    .any(|hit| matches!(hit.action, Action::MacroRow(499))));
+                assert!(app
+                    .hits
+                    .iter()
+                    .any(|hit| matches!(hit.action, Action::AcceptEditor)));
+                for function in [2, 3, 4, 5, 6, 7, 8, 9] {
+                    assert!(app.hits.iter().any(|hit| matches!(hit.action, Action::Key(KeyCode::F(value)) if value == function)));
+                }
+            } else if code != KeyCode::Null && (width, height) == (45, 12) {
+                assert!(app
+                    .hits
+                    .iter()
+                    .any(|hit| matches!(hit.action, Action::Key(KeyCode::Enter))));
+                assert!(app
+                    .hits
+                    .iter()
+                    .any(|hit| matches!(hit.action, Action::Key(KeyCode::Esc))));
+            }
             assert!(app
                 .hits
                 .iter()
@@ -384,6 +411,29 @@ fn small_windows_nested_prompts_and_huge_timelines_keep_hits_in_bounds_and_prese
     assert_eq!(app.document.profile(), &before);
     app.handle_key(key(KeyCode::Esc));
     assert!(app.modal.is_none());
+}
+
+#[test]
+fn compact_timeline_mouse_action_edits_only_the_local_macro_draft() {
+    let mut app = app();
+    let before = app.document.profile().clone();
+    open(&mut app, false);
+    let playback = editor(&app).draft.definition.playback;
+    screen(&mut app, 45, 12);
+    let hit = app
+        .hits
+        .iter()
+        .find(|hit| matches!(hit.action, Action::Key(KeyCode::F(3))))
+        .unwrap()
+        .clone();
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: hit.area.x,
+        row: hit.area.y,
+        modifiers: KeyModifiers::NONE,
+    });
+    assert_ne!(editor(&app).draft.definition.playback, playback);
+    assert_eq!(app.document.profile(), &before);
 }
 
 #[test]

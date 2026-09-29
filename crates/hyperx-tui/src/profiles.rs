@@ -184,7 +184,7 @@ pub(crate) fn render_browser(
         text(
             frame,
             inner,
-            "Enlarge terminal to at least 45x15. Esc cancels the field/dialog. No HID access.",
+            "Enlarge terminal to at least 45x12. Esc cancels the field/dialog. No HID access.",
         );
         return;
     }

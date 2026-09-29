@@ -48,8 +48,9 @@ DRAFT settings, not live state. No arguments create an empty partial target
 profile with no DPI/polling/binding/lighting defaults. Suggested size is 100x30.
 The main views adapt down to 45x12: short tab/panel labels, a one-line header,
 all global action buttons, and a bottom-border `row N` or `macro N/M` position
-hint remain visible. At smaller sizes the TUI shows a resize notice instead of
-panicking. Editors and file dialogs may require more room (see below). `--view` selects
+hint remain visible. Complex dialogs use the full terminal at 45x12, with
+scrollable lists and compact macro controls. At smaller sizes the TUI shows a
+resize notice instead of panicking. `--view` selects
 performance, buttons, macros, lighting or profiles on startup and in `--render`;
 it cannot be combined with validation-only `--check`.
 In Performance, `[` / `]` keeps the keyboard-selected DPI stage on screen even
@@ -163,8 +164,10 @@ a changed, referenced definition requires confirmation listing affected
 references; cancellation retains the local draft. Esc closes an unchanged
 macro or asks before discarding a changed/new draft. Field cancellation does
 not discard the surrounding timeline. Identity is immutable; stale or duplicate
-source definitions cannot be silently replaced. The editor needs at least
-45x18 cells; smaller windows keep the draft and show a resize notice.
+source definitions cannot be silently replaced. The editor works at 45x12
+with a compact timeline; smaller windows keep the draft and show a resize
+notice. F9 keeps the full capability details available when the compact
+timeline omits the two inline limit rows.
 
 Library editing deliberately allows empty, unbalanced or unsupported drafts,
 subject to file size/name checks. File delays are unsigned integers 0–65535 ms;
@@ -232,7 +235,7 @@ creates exclusively in the selected directory. Use one `.toml` filename, not
 a path; directory separators, drive/stream syntax and control characters are
 rejected. A destination that already exists, even if created after browsing,
 is never overwritten. A failed save keeps the field, draft and old baseline.
-Esc cancels a field first, then the browser. The browser needs at least 45x15
+Esc cancels a field first, then the browser. The browser needs at least 45x12
 cells; shrinking keeps its state and blocks hidden mouse targets.
 
 Opening a new file when the current document is dirty asks for consent only
@@ -278,7 +281,7 @@ mouse. Duplicate source IDs cannot be resolved or omitted by selecting their
 row number; inspect the advanced file editor instead. `n` / Esc returns from
 a confirmation, and Esc steps back through the chooser until closing it. No
 preview changes the file document. Use `s` / Copy NEW afterward to save a new
-file. Minimum chooser size is 45x16; resize preserves selection and isolates
+file. Minimum chooser size is 45x12; resize preserves selection and isolates
 mouse targets. Arrows/Page keys and the wheel scroll reports and choices.
 
 To practice without a mouse, open the explicitly **synthetic** example (not an

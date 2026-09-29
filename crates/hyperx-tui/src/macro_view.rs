@@ -222,10 +222,11 @@ pub(crate) fn render_editor(
         horizontal: 1,
         vertical: 1,
     });
-    if inner.height < 12 {
-        text(frame, inner, "Enlarge terminal to edit a timeline (45x18 minimum).\nCtrl+S updates file; Esc then y discards, n keeps.\nNo mouse settings are changed.");
+    if inner.height < 10 {
+        text(frame, inner, "Enlarge terminal to edit a timeline (45x12 minimum).\nCtrl+S updates file; Esc then y discards, n keeps.\nNo mouse settings are changed.");
         return;
     }
+    let compact = inner.height < 12;
     if let Some(prompt) = &editor.prompt {
         match prompt {
             Prompt::Info {
@@ -368,18 +369,20 @@ pub(crate) fn render_editor(
             }
         ),
     );
-    text(
-        frame,
-        row(inner, 1),
-        &format!(
-            "ID {} (fixed) | {} file references",
-            editor.draft.source_id,
-            macro_references(profile, &editor.draft.source_id).len()
-        ),
-    );
+    if !compact {
+        text(
+            frame,
+            row(inner, 1),
+            &format!(
+                "ID {} (fixed) | {} file references",
+                editor.draft.source_id,
+                macro_references(profile, &editor.draft.source_id).len()
+            ),
+        );
+    }
     buttons(
         frame,
-        row(inner, 2),
+        row(inner, if compact { 1 } else { 2 }),
         &[
             ("[Name F2]", KeyCode::F(2)),
             ("[Playback F3]", KeyCode::F(3)),
@@ -389,7 +392,7 @@ pub(crate) fn render_editor(
     );
     buttons(
         frame,
-        row(inner, 3),
+        row(inner, if compact { 2 } else { 3 }),
         &[
             ("[Type F4]", KeyCode::F(4)),
             ("[Input F5]", KeyCode::F(5)),
@@ -399,7 +402,7 @@ pub(crate) fn render_editor(
     );
     buttons(
         frame,
-        row(inner, 4),
+        row(inner, if compact { 3 } else { 4 }),
         &[
             ("[Add]", KeyCode::Insert),
             ("[Remove]", KeyCode::Delete),
@@ -410,10 +413,14 @@ pub(crate) fn render_editor(
     );
     text(
         frame,
-        row(inner, 5),
-        "#   Transition   Named input                   Delay AFTER event",
+        row(inner, if compact { 4 } else { 5 }),
+        if compact {
+            "# Transition  Named input   Delay AFTER"
+        } else {
+            "#   Transition   Named input                   Delay AFTER event"
+        },
     );
-    let height = usize::from(inner.height.saturating_sub(11));
+    let height = usize::from(inner.height.saturating_sub(if compact { 8 } else { 11 }));
     let start = editor.selected.saturating_sub(height.saturating_sub(1));
     for (index, event) in editor
         .draft
@@ -425,11 +432,30 @@ pub(crate) fn render_editor(
         .take(height)
     {
         let (kind, input, delay) = event_parts(event);
-        let y = 6 + (index - start) as u16;
-        button(
-            frame,
-            row(inner, y),
-            &format!(
+        let y = if compact { 5 } else { 6 } + (index - start) as u16;
+        let label = if compact {
+            let prefix = format!("{:>2} {kind} ", index + 1);
+            let suffix = format!(" {delay}ms");
+            let available = usize::from(inner.width)
+                .saturating_sub(Line::raw(&prefix).width() + Line::raw(&suffix).width());
+            let input = if input.is_empty() {
+                "<choose explicitly>"
+            } else {
+                input
+            };
+            let mut short_input = String::new();
+            let mut used = 0;
+            for character in safe_text(input).chars().take(128) {
+                let width = Line::raw(character.to_string()).width();
+                if used + width > available {
+                    break;
+                }
+                short_input.push(character);
+                used += width;
+            }
+            format!("{prefix}{short_input}{suffix}")
+        } else {
+            format!(
                 "{:>2}  {kind:<12} {:<25} {delay} ms",
                 index + 1,
                 if input.is_empty() {
@@ -437,7 +463,12 @@ pub(crate) fn render_editor(
                 } else {
                     input
                 }
-            ),
+            )
+        };
+        button(
+            frame,
+            row(inner, y),
+            &label,
             Action::MacroRow(index),
             hits,
             index == editor.selected,
@@ -446,37 +477,39 @@ pub(crate) fn render_editor(
     if editor.draft.definition.events.is_empty() {
         text(
             frame,
-            row(inner, 6),
+            row(inner, if compact { 5 } else { 6 }),
             "Empty timeline draft. Add creates an explicit down/up transition.",
         );
     }
-    let bottom = inner.height - 5;
-    let mut limits = Vec::new();
-    for control in profile_controls(&profile.device) {
-        if let Some(caps) = control.macros {
-            let modes = |values: &[hyperx_core::MacroPlayback]| {
-                values
-                    .iter()
-                    .map(|mode| match mode {
-                        hyperx_core::MacroPlayback::Once => "Once",
-                        hyperx_core::MacroPlayback::ToggleRepeat => "Toggle",
-                        hyperx_core::MacroPlayback::RepeatWhileHeld => "Hold",
-                    })
-                    .collect::<Vec<_>>()
-                    .join("/")
-            };
-            limits.push(format!(
-                "{} runtime {}; onboard {}; {} events / {} ms (encoder limits, F9 details)",
-                control.name,
-                modes(caps.runtime_playback),
-                modes(caps.onboard_playback),
-                caps.max_events,
-                caps.max_delay_ms,
-            ));
+    if !compact {
+        let bottom = inner.height - 5;
+        let mut limits = Vec::new();
+        for control in profile_controls(&profile.device) {
+            if let Some(caps) = control.macros {
+                let modes = |values: &[hyperx_core::MacroPlayback]| {
+                    values
+                        .iter()
+                        .map(|mode| match mode {
+                            hyperx_core::MacroPlayback::Once => "Once",
+                            hyperx_core::MacroPlayback::ToggleRepeat => "Toggle",
+                            hyperx_core::MacroPlayback::RepeatWhileHeld => "Hold",
+                        })
+                        .collect::<Vec<_>>()
+                        .join("/")
+                };
+                limits.push(format!(
+                    "{} runtime {}; onboard {}; {} events / {} ms (encoder limits, F9 details)",
+                    control.name,
+                    modes(caps.runtime_playback),
+                    modes(caps.onboard_playback),
+                    caps.max_events,
+                    caps.max_delay_ms,
+                ));
+            }
         }
-    }
-    for (index, limit) in limits.iter().take(2).enumerate() {
-        text(frame, row(inner, bottom + index as u16), limit);
+        for (index, limit) in limits.iter().take(2).enumerate() {
+            text(frame, row(inner, bottom + index as u16), limit);
+        }
     }
     text(
         frame,

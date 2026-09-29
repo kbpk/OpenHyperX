@@ -89,7 +89,7 @@ pub(crate) fn render(
         vertical: 1,
     });
     if inner.height < 10 {
-        frame.render_widget(Paragraph::new("Enlarge terminal to 45x16. Esc returns/back, then closes. No profile edits or HID access."), inner);
+        frame.render_widget(Paragraph::new("Enlarge terminal to 45x12. Esc returns/back, then closes. No profile edits or HID access."), inner);
         return;
     }
     if let Some(report) = &picker.info {

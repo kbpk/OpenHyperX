@@ -410,13 +410,36 @@ fn bounded_listing_and_small_resizes_keep_paths_and_mouse_actions_isolated() {
                 Action::Key(_) | Action::FileEntry(_) | Action::EditorCursor { .. }
             ));
         }
-        if height < 15 {
+        if width < 45 || height < 12 {
             assert!(app.hits.is_empty());
+        } else if (width, height) == (45, 12) {
+            assert!(app
+                .hits
+                .iter()
+                .any(|hit| matches!(hit.action, Action::FileEntry(11))));
+            assert!(app
+                .hits
+                .iter()
+                .any(|hit| matches!(hit.action, Action::Key(KeyCode::Enter))));
         }
     }
     app.handle_key(key(KeyCode::Char('p')));
     for (width, height) in [(45, 12), (45, 15), (120, 40)] {
         screen(&mut app, width, height);
+        if (width, height) == (45, 12) {
+            assert!(app
+                .hits
+                .iter()
+                .any(|hit| matches!(hit.action, Action::EditorCursor { .. })));
+            assert!(app
+                .hits
+                .iter()
+                .any(|hit| matches!(hit.action, Action::Key(KeyCode::Enter))));
+            assert!(app
+                .hits
+                .iter()
+                .any(|hit| matches!(hit.action, Action::Key(KeyCode::Esc))));
+        }
         assert!(!app
             .hits
             .iter()
