@@ -56,10 +56,10 @@ impl View {
 #[command(version, about = "OpenHyperX offline profile editor; never opens HID")]
 struct Cli {
     /// Open an existing OpenHyperX TOML profile, not a live device.
-    #[arg(conflicts_with_all = ["demo", "recover", "list_recovery"])]
+    #[arg(conflicts_with_all = ["demo", "recover", "list_recovery", "discard_recovery"])]
     file: Option<PathBuf>,
     /// Load example settings, clearly labeled as demo rather than device state.
-    #[arg(long, conflicts_with_all = ["recover", "list_recovery"])]
+    #[arg(long, conflicts_with_all = ["recover", "list_recovery", "discard_recovery"])]
     demo: bool,
     /// Restore exactly this previously listed TUI draft snapshot; no device access.
     #[arg(long, conflicts_with = "list_recovery")]
@@ -67,6 +67,12 @@ struct Cli {
     /// List TUI crash-recovery snapshots without restoring or deleting them.
     #[arg(long, conflicts_with_all = ["render", "check", "view"])]
     list_recovery: bool,
+    /// Permanently remove one explicitly listed TUI snapshot, never a profile or mouse state.
+    #[arg(long, conflicts_with_all = ["recover", "list_recovery", "render", "check", "view"])]
+    discard_recovery: Option<PathBuf>,
+    /// Required confirmation for --discard-recovery.
+    #[arg(long, requires = "discard_recovery")]
+    confirm_discard_recovery: bool,
     /// Private directory for offline draft snapshots (default: user app-state directory).
     #[arg(long)]
     recovery_dir: Option<PathBuf>,
@@ -95,11 +101,12 @@ fn main() -> Result<()> {
             .unwrap_or_else(DraftRecoveryStore::default_directory)?;
         DraftRecoveryStore::new(&directory, RecoveryClient::Tui)
     };
-    let mut recovery = if cli.list_recovery || cli.recover.is_some() {
-        Some(store()?)
-    } else {
-        None
-    };
+    let mut recovery =
+        if cli.list_recovery || cli.recover.is_some() || cli.discard_recovery.is_some() {
+            Some(store()?)
+        } else {
+            None
+        };
     if cli.list_recovery {
         let recovery = recovery.as_ref().expect("created for listing");
         let paths = recovery.list()?;
@@ -118,6 +125,20 @@ fn main() -> Result<()> {
         if paths.is_empty() {
             println!("No TUI recovery snapshots.");
         }
+        return Ok(());
+    }
+    if let Some(path) = &cli.discard_recovery {
+        if !cli.confirm_discard_recovery {
+            bail!("--discard-recovery requires --confirm-discard-recovery; this permanently removes only that offline snapshot");
+        }
+        recovery
+            .as_ref()
+            .expect("created for discard")
+            .discard(path)?;
+        println!(
+            "Discarded only TUI recovery snapshot {:?}; no profile or HID device was opened.",
+            path
+        );
         return Ok(());
     }
     let document = if let Some(path) = &cli.recover {

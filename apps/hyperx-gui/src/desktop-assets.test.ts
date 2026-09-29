@@ -49,6 +49,7 @@ describe("offline desktop IPC capability", () => {
       "gui_undo_file_edit",
       "gui_redo_file_edit",
       "gui_restore_recovery",
+      "gui_discard_recovery",
     ]) {
       expect(manifest).toContain(`"${command}"`);
       expect(capability.permissions).toContain(

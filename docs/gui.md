@@ -76,7 +76,11 @@ platform app-state directory elsewhere). A new complete snapshot is installed
 before the previous one is retired. On restart, older snapshots appear in a
 recovery notice with their profile names; **Restore offline draft** is available
 only while the current document is clean and no macro timeline is pending.
-Restoration preserves the original FILE baseline, so a later overwrite still
+Each listed snapshot also has a separate **Discard recovery snapshot** action
+with a confirmation dialog; the backend refuses to delete the current
+session's active snapshot or a path outside its private directory. Discard is
+permanent and affects no ordinary profile or device. Restoration preserves the
+original FILE baseline, so a later overwrite still
 rejects files changed on disk. Save NEW or a confirmed FILE overwrite retires
 the current snapshot. Corrupt snapshots remain visible and are not silently
 deleted. This is not a device backup, an onboard save or a USB operation.
@@ -312,7 +316,8 @@ Sources: [Rust IPC](https://v2.tauri.app/develop/calling-rust/),
 - [x] Deliberate recoverable overwrite of an opened FILE with a separate review.
 - [x] Bounded in-session undo/redo for complete FILE drafts.
 - [x] Recover accepted FILE-document edits after restart through an explicit offline choice.
-- [ ] Recover uncommitted input fields and local macro timelines; manage/discard old snapshots in the GUI.
+- [x] Manage and explicitly discard old GUI recovery snapshots without granting arbitrary filesystem access.
+- [ ] Recover uncommitted input fields and local macro timelines.
 - [ ] Connected app facade **only after** usable hardware baseline/readback is restored.
 - [ ] Separate Preview, Apply and confirmed Save to mouse; no reports in React.
 - [ ] Installer, signing and releases after native behavior is validated.

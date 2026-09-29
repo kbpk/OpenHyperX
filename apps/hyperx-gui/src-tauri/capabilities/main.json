@@ -14,6 +14,7 @@
     "allow-gui-overwrite-profile",
     "allow-gui-undo-file-edit",
     "allow-gui-redo-file-edit",
-    "allow-gui-restore-recovery"
+    "allow-gui-restore-recovery",
+    "allow-gui-discard-recovery"
   ]
 }

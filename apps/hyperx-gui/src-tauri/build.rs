@@ -12,6 +12,7 @@ fn main() {
             "gui_undo_file_edit",
             "gui_redo_file_edit",
             "gui_restore_recovery",
+            "gui_discard_recovery",
         ]),
     ))
     .expect("Tauri configuration/permissions build failed");

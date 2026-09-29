@@ -61,6 +61,14 @@ function fakeBackend(initial = structuredClone(fixture) as Snapshot) {
           pending_recovery: [],
         };
       }
+      if (command === "gui_discard_recovery") {
+        current = {
+          ...current,
+          pending_recovery: current.pending_recovery.filter(
+            (candidate) => candidate.token !== args?.token,
+          ),
+        };
+      }
       void args;
       return current;
     },
@@ -107,6 +115,46 @@ describe("offline profile UI", () => {
       await screen.findByText(/Recovered offline FILE draft/),
     ).toBeTruthy();
     expect(screen.getByText("RECOVERED DRAFT")).toBeTruthy();
+  });
+
+  it("requires a separate confirmation before permanently discarding an old snapshot", async () => {
+    const initial = structuredClone(fixture) as Snapshot;
+    initial.pending_recovery = [
+      {
+        token: "draft-gui-old.toml",
+        profile_name: "Old draft",
+        original_file: null,
+        error: null,
+      },
+    ];
+    const backend = fakeBackend(initial);
+    render(<App backend={backend} />);
+    await screen.findByText("Old draft");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Discard recovery snapshot" }),
+    );
+    expect(backend.request).not.toHaveBeenCalledWith(
+      "gui_discard_recovery",
+      expect.anything(),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Keep snapshot" }),
+    );
+    expect(screen.getByText("Old draft")).toBeTruthy();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Discard recovery snapshot" }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Discard snapshot permanently" }),
+    );
+    await waitFor(() =>
+      expect(backend.request).toHaveBeenCalledWith("gui_discard_recovery", {
+        expectedRevision: 0,
+        token: "draft-gui-old.toml",
+        confirmed: true,
+      }),
+    );
+    expect(screen.queryByText("Old draft")).toBeNull();
   });
 
   it("exposes explicit imported-assignment resolution in Profiles through typed IPC", async () => {

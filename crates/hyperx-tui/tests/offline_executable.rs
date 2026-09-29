@@ -229,5 +229,23 @@ fn actual_executable_lists_and_renders_an_explicit_recovered_file_draft() {
     ])
     .status
     .success());
+    assert!(!cli(&[
+        "--discard-recovery",
+        snapshot.to_str().unwrap(),
+        "--recovery-dir",
+        directory.to_str().unwrap(),
+    ])
+    .status
+    .success());
+    assert!(snapshot.exists());
+    let discarded = cli(&[
+        "--discard-recovery",
+        snapshot.to_str().unwrap(),
+        "--confirm-discard-recovery",
+        "--recovery-dir",
+        directory.to_str().unwrap(),
+    ]);
+    assert!(discarded.status.success(), "{discarded:?}");
+    assert!(!snapshot.exists());
     fs::remove_dir_all(root).unwrap();
 }

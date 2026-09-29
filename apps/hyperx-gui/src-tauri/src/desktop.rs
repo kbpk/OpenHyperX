@@ -215,11 +215,7 @@ fn gui_restore_recovery(
     restore_recovery(&state, expected_revision, &token)
 }
 
-fn restore_recovery(
-    state: &Managed,
-    expected_revision: u64,
-    token: &str,
-) -> Result<Snapshot, String> {
+fn checked_recovery_token(token: &str) -> Result<(), String> {
     if token.is_empty()
         || token.contains('/')
         || token.contains('\\')
@@ -228,6 +224,15 @@ fn restore_recovery(
     {
         return Err("invalid recovery token".into());
     }
+    Ok(())
+}
+
+fn restore_recovery(
+    state: &Managed,
+    expected_revision: u64,
+    token: &str,
+) -> Result<Snapshot, String> {
+    checked_recovery_token(token)?;
     with_snapshot(state, |session| {
         session.check_discard(expected_revision, false)?;
         let mut recovery = state
@@ -243,6 +248,44 @@ fn restore_recovery(
     })
 }
 
+#[tauri::command]
+fn gui_discard_recovery(
+    state: State<'_, Managed>,
+    expected_revision: u64,
+    token: String,
+    confirmed: bool,
+) -> Result<Snapshot, String> {
+    discard_recovery(&state, expected_revision, &token, confirmed)
+}
+
+fn discard_recovery(
+    state: &Managed,
+    expected_revision: u64,
+    token: &str,
+    confirmed: bool,
+) -> Result<Snapshot, String> {
+    checked_recovery_token(token)?;
+    if !confirmed {
+        return Err("explicit confirmation is required to discard a recovery snapshot".into());
+    }
+    with_snapshot(state, |session| {
+        session.check_revision(expected_revision)?;
+        let recovery = state
+            .recovery
+            .lock()
+            .map_err(|_| anyhow::anyhow!("draft recovery lock is unavailable"))?;
+        let store = recovery
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("draft recovery storage is unavailable"))?;
+        let path = store.directory().join(token);
+        if store.active_path() == Some(path.as_path()) {
+            anyhow::bail!("cannot discard the current session's active recovery snapshot");
+        }
+        store.discard(&path)?;
+        Ok(session.snapshot())
+    })
+}
+
 #[cfg(test)]
 mod recovery_tests {
     use std::{
@@ -255,7 +298,7 @@ mod recovery_tests {
 
     use hyperx_app::{parse_profile, DraftRecoveryStore, ProfileDocument, RecoveryClient};
 
-    use super::{restore_recovery, with_snapshot, Managed};
+    use super::{discard_recovery, restore_recovery, with_snapshot, Managed};
     use crate::{Origin, Session};
 
     #[test]
@@ -278,6 +321,9 @@ mod recovery_tests {
         document.replace(edited);
         let old_snapshot = producer.capture(&document).unwrap().unwrap();
         drop(producer);
+        let mut disposable = DraftRecoveryStore::new(&directory, RecoveryClient::Gui).unwrap();
+        let disposable_snapshot = disposable.capture(&document).unwrap().unwrap();
+        drop(disposable);
         let managed = Managed {
             session: Mutex::new(Session::empty()),
             recovery: Mutex::new(Some(
@@ -286,19 +332,46 @@ mod recovery_tests {
             close_pending: AtomicBool::new(false),
         };
         let initial = with_snapshot(&managed, |session| Ok(session.snapshot())).unwrap();
-        assert_eq!(initial.pending_recovery.len(), 1);
-        let token = initial.pending_recovery[0].token.clone();
+        assert_eq!(initial.pending_recovery.len(), 2);
+        let token = old_snapshot
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let disposable_token = disposable_snapshot
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
         assert_eq!(
             initial.pending_recovery[0].profile_name.as_deref(),
             Some("GUI recovered draft")
         );
         assert!(restore_recovery(&managed, 0, "../not-a-snapshot.toml").is_err());
+        assert!(discard_recovery(&managed, 0, &disposable_token, false).is_err());
+        assert!(disposable_snapshot.exists());
+        assert!(discard_recovery(&managed, 0, "../not-a-snapshot.toml", true).is_err());
+        let after_discard = discard_recovery(&managed, 0, &disposable_token, true).unwrap();
+        assert_eq!(after_discard.pending_recovery.len(), 1);
+        assert!(!disposable_snapshot.exists());
         let restored = restore_recovery(&managed, 0, &token).unwrap();
         assert_eq!(restored.origin, Origin::Recovered);
         assert!(restored.dirty);
         assert_eq!(restored.profile.name, "GUI recovered draft");
         assert!(restored.pending_recovery.is_empty());
         assert!(!old_snapshot.exists());
+        let active = managed
+            .recovery
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .active_path()
+            .unwrap()
+            .to_owned();
+        let active_token = active.file_name().unwrap().to_string_lossy();
+        assert!(discard_recovery(&managed, restored.revision, &active_token, true).is_err());
+        assert!(active.exists());
         let saved = with_snapshot(&managed, |session| {
             session.save_new(restored.revision, &root.join("saved.toml"))
         })
@@ -338,7 +411,7 @@ pub fn run(demo: bool) {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Managed { session: Mutex::new(session), recovery: Mutex::new(recovery), close_pending: AtomicBool::new(false) })
-        .invoke_handler(tauri::generate_handler![gui_snapshot, gui_edit, gui_set_local_draft, gui_reset, gui_open_profile, gui_save_profile, gui_overwrite_profile, gui_undo_file_edit, gui_redo_file_edit, gui_restore_recovery])
+        .invoke_handler(tauri::generate_handler![gui_snapshot, gui_edit, gui_set_local_draft, gui_reset, gui_open_profile, gui_save_profile, gui_overwrite_profile, gui_undo_file_edit, gui_redo_file_edit, gui_restore_recovery, gui_discard_recovery])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.state::<Managed>();

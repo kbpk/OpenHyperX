@@ -30,13 +30,16 @@ or writes the mouse. To inspect and explicitly restore an older draft:
 ```powershell
 hyperx-tui --list-recovery
 hyperx-tui --recover 'PATH printed by --list-recovery'
+hyperx-tui --discard-recovery 'PATH printed by --list-recovery' --confirm-discard-recovery
 ```
 
 The path must name a TUI snapshot inside the private recovery directory
 (`%LOCALAPPDATA%\OpenHyperX\draft-recovery` on Windows). Portable setups may
-pass `--recovery-dir PATH` to both commands and the interactive editor. A
+pass `--recovery-dir PATH` to these commands and the interactive editor. A
 broken snapshot stays on disk and is reported as unreadable, not silently
-deleted. Only edits accepted into the complete profile document are captured;
+deleted. `--discard-recovery` permanently removes only that listed snapshot
+after the separate confirmation flag; it never deletes an ordinary profile.
+Only edits accepted into the complete profile document are captured;
 unfinished text fields and macro-editor timelines remain local to their modal
 and are not yet crash-recoverable. `--render` and `--check` do not autosave.
 

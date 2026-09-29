@@ -258,8 +258,9 @@ export default function App({
   const [state, setState] = useState<SessionState>(client.state);
   const [page, setPage] = useState<Page>("Performance");
   const [modal, setModal] = useState<
-    "review" | "add" | "discard" | "overwrite" | null
+    "review" | "add" | "discard" | "overwrite" | "discard-recovery" | null
   >(null);
+  const [recoveryToken, setRecoveryToken] = useState<string | null>(null);
   const [replacement, setReplacement] = useState<"open" | "empty" | "demo">(
     "empty",
   );
@@ -308,6 +309,7 @@ export default function App({
           "gui_redo_file_edit",
           "gui_open_profile",
           "gui_reset",
+          "gui_restore_recovery",
         ].includes(command)
       )
         await draftGuardQueue.current;
@@ -496,6 +498,15 @@ export default function App({
                       Restore offline draft
                     </button>
                   )}
+                  <button
+                    disabled={disabled}
+                    onClick={() => {
+                      setRecoveryToken(candidate.token);
+                      setModal("discard-recovery");
+                    }}
+                  >
+                    Discard recovery snapshot
+                  </button>
                 </div>
               ))}
             </section>
@@ -1143,6 +1154,37 @@ export default function App({
               }
             >
               Overwrite FILE and keep recovery copy
+            </button>
+          </div>
+        </Dialog>
+      )}
+      {modal === "discard-recovery" && recoveryToken && (
+        <Dialog
+          title="Discard offline recovery snapshot?"
+          close={() => setModal(null)}
+        >
+          <p>
+            Permanently remove only snapshot <code>{recoveryToken}</code>? This
+            cannot be undone. The current FILE draft and mouse are unaffected.
+          </p>
+          {state.error && <div className="notice error">{state.error}</div>}
+          <div className="dialog-actions">
+            <button onClick={() => setModal(null)}>Keep snapshot</button>
+            <button
+              disabled={state.busy}
+              onClick={() =>
+                void request("gui_discard_recovery", {
+                  token: recoveryToken,
+                  confirmed: true,
+                }).then((discarded) => {
+                  if (discarded) {
+                    setRecoveryToken(null);
+                    setModal(null);
+                  }
+                })
+              }
+            >
+              Discard snapshot permanently
             </button>
           </div>
         </Dialog>
