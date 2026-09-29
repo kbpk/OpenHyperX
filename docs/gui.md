@@ -84,8 +84,16 @@ original FILE baseline, so a later overwrite still
 rejects files changed on disk. Save NEW or a confirmed FILE overwrite retires
 the current snapshot. Corrupt snapshots remain visible and are not silently
 deleted. This is not a device backup, an onboard save or a USB operation.
-Uncommitted text fields and the local macro-timeline editor are not yet included
-in crash recovery.
+The separate local macro-timeline editor also stores a best-effort, size-bounded
+snapshot in the desktop WebView's local storage after each change. After restart,
+Macros offers **Restore macro timeline** or **Discard saved timeline** explicitly;
+restoration requires the matching FILE path and unchanged original macro. Open
+the original file (or restore its FILE draft) first if the editor says the
+current document does not match. A recovered timeline is still not a FILE edit
+until **Add macro to file** or **Update file macro** is pressed. Invalid local
+snapshots are never silently overwritten. This local storage is not a portable
+profile backup and may be unavailable or cleared by the WebView. Other
+uncommitted input fields are not yet covered by crash recovery.
 
 ## Editing bindings
 
@@ -133,6 +141,9 @@ permission to apply it. No global recorder or keyboard hook is implemented.
 
 Pending local timeline edits survive page navigation, prevent replacing/saving
 the document until committed or discarded, and protect native window close.
+The desktop GUI also offers explicit local-timeline recovery after a restart;
+restoration never commits the macro automatically. Browser preview does not
+persist these editor snapshots.
 After updating the file draft, use Save new file for disk persistence.
 
 ## Resolving imported assignments
@@ -317,7 +328,8 @@ Sources: [Rust IPC](https://v2.tauri.app/develop/calling-rust/),
 - [x] Bounded in-session undo/redo for complete FILE drafts.
 - [x] Recover accepted FILE-document edits after restart through an explicit offline choice.
 - [x] Manage and explicitly discard old GUI recovery snapshots without granting arbitrary filesystem access.
-- [ ] Recover uncommitted input fields and local macro timelines.
+- [x] Offer explicit best-effort recovery of uncommitted local macro timelines.
+- [ ] Recover other uncommitted input fields.
 - [ ] Connected app facade **only after** usable hardware baseline/readback is restored.
 - [ ] Separate Preview, Apply and confirmed Save to mouse; no reports in React.
 - [ ] Installer, signing and releases after native behavior is validated.

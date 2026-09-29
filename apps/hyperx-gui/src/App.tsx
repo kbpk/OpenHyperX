@@ -866,6 +866,7 @@ export default function App({
                   disabled={disabled}
                   edit={edit}
                   onDraftChange={reportMacroDraft}
+                  persistLocalDraft={backend.desktop}
                 />
               </section>
               {page === "Profiles" && (

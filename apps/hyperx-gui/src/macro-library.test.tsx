@@ -11,7 +11,10 @@ import fixture from "./demo.json";
 import { MacroLibrary } from "./macro-library";
 import type { Snapshot } from "./types";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
 function data(): Snapshot {
   const snapshot = structuredClone(fixture) as Snapshot;
   snapshot.macro_keys = ["a", "b", "left-shift", "right-shift", "enter"];
@@ -19,7 +22,12 @@ function data(): Snapshot {
   snapshot.profile.buttons = {};
   return snapshot;
 }
-function mount(snapshot = data(), disabled = false, success = true) {
+function mount(
+  snapshot = data(),
+  disabled = false,
+  success = true,
+  persistLocalDraft = false,
+) {
   const edit = vi.fn(async () => success);
   const onDraftChange = vi.fn();
   const view = render(
@@ -28,6 +36,7 @@ function mount(snapshot = data(), disabled = false, success = true) {
       disabled={disabled}
       edit={edit}
       onDraftChange={onDraftChange}
+      persistLocalDraft={persistLocalDraft}
     />,
   );
   return { ...view, edit, onDraftChange, snapshot };
@@ -39,6 +48,119 @@ async function openExisting() {
 }
 
 describe("offline named macro timeline editor", () => {
+  it("offers explicit recovery after a restart without editing the file", async () => {
+    const snapshot = data();
+    snapshot.path = "C:\\Profiles\\raid.toml";
+    const first = mount(snapshot, false, true, true);
+    await openExisting();
+    fireEvent.change(screen.getByLabelText("Macro name"), {
+      target: { value: "Recovered AB" },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Add event" }));
+    await waitFor(() =>
+      expect(
+        localStorage.getItem("openhyperx.gui.local-macro-draft.v1"),
+      ).toContain("Recovered AB"),
+    );
+    first.unmount();
+    const second = mount(snapshot, false, true, true);
+    expect(screen.getByRole("status").textContent).toContain("Recovered AB");
+    expect(
+      (screen.getByRole("button", { name: "New macro" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(second.edit).not.toHaveBeenCalled();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Restore macro timeline" }),
+    );
+    expect(
+      (screen.getByLabelText("Macro name") as HTMLInputElement).value,
+    ).toBe("Recovered AB");
+    expect(screen.getByLabelText("Event 5 type")).toBeTruthy();
+    expect(second.edit).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Add event" }));
+    expect(screen.getByLabelText("Event 6 type")).toBeTruthy();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Discard timeline edits" }),
+    );
+    expect(
+      localStorage.getItem("openhyperx.gui.local-macro-draft.v1"),
+    ).toBeNull();
+  });
+  it("requires the original document before restoring a saved timeline", async () => {
+    const snapshot = data();
+    snapshot.path = "C:\\Profiles\\original.toml";
+    const first = mount(snapshot, false, true, true);
+    await openExisting();
+    fireEvent.change(screen.getByLabelText("Macro name"), {
+      target: { value: "Original edit" },
+    });
+    first.unmount();
+    const other = data();
+    other.path = "C:\\Profiles\\other.toml";
+    const second = mount(other, false, true, true);
+    expect(screen.getByRole("status").textContent).toContain(
+      "Open the original file",
+    );
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Restore macro timeline",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    second.rerender(
+      <MacroLibrary
+        snapshot={snapshot}
+        disabled={false}
+        edit={second.edit}
+        onDraftChange={second.onDraftChange}
+        persistLocalDraft
+      />,
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Restore macro timeline" }),
+    );
+    expect(
+      (screen.getByLabelText("Macro name") as HTMLInputElement).value,
+    ).toBe("Original edit");
+    expect(second.edit).not.toHaveBeenCalled();
+  });
+  it("does not silently overwrite an invalid recovery snapshot", async () => {
+    localStorage.setItem("openhyperx.gui.local-macro-draft.v1", "{broken");
+    const { edit } = mount(data(), false, true, true);
+    expect(screen.getByRole("status").textContent).toContain("invalid");
+    expect(
+      (screen.getByRole("button", { name: "New macro" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Discard saved timeline" }),
+    );
+    expect(
+      localStorage.getItem("openhyperx.gui.local-macro-draft.v1"),
+    ).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "New macro" }));
+    expect(screen.getByLabelText("Macro name")).toBeTruthy();
+    expect(edit).not.toHaveBeenCalled();
+  });
+  it("retires the local timeline snapshot after a successful file edit", async () => {
+    const { edit } = mount(data(), false, true, true);
+    await openExisting();
+    fireEvent.change(screen.getByLabelText("Macro name"), {
+      target: { value: "Saved AB" },
+    });
+    expect(
+      localStorage.getItem("openhyperx.gui.local-macro-draft.v1"),
+    ).toContain("Saved AB");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Update file macro" }),
+    );
+    expect(edit).toHaveBeenCalledOnce();
+    expect(
+      localStorage.getItem("openhyperx.gui.local-macro-draft.v1"),
+    ).toBeNull();
+  });
   it("creates a chord with separate downs/ups and individual delays through one typed edit", async () => {
     const { edit, onDraftChange } = mount();
     await userEvent.click(screen.getByRole("button", { name: "New macro" }));

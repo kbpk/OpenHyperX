@@ -14,7 +14,117 @@ type Draft = {
   playback: Playback;
   events: EventDraft[];
   original: NamedMacro | null;
+  sourcePath: string | null;
+  sourceName: string;
 };
+type StoredDraft = { version: 1; baseline: string; draft: Draft };
+type Recovery = {
+  stored: StoredDraft | null;
+  warning: string | null;
+  blocked: boolean;
+};
+const recoveryKey = "openhyperx.gui.local-macro-draft.v1";
+const maxRecoveryBytes = 256 * 1024;
+const blankRecovery: Recovery = { stored: null, warning: null, blocked: false };
+
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function playback(value: unknown): value is Playback {
+  return (
+    value === "once" ||
+    value === "toggle-repeat" ||
+    value === "repeat-while-held"
+  );
+}
+function macroEvent(value: unknown): value is MacroEvent {
+  if (
+    !record(value) ||
+    typeof value.delay_ms !== "number" ||
+    !Number.isInteger(value.delay_ms)
+  )
+    return false;
+  if (value.delay_ms < 0 || value.delay_ms > 65535) return false;
+  if (value.type === "key-down" || value.type === "key-up")
+    return typeof value.key === "string";
+  if (value.type === "mouse-button-down" || value.type === "mouse-button-up")
+    return typeof value.button === "string";
+  return false;
+}
+function namedMacro(value: unknown): value is NamedMacro {
+  return (
+    record(value) &&
+    typeof value.source_id === "string" &&
+    typeof value.name === "string" &&
+    playback(value.playback) &&
+    Array.isArray(value.events) &&
+    value.events.length <= 4096 &&
+    value.events.every(macroEvent)
+  );
+}
+function storedDraft(value: unknown): value is StoredDraft {
+  if (
+    !record(value) ||
+    value.version !== 1 ||
+    typeof value.baseline !== "string"
+  )
+    return false;
+  const draft = value.draft;
+  if (!record(draft) || !Array.isArray(draft.events)) return false;
+  return (
+    typeof draft.id === "string" &&
+    typeof draft.name === "string" &&
+    playback(draft.playback) &&
+    (draft.original === null || namedMacro(draft.original)) &&
+    (draft.sourcePath === null || typeof draft.sourcePath === "string") &&
+    typeof draft.sourceName === "string" &&
+    draft.events.length <= 4096 &&
+    draft.events.every(
+      (event: unknown) =>
+        record(event) &&
+        typeof event.rowId === "number" &&
+        Number.isSafeInteger(event.rowId) &&
+        event.rowId >= 0 &&
+        (event.type === "key-down" ||
+          event.type === "key-up" ||
+          event.type === "mouse-button-down" ||
+          event.type === "mouse-button-up") &&
+        typeof event.value === "string" &&
+        typeof event.delay === "string",
+    ) &&
+    new Set(draft.events.map((event: EventDraft) => event.rowId)).size ===
+      draft.events.length
+  );
+}
+function readRecovery(): Recovery {
+  let raw: string | null;
+  try {
+    raw = localStorage.getItem(recoveryKey);
+  } catch {
+    return {
+      stored: null,
+      warning:
+        "Cannot read the local macro recovery snapshot. Editing is possible, but recovery is unavailable.",
+      blocked: false,
+    };
+  }
+  if (raw === null) return blankRecovery;
+  try {
+    if (raw.length > maxRecoveryBytes)
+      throw new Error("Saved timeline exceeds the recovery limit");
+    const parsed: unknown = JSON.parse(raw);
+    if (storedDraft(parsed))
+      return { stored: parsed, warning: null, blocked: true };
+  } catch {
+    // A malformed snapshot must not be silently overwritten.
+  }
+  return {
+    stored: null,
+    warning:
+      "The saved macro timeline is invalid. Discard it explicitly before editing another timeline.",
+    blocked: true,
+  };
+}
 
 function references(snapshot: Snapshot, id: string): string[] {
   return [
@@ -37,7 +147,11 @@ function draftValue(draft: Draft): string {
     })),
   });
 }
-function makeDraft(macro: NamedMacro, nextRow: () => number): Draft {
+function makeDraft(
+  macro: NamedMacro,
+  nextRow: () => number,
+  snapshot: Snapshot,
+): Draft {
   return {
     id: macro.source_id,
     name: macro.name,
@@ -49,6 +163,8 @@ function makeDraft(macro: NamedMacro, nextRow: () => number): Draft {
       delay: String(event.delay_ms),
     })),
     original: macro,
+    sourcePath: snapshot.path,
+    sourceName: snapshot.profile.name,
   };
 }
 
@@ -59,17 +175,25 @@ export function MacroLibrary({
   disabled,
   edit,
   onDraftChange,
+  persistLocalDraft = false,
 }: {
   snapshot: Snapshot;
   disabled: boolean;
   edit: (value: Edit) => Promise<boolean>;
   onDraftChange: (dirty: boolean) => void;
+  persistLocalDraft?: boolean;
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [baseline, setBaseline] = useState("");
   const [search, setSearch] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [removeId, setRemoveId] = useState<string | null>(null);
+  const [recovery, setRecovery] = useState<Recovery>(() =>
+    persistLocalDraft ? readRecovery() : blankRecovery,
+  );
+  const [recoveryWriteError, setRecoveryWriteError] = useState<string | null>(
+    null,
+  );
   const row = useRef(0);
   const keysId = useId();
   const library = snapshot.profile.macros ?? [];
@@ -81,6 +205,16 @@ export function MacroLibrary({
     !!draft?.original &&
     (current?.length !== 1 ||
       JSON.stringify(current[0]) !== JSON.stringify(draft.original));
+  const wrongSource = !!draft && draft.sourcePath !== snapshot.path;
+  const saved = recovery.stored?.draft;
+  const recoveryMatchesDocument =
+    !!saved &&
+    saved.sourcePath === snapshot.path &&
+    (!saved.original ||
+      (library.filter((macro) => macro.source_id === saved.id).length === 1 &&
+        JSON.stringify(
+          library.find((macro) => macro.source_id === saved.id),
+        ) === JSON.stringify(saved.original)));
   const refs = draft ? references(snapshot, draft.id) : [];
   const keys = snapshot.macro_keys ?? [];
   const buttons = snapshot.macro_mouse_buttons ?? [];
@@ -99,16 +233,37 @@ export function MacroLibrary({
     window.addEventListener("beforeunload", prevent);
     return () => window.removeEventListener("beforeunload", prevent);
   }, [dirty]);
+  useEffect(() => {
+    if (!persistLocalDraft || recovery.blocked || !draft) return;
+    try {
+      if (dirty) {
+        const raw = JSON.stringify({ version: 1, baseline, draft });
+        if (raw.length > maxRecoveryBytes)
+          throw new Error("Macro timeline exceeds the local recovery limit.");
+        localStorage.setItem(recoveryKey, raw);
+      } else {
+        localStorage.removeItem(recoveryKey);
+      }
+      setRecoveryWriteError(null);
+    } catch {
+      setRecoveryWriteError(
+        "Could not save the local macro timeline for crash recovery. Keep this window open or add the macro to the file.",
+      );
+    }
+  }, [baseline, dirty, draft, persistLocalDraft, recovery.blocked]);
   const nextRow = () => row.current++;
   function begin(macro: NamedMacro | null) {
+    if (recovery.blocked) return;
     const next = macro
-      ? makeDraft(macro, nextRow)
+      ? makeDraft(macro, nextRow, snapshot)
       : {
           id: `macro-${crypto.randomUUID()}`,
           name: "New macro",
           playback: "once" as Playback,
           events: [],
           original: null,
+          sourcePath: snapshot.path,
+          sourceName: snapshot.profile.name,
         };
     setDraft(next);
     // A newly created empty timeline is already an uncommitted draft.
@@ -118,6 +273,16 @@ export function MacroLibrary({
     setRemoveId(null);
   }
   function closeDraft() {
+    if (persistLocalDraft) {
+      try {
+        localStorage.removeItem(recoveryKey);
+        setRecoveryWriteError(null);
+      } catch {
+        setRecoveryWriteError(
+          "Could not clear the local recovery snapshot. It may appear again after restart.",
+        );
+      }
+    }
     setDraft(null);
     setConfirmed(false);
     setSearch("");
@@ -152,6 +317,7 @@ export function MacroLibrary({
       disabled ||
       !dirty ||
       stale ||
+      wrongSource ||
       invalidEvent ||
       !draft.name.trim() ||
       (draft.original && refs.length > 0 && !confirmed)
@@ -189,12 +355,84 @@ export function MacroLibrary({
   }
   return (
     <div className="macro-library">
+      {recovery.blocked && (
+        <div className="notice" role="status">
+          <strong>Uncommitted macro timeline found</strong>
+          {recovery.stored ? (
+            <>
+              <p>
+                “{recovery.stored.draft.name}” from{" "}
+                {recovery.stored.draft.sourcePath ??
+                  `unsaved profile “${recovery.stored.draft.sourceName}”`}
+                . Restore it explicitly; nothing has been added to the file or
+                sent to the mouse.
+              </p>
+              {!recoveryMatchesDocument && (
+                <p>
+                  Open the original file or restore its FILE draft first. The
+                  current document does not match this timeline's source.
+                </p>
+              )}
+              <button
+                type="button"
+                disabled={!recoveryMatchesDocument}
+                onClick={() => {
+                  const saved = recovery.stored!;
+                  row.current =
+                    Math.max(
+                      -1,
+                      ...saved.draft.events.map((event) => event.rowId),
+                    ) + 1;
+                  setDraft(saved.draft);
+                  setBaseline(saved.baseline);
+                  setConfirmed(false);
+                  setRecovery(blankRecovery);
+                }}
+              >
+                Restore macro timeline
+              </button>{" "}
+            </>
+          ) : (
+            <p>{recovery.warning}</p>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                localStorage.removeItem(recoveryKey);
+                setRecovery(blankRecovery);
+              } catch {
+                setRecovery({
+                  ...recovery,
+                  warning:
+                    "Could not discard the local macro recovery snapshot.",
+                });
+              }
+            }}
+          >
+            Discard saved timeline
+          </button>
+        </div>
+      )}
+      {!recovery.blocked && recovery.warning && (
+        <div className="notice error" role="alert">
+          {recovery.warning}
+        </div>
+      )}
+      {recoveryWriteError && (
+        <div className="notice error" role="alert">
+          {recoveryWriteError}
+        </div>
+      )}
       <div className="section-heading">
         <div>
           <h2>Named macro library</h2>
           <p>File definitions, not recordings or live mouse state.</p>
         </div>
-        <button disabled={disabled || dirty} onClick={() => begin(null)}>
+        <button
+          disabled={disabled || dirty || recovery.blocked}
+          onClick={() => begin(null)}
+        >
           New macro
         </button>
       </div>
@@ -409,6 +647,13 @@ export function MacroLibrary({
               definition before replacing it.
             </div>
           )}
+          {wrongSource && (
+            <div className="notice error" role="alert">
+              This timeline belongs to{" "}
+              {draft.sourcePath ?? "an unsaved profile"}, not the current file.
+              Open the original profile before updating it.
+            </div>
+          )}
           {draft.original && refs.length > 0 && (
             <div className="notice">
               <p>
@@ -437,6 +682,7 @@ export function MacroLibrary({
                 disabled ||
                 !dirty ||
                 stale ||
+                wrongSource ||
                 invalidEvent ||
                 !draft.name.trim() ||
                 (!!draft.original && refs.length > 0 && !confirmed)
@@ -508,14 +754,20 @@ export function MacroLibrary({
             )}
             <div className="macro-card-actions">
               <button
-                disabled={disabled || dirty || !unique}
+                disabled={disabled || dirty || recovery.blocked || !unique}
                 aria-label={`Edit macro ${macro.name}`}
                 onClick={() => begin(macro)}
               >
                 Edit timeline
               </button>
               <button
-                disabled={disabled || dirty || !unique || refs.length > 0}
+                disabled={
+                  disabled ||
+                  dirty ||
+                  recovery.blocked ||
+                  !unique ||
+                  refs.length > 0
+                }
                 title={
                   refs.length
                     ? "Remove file references before deleting a definition"
