@@ -8,6 +8,10 @@ fn main() {
             "gui_reset",
             "gui_open_profile",
             "gui_save_profile",
+            "gui_overwrite_profile",
+            "gui_undo_file_edit",
+            "gui_redo_file_edit",
+            "gui_restore_recovery",
         ]),
     ))
     .expect("Tauri configuration/permissions build failed");

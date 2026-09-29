@@ -8,10 +8,13 @@ use std::sync::{
 use tauri::{Manager, State};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
-use crate::{Edit, Session, Snapshot};
+use hyperx_app::{DraftRecoveryStore, RecoveryClient};
+
+use crate::{Edit, RecoveryDraftSummary, Session, Snapshot};
 
 struct Managed {
     session: Mutex<Session>,
+    recovery: Mutex<Option<DraftRecoveryStore>>,
     close_pending: AtomicBool,
 }
 fn with_session<T>(
@@ -25,9 +28,73 @@ fn with_session<T>(
     action(&mut session).map_err(|error| format!("{error:#}"))
 }
 
+fn with_snapshot(
+    state: &Managed,
+    action: impl FnOnce(&mut Session) -> anyhow::Result<Snapshot>,
+) -> Result<Snapshot, String> {
+    let mut session = state
+        .session
+        .lock()
+        .map_err(|_| "offline document lock is unavailable".to_owned())?;
+    let prior_revision = session.revision;
+    action(&mut session).map_err(|error| format!("{error:#}"))?;
+    let mut recovery = state
+        .recovery
+        .lock()
+        .map_err(|_| "draft recovery lock is unavailable".to_owned())?;
+    if session.revision != prior_revision {
+        if let Some(store) = recovery.as_mut() {
+            session.recovery_warning = store.capture(&session.document).err().map(|error| {
+                format!(
+                    "FILE edit remains in memory, but crash recovery failed: {error:#}. Save NEW now."
+                )
+            });
+        }
+    }
+    let mut snapshot = session.snapshot();
+    if let Some(store) = recovery.as_ref() {
+        match store.list() {
+            Ok(paths) => {
+                snapshot.pending_recovery = paths
+                    .into_iter()
+                    .filter(|path| store.active_path() != Some(path.as_path()))
+                    .map(|path| {
+                        let token = path
+                            .file_name()
+                            .expect("listed recovery path has a filename")
+                            .to_string_lossy()
+                            .into_owned();
+                        match store.load(&path) {
+                            Ok(document) => RecoveryDraftSummary {
+                                token,
+                                profile_name: Some(document.profile().name.clone()),
+                                original_file: document
+                                    .path()
+                                    .map(|path| path.to_string_lossy().into_owned()),
+                                error: None,
+                            },
+                            Err(error) => RecoveryDraftSummary {
+                                token,
+                                profile_name: None,
+                                original_file: None,
+                                error: Some(format!("{error:#}")),
+                            },
+                        }
+                    })
+                    .collect();
+            }
+            Err(error) => {
+                snapshot.recovery_warning =
+                    Some(format!("Cannot list offline recovery snapshots: {error:#}"));
+            }
+        }
+    }
+    Ok(snapshot)
+}
+
 #[tauri::command]
 fn gui_snapshot(state: State<'_, Managed>) -> Result<Snapshot, String> {
-    with_session(&state, |session| Ok(session.snapshot()))
+    with_snapshot(&state, |session| Ok(session.snapshot()))
 }
 #[tauri::command]
 fn gui_edit(
@@ -35,7 +102,7 @@ fn gui_edit(
     expected_revision: u64,
     edit: Edit,
 ) -> Result<Snapshot, String> {
-    with_session(&state, |session| session.edit(expected_revision, edit))
+    with_snapshot(&state, |session| session.edit(expected_revision, edit))
 }
 #[tauri::command]
 fn gui_set_local_draft(state: State<'_, Managed>, pending: bool) -> Result<(), String> {
@@ -51,7 +118,7 @@ fn gui_reset(
     discard_changes: bool,
     demo: bool,
 ) -> Result<Snapshot, String> {
-    with_session(&state, |session| {
+    with_snapshot(&state, |session| {
         session.reset(expected_revision, discard_changes, demo)
     })
 }
@@ -76,7 +143,7 @@ async fn gui_open_profile(
     })
     .await
     .map_err(|error| error.to_string())?;
-    with_session(&state, |session| {
+    with_snapshot(&state, |session| {
         session.check_discard(expected_revision, discard_changes)?;
         if let Some(file) = selected {
             session.open(expected_revision, discard_changes, &file.into_path()?)
@@ -102,7 +169,7 @@ async fn gui_save_profile(
     })
     .await
     .map_err(|error| error.to_string())?;
-    with_session(&state, |session| {
+    with_snapshot(&state, |session| {
         session.check_save(expected_revision)?;
         if let Some(file) = selected {
             session.save_new(expected_revision, &file.into_path()?)
@@ -118,7 +185,7 @@ fn gui_overwrite_profile(
     expected_revision: u64,
     confirmed: bool,
 ) -> Result<Snapshot, String> {
-    with_session(&state, |session| {
+    with_snapshot(&state, |session| {
         session.overwrite_file(expected_revision, confirmed)
     })
 }
@@ -128,7 +195,7 @@ fn gui_undo_file_edit(
     state: State<'_, Managed>,
     expected_revision: u64,
 ) -> Result<Snapshot, String> {
-    with_session(&state, |session| session.undo_file_edit(expected_revision))
+    with_snapshot(&state, |session| session.undo_file_edit(expected_revision))
 }
 
 #[tauri::command]
@@ -136,19 +203,142 @@ fn gui_redo_file_edit(
     state: State<'_, Managed>,
     expected_revision: u64,
 ) -> Result<Snapshot, String> {
-    with_session(&state, |session| session.redo_file_edit(expected_revision))
+    with_snapshot(&state, |session| session.redo_file_edit(expected_revision))
+}
+
+#[tauri::command]
+fn gui_restore_recovery(
+    state: State<'_, Managed>,
+    expected_revision: u64,
+    token: String,
+) -> Result<Snapshot, String> {
+    restore_recovery(&state, expected_revision, &token)
+}
+
+fn restore_recovery(
+    state: &Managed,
+    expected_revision: u64,
+    token: &str,
+) -> Result<Snapshot, String> {
+    if token.is_empty()
+        || token.contains('/')
+        || token.contains('\\')
+        || token == "."
+        || token == ".."
+    {
+        return Err("invalid recovery token".into());
+    }
+    with_snapshot(state, |session| {
+        session.check_discard(expected_revision, false)?;
+        let mut recovery = state
+            .recovery
+            .lock()
+            .map_err(|_| anyhow::anyhow!("draft recovery lock is unavailable"))?;
+        let store = recovery
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("draft recovery storage is unavailable"))?;
+        let path = store.directory().join(&token);
+        let document = store.adopt(&path)?;
+        session.restore_recovery(expected_revision, document)
+    })
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use std::{
+        fs,
+        sync::{
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+            Mutex,
+        },
+    };
+
+    use hyperx_app::{parse_profile, DraftRecoveryStore, ProfileDocument, RecoveryClient};
+
+    use super::{restore_recovery, with_snapshot, Managed};
+    use crate::{Origin, Session};
+
+    #[test]
+    fn backend_lists_and_restores_only_a_selected_private_snapshot() {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "openhyperx-gui-recovery-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let directory = root.join("private");
+        let mut producer = DraftRecoveryStore::new(&directory, RecoveryClient::Gui).unwrap();
+        let profile = parse_profile(include_str!(
+            "../../../../examples/profiles/pulsefire-raid.toml"
+        ))
+        .unwrap();
+        let mut document = ProfileDocument::from_profile(profile);
+        let mut edited = document.profile().clone();
+        edited.name = "GUI recovered draft".into();
+        document.replace(edited);
+        let old_snapshot = producer.capture(&document).unwrap().unwrap();
+        drop(producer);
+        let managed = Managed {
+            session: Mutex::new(Session::empty()),
+            recovery: Mutex::new(Some(
+                DraftRecoveryStore::new(&directory, RecoveryClient::Gui).unwrap(),
+            )),
+            close_pending: AtomicBool::new(false),
+        };
+        let initial = with_snapshot(&managed, |session| Ok(session.snapshot())).unwrap();
+        assert_eq!(initial.pending_recovery.len(), 1);
+        let token = initial.pending_recovery[0].token.clone();
+        assert_eq!(
+            initial.pending_recovery[0].profile_name.as_deref(),
+            Some("GUI recovered draft")
+        );
+        assert!(restore_recovery(&managed, 0, "../not-a-snapshot.toml").is_err());
+        let restored = restore_recovery(&managed, 0, &token).unwrap();
+        assert_eq!(restored.origin, Origin::Recovered);
+        assert!(restored.dirty);
+        assert_eq!(restored.profile.name, "GUI recovered draft");
+        assert!(restored.pending_recovery.is_empty());
+        assert!(!old_snapshot.exists());
+        let saved = with_snapshot(&managed, |session| {
+            session.save_new(restored.revision, &root.join("saved.toml"))
+        })
+        .unwrap();
+        assert!(!saved.dirty);
+        assert!(saved.pending_recovery.is_empty());
+        assert!(managed
+            .recovery
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .list()
+            .unwrap()
+            .is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 pub fn run(demo: bool) {
-    let session = if demo {
+    let mut session = if demo {
         Session::demo().expect("bundled demo must parse")
     } else {
         Session::empty()
     };
+    let recovery = DraftRecoveryStore::default_directory()
+        .and_then(|directory| DraftRecoveryStore::new(&directory, RecoveryClient::Gui));
+    let recovery = match recovery {
+        Ok(store) => Some(store),
+        Err(error) => {
+            session.recovery_warning = Some(format!(
+                "Crash recovery is unavailable: {error:#}. Save NEW frequently."
+            ));
+            None
+        }
+    };
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(Managed { session: Mutex::new(session), close_pending: AtomicBool::new(false) })
-        .invoke_handler(tauri::generate_handler![gui_snapshot, gui_edit, gui_set_local_draft, gui_reset, gui_open_profile, gui_save_profile, gui_overwrite_profile, gui_undo_file_edit, gui_redo_file_edit])
+        .manage(Managed { session: Mutex::new(session), recovery: Mutex::new(recovery), close_pending: AtomicBool::new(false) })
+        .invoke_handler(tauri::generate_handler![gui_snapshot, gui_edit, gui_set_local_draft, gui_reset, gui_open_profile, gui_save_profile, gui_overwrite_profile, gui_undo_file_edit, gui_redo_file_edit, gui_restore_recovery])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.state::<Managed>();

@@ -1,4 +1,4 @@
-export type Origin = "empty" | "demo" | "file";
+export type Origin = "empty" | "demo" | "file" | "recovered";
 export type PrimaryLayout = "standard" | "swapped";
 export type Playback = "once" | "toggle-repeat" | "repeat-while-held";
 export interface Stage {
@@ -59,6 +59,13 @@ export interface Snapshot {
   origin: Origin;
   path: string | null;
   recovery_path: string | null;
+  recovery_warning: string | null;
+  pending_recovery: {
+    token: string;
+    profile_name: string | null;
+    original_file: string | null;
+    error: string | null;
+  }[];
   dirty: boolean;
   can_undo: boolean;
   can_redo: boolean;

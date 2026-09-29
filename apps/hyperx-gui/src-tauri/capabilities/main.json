@@ -10,6 +10,10 @@
     "allow-gui-set-local-draft",
     "allow-gui-reset",
     "allow-gui-open-profile",
-    "allow-gui-save-profile"
+    "allow-gui-save-profile",
+    "allow-gui-overwrite-profile",
+    "allow-gui-undo-file-edit",
+    "allow-gui-redo-file-edit",
+    "allow-gui-restore-recovery"
   ]
 }

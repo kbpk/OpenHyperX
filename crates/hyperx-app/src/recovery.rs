@@ -123,6 +123,10 @@ impl DraftRecoveryStore {
         &self.directory
     }
 
+    pub fn active_path(&self) -> Option<&Path> {
+        self.active.as_deref()
+    }
+
     /// Snapshot only an unsaved FILE draft. A clean document clears this
     /// process's last snapshot; it never deletes another process's files.
     pub fn capture(&mut self, document: &ProfileDocument) -> Result<Option<PathBuf>> {

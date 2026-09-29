@@ -3,6 +3,8 @@
   "origin": "demo",
   "path": null,
   "recovery_path": null,
+  "recovery_warning": null,
+  "pending_recovery": [],
   "dirty": false,
   "can_undo": false,
   "can_redo": false,

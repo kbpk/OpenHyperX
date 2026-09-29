@@ -392,9 +392,11 @@ export default function App({
               <small>
                 {snapshot?.origin === "file"
                   ? "LOCAL FILE"
-                  : snapshot?.origin === "demo"
-                    ? "DEMO PROFILE"
-                    : "NEW DRAFT"}
+                  : snapshot?.origin === "recovered"
+                    ? "RECOVERED DRAFT"
+                    : snapshot?.origin === "demo"
+                      ? "DEMO PROFILE"
+                      : "NEW DRAFT"}
               </small>
             </div>
           </div>
@@ -451,6 +453,52 @@ export default function App({
             <div className="notice">
               Demo profile — not a readout of your connected mouse.
             </div>
+          )}
+          {snapshot?.origin === "recovered" && (
+            <div className="notice">
+              Recovered offline FILE draft. It has not been saved to disk or to
+              the mouse. Save NEW, or review and confirm a FILE overwrite.
+            </div>
+          )}
+          {snapshot?.recovery_warning && (
+            <div className="notice error" role="alert">
+              {snapshot.recovery_warning}
+            </div>
+          )}
+          {backend.desktop && (snapshot?.pending_recovery.length ?? 0) > 0 && (
+            <section className="notice" aria-label="Offline draft recovery">
+              <strong>Older unsaved FILE drafts are available</strong>
+              <p>
+                Restore only after saving or discarding the current draft. This
+                reads an offline snapshot; it does not connect to the mouse.
+              </p>
+              {snapshot?.pending_recovery.map((candidate) => (
+                <div key={candidate.token}>
+                  <span>
+                    {candidate.profile_name ?? candidate.token}
+                    {candidate.original_file
+                      ? ` · originally ${candidate.original_file}`
+                      : ""}
+                  </span>
+                  {candidate.error ? (
+                    <p role="alert">
+                      Unreadable snapshot, retained on disk: {candidate.error}
+                    </p>
+                  ) : (
+                    <button
+                      disabled={disabled || !!snapshot?.dirty || macroDraft}
+                      onClick={() =>
+                        void request("gui_restore_recovery", {
+                          token: candidate.token,
+                        })
+                      }
+                    >
+                      Restore offline draft
+                    </button>
+                  )}
+                </div>
+              ))}
+            </section>
           )}
           {state.error && (
             <div className="notice error" role="alert">

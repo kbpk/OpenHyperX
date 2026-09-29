@@ -23,6 +23,7 @@ pub enum Origin {
     Empty,
     Demo,
     File,
+    Recovered,
 }
 
 #[derive(Debug, Serialize)]
@@ -32,6 +33,8 @@ pub struct Snapshot {
     pub path: Option<String>,
     /// Latest FILE-only recovery copy from a confirmed overwrite.
     pub recovery_path: Option<String>,
+    pub recovery_warning: Option<String>,
+    pub pending_recovery: Vec<RecoveryDraftSummary>,
     pub dirty: bool,
     pub can_undo: bool,
     pub can_redo: bool,
@@ -45,6 +48,14 @@ pub struct Snapshot {
     pub controls: Vec<Control>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub resolution_sources: Vec<ResolutionSource>,
+}
+#[derive(Debug, Serialize)]
+pub struct RecoveryDraftSummary {
+    /// Snapshot basename only; the backend resolves it within its private directory.
+    pub token: String,
+    pub profile_name: Option<String>,
+    pub original_file: Option<String>,
+    pub error: Option<String>,
 }
 #[derive(Debug, Serialize)]
 pub struct ResolutionSource {
@@ -190,6 +201,7 @@ pub struct Session {
     local_draft: bool,
     local_draft_generation: u64,
     recovery_path: Option<String>,
+    recovery_warning: Option<String>,
 }
 
 impl Default for Session {
@@ -211,6 +223,7 @@ impl Session {
             local_draft: false,
             local_draft_generation: 0,
             recovery_path: None,
+            recovery_warning: None,
         }
     }
     pub fn demo() -> Result<Self> {
@@ -223,6 +236,7 @@ impl Session {
             local_draft: false,
             local_draft_generation: 0,
             recovery_path: None,
+            recovery_warning: None,
         })
     }
     pub fn dirty(&self) -> bool {
@@ -351,6 +365,8 @@ impl Session {
                 .path()
                 .map(|path| path.to_string_lossy().into_owned()),
             recovery_path: self.recovery_path.clone(),
+            recovery_warning: self.recovery_warning.clone(),
+            pending_recovery: Vec::new(),
             dirty: self.dirty(),
             can_undo: self.document.can_undo(),
             can_redo: self.document.can_redo(),
@@ -484,6 +500,21 @@ impl Session {
         let document = ProfileDocument::open(path)?;
         self.document = document;
         self.origin = Origin::File;
+        self.recovery_path = None;
+        self.revision += 1;
+        Ok(self.snapshot())
+    }
+    pub fn restore_recovery(
+        &mut self,
+        expected: u64,
+        document: ProfileDocument,
+    ) -> Result<Snapshot> {
+        self.check_discard(expected, false)?;
+        if !document.dirty() {
+            bail!("recovery snapshot has no unsaved file draft");
+        }
+        self.document = document;
+        self.origin = Origin::Recovered;
         self.recovery_path = None;
         self.revision += 1;
         Ok(self.snapshot())

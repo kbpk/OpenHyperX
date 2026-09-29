@@ -31,3 +31,32 @@ describe("native desktop icons", () => {
     expect(icns.readUInt32BE(4)).toBe(icns.length);
   });
 });
+
+describe("offline desktop IPC capability", () => {
+  it("lists every registered command in the build manifest and local-window capability", () => {
+    const manifest = readFileSync(resolve(desktop, "build.rs"), "utf8");
+    const capability = JSON.parse(
+      readFileSync(resolve(desktop, "capabilities/main.json"), "utf8"),
+    );
+    for (const command of [
+      "gui_snapshot",
+      "gui_edit",
+      "gui_set_local_draft",
+      "gui_reset",
+      "gui_open_profile",
+      "gui_save_profile",
+      "gui_overwrite_profile",
+      "gui_undo_file_edit",
+      "gui_redo_file_edit",
+      "gui_restore_recovery",
+    ]) {
+      expect(manifest).toContain(`"${command}"`);
+      expect(capability.permissions).toContain(
+        `allow-${command.replaceAll("_", "-")}`,
+      );
+    }
+    expect(capability.windows).toEqual(["main"]);
+    expect(capability.permissions).not.toContain("fs:default");
+    expect(capability.permissions).not.toContain("shell:default");
+  });
+});

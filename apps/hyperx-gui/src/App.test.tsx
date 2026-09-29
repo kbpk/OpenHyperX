@@ -52,6 +52,15 @@ function fakeBackend(initial = structuredClone(fixture) as Snapshot) {
       if (command === "gui_reset") {
         current = { ...current, dirty: false, revision: current.revision + 1 };
       }
+      if (command === "gui_restore_recovery") {
+        current = {
+          ...current,
+          origin: "recovered",
+          dirty: true,
+          revision: current.revision + 1,
+          pending_recovery: [],
+        };
+      }
       void args;
       return current;
     },
@@ -63,6 +72,43 @@ function fakeBackend(initial = structuredClone(fixture) as Snapshot) {
   };
 }
 describe("offline profile UI", () => {
+  it("restores a listed offline draft by token without a frontend-supplied path", async () => {
+    const initial = structuredClone(fixture) as Snapshot;
+    initial.pending_recovery = [
+      {
+        token: "draft-gui-example.toml",
+        profile_name: "Recovered profile",
+        original_file: "C:\\profiles\\raid.toml",
+        error: null,
+      },
+      {
+        token: "draft-gui-broken.toml",
+        profile_name: null,
+        original_file: null,
+        error: "invalid snapshot",
+      },
+    ];
+    const backend = fakeBackend(initial);
+    render(<App backend={backend} />);
+    expect(await screen.findByText(/Older unsaved FILE drafts/)).toBeTruthy();
+    expect(
+      screen.getByText(/Unreadable snapshot, retained on disk/),
+    ).toBeTruthy();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Restore offline draft" }),
+    );
+    await waitFor(() =>
+      expect(backend.request).toHaveBeenCalledWith("gui_restore_recovery", {
+        expectedRevision: 0,
+        token: "draft-gui-example.toml",
+      }),
+    );
+    expect(
+      await screen.findByText(/Recovered offline FILE draft/),
+    ).toBeTruthy();
+    expect(screen.getByText("RECOVERED DRAFT")).toBeTruthy();
+  });
+
   it("exposes explicit imported-assignment resolution in Profiles through typed IPC", async () => {
     const imported = structuredClone(fixture) as Snapshot;
     delete imported.profile.buttons?.button4;
