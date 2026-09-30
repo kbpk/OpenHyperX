@@ -242,6 +242,9 @@ impl App {
                     picker,
                     self.document.dirty(),
                     self.recovery.as_ref().and_then(|store| store.active_path()),
+                    self.local_recovery
+                        .as_ref()
+                        .and_then(|store| store.active_path()),
                     &mut self.hits,
                 ),
                 Modal::Macro(editor) => crate::macro_view::render_editor(

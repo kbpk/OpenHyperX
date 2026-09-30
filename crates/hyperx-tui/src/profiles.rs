@@ -14,7 +14,7 @@ use crate::{
     app::App,
     editor::Editor,
     files::{FileBrowser, Mode, Prompt},
-    recovery_picker::{Confirmation as RecoveryConfirmation, RecoveryPicker},
+    recovery_picker::{Confirmation as RecoveryConfirmation, EntryKind, RecoveryPicker},
     render::safe_text,
     widgets::{sub, Action, Hit},
 };
@@ -33,7 +33,8 @@ pub(crate) fn render_recovery(
     area: Rect,
     picker: &RecoveryPicker,
     current_dirty: bool,
-    active: Option<&Path>,
+    active_file: Option<&Path>,
+    active_local: Option<&Path>,
     hits: &mut Vec<Hit>,
 ) {
     frame.render_widget(
@@ -57,10 +58,16 @@ pub(crate) fn render_recovery(
     if let Some(reason) = picker.confirmation {
         if let Some(entry) = picker.entries.get(picker.selected) {
             let action = match reason {
+                RecoveryConfirmation::Restore if entry.kind == EntryKind::LocalEditor => {
+                    "Restore this unfinished editor?"
+                }
                 RecoveryConfirmation::Restore => "Restore this unsaved FILE draft?",
                 RecoveryConfirmation::Discard => "Permanently discard only this recovery snapshot?",
             };
             let explanation = match reason {
+                RecoveryConfirmation::Restore if entry.kind == EntryKind::LocalEditor => {
+                    "Opens local edits only; matching source profile required."
+                }
                 RecoveryConfirmation::Restore if current_dirty => {
                     "Current draft stays recoverable. No FILE/USB write."
                 }
@@ -73,7 +80,8 @@ pub(crate) fn render_recovery(
             };
             frame.render_widget(
                 Paragraph::new(safe_text(&format!(
-                    "{action}\n{explanation}\n\nSnapshot: {}\nProfile: {}",
+                    "{action}\n{explanation}\n\n{}: {}\nProfile: {}",
+                    entry.label,
                     entry.path.file_name().unwrap_or_default().to_string_lossy(),
                     entry.profile.as_deref().unwrap_or("UNREADABLE")
                 )))
@@ -115,14 +123,19 @@ pub(crate) fn render_recovery(
         if list_row.height == 0 {
             break;
         }
+        let active = match entry.kind {
+            EntryKind::FileDraft => active_file,
+            EntryKind::LocalEditor => active_local,
+        };
         let active_label = if active == Some(entry.path.as_path()) {
             " [ACTIVE]"
         } else {
             ""
         };
         let label = format!(
-            "{} {}{} · {}",
+            "{} {} · {}{} · {}",
             if offset == picker.selected { '>' } else { ' ' },
+            entry.label,
             entry.path.file_name().unwrap_or_default().to_string_lossy(),
             active_label,
             entry.profile.as_deref().unwrap_or("UNREADABLE")

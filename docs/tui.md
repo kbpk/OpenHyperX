@@ -25,12 +25,16 @@ The interactive TUI automatically writes a private offline recovery snapshot
 after each accepted FILE draft edit. It preserves the original file baseline
 and exact bytes for the stale-file overwrite check. A normal Save NEW or
 confirmed FILE overwrite clears this session's snapshot. Recovery never reads
-or writes the mouse. In the interactive Profiles tab, **F7 / Recovery** lists
-TUI snapshots. Select one with arrows or the mouse, press **r** to restore or
-**d** to discard, then confirm with **y**. A broken snapshot is visible but
-cannot be restored; the current session's active snapshot cannot be discarded.
-If a dirty draft is replaced by a recovered one, its previous snapshot remains
-available. The command-line equivalents are:
+or writes the mouse. Unaccepted text-editor fields and local macro timelines
+have separate private, bounded `local-tui-*.json` snapshots. The interactive
+Profiles **F7 / Recovery** panel lists both kinds. Select one with arrows or
+the mouse, press **r** to restore or **d** to discard, then confirm with **y**.
+Restoring a local editor requires the exact source profile and path to be open;
+it never accepts its contents into the FILE draft automatically. A broken
+snapshot is visible but cannot be restored; the current session's active
+snapshot cannot be discarded. If a dirty FILE draft is replaced by a recovered
+one, its previous snapshot remains available. The command-line equivalents
+for complete FILE drafts (not unfinished local editors) are:
 
 ```powershell
 hyperx-tui --list-recovery
@@ -44,9 +48,12 @@ pass `--recovery-dir PATH` to these commands and the interactive editor. A
 broken snapshot stays on disk and is reported as unreadable, not silently
 deleted. `--discard-recovery` permanently removes only that listed snapshot
 after the separate confirmation flag; it never deletes an ordinary profile.
-Only edits accepted into the complete profile document are captured;
-unfinished text fields and macro-editor timelines remain local to their modal
-and are not yet crash-recoverable. `--render` and `--check` do not autosave.
+Only accepted edits enter complete FILE-draft snapshots. Local editor recovery
+also preserves text cursor position, macro timeline and unfinished macro
+name/delay/input prompts, but not transient browser/search filters, info views
+or earlier replacement consent. A restored Open-path field cannot reuse an
+old confirmation to discard a dirty document. `--render` and `--check` do not
+autosave. These snapshots are not portable profile backups.
 
 `--demo` loads the repository example with a DEMO DATA badge. A file loads FILE
 DRAFT settings, not live state. No arguments create an empty partial target

@@ -22,6 +22,7 @@ mod color_palette;
 mod diagnostics;
 mod editor;
 mod files;
+mod local_recovery;
 mod macro_view;
 mod macros;
 mod profiles;
@@ -198,15 +199,18 @@ fn main() -> Result<()> {
         bail!("interactive TUI needs a terminal; run in Windows Terminal or use --demo --render / --check for offline smoke tests");
     }
     let recovery = recovery.map_or_else(store, Ok)?;
+    let local_recovery = local_recovery::LocalRecoveryStore::new(recovery.directory())?;
     if cli.recover.is_none() {
-        let count = recovery.list()?.len();
-        if count > 0 {
+        let file_count = recovery.list()?.len();
+        let local_count = local_recovery.list()?.len();
+        if file_count + local_count > 0 {
             app.status = format!(
-                "{count} prior TUI draft snapshot(s). Use --list-recovery then --recover PATH; no HID access."
+                "{file_count} FILE and {local_count} local editor recovery snapshot(s). Profiles → F7 to inspect; no HID access."
             );
         }
     }
     app.recovery = Some(recovery);
+    app.local_recovery = Some(local_recovery);
     // Ratatui's run wrapper restores raw mode/alternate screen on success,
     // returned errors and panic. Our additional paste mode has its own guard.
     ratatui::run(|terminal| -> Result<()> {
@@ -247,6 +251,13 @@ fn handle_event(app: &mut app::App, event: Event) {
                     "RECOVERY SNAPSHOT FAILED: {error:#}. FILE draft is still in memory; save NEW now."
                 );
             }
+        }
+    }
+    if let Some(local) = &mut app.local_recovery {
+        if let Err(error) = local.capture(&app.document, app.modal.as_ref()) {
+            app.status = format!(
+                "LOCAL EDITOR RECOVERY FAILED: {error:#}. Edits remain in memory; accept or copy the text before closing."
+            );
         }
     }
 }

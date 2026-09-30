@@ -1571,6 +1571,7 @@ dependencies = [
  "hyperx-core",
  "ratatui",
  "serde",
+ "serde_json",
  "toml 0.8.8",
 ]
 

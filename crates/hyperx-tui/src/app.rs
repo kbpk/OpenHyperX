@@ -7,12 +7,14 @@ use hyperx_app::{
 };
 use serde::Deserialize;
 
-use crate::editor::Editor;
+use crate::{editor::Editor, local_recovery::LocalRecoveryStore, recovery_picker::EntryKind};
 
 #[derive(Clone, Copy, Debug)]
 pub enum EditAction {
     Section(ProfileSection),
     Open,
+    /// Restored path text cannot reuse an earlier discard confirmation.
+    OpenRecovered,
     SaveAs,
     Resolve,
     Omit,
@@ -69,6 +71,7 @@ pub struct App {
     pub hits: Vec<crate::widgets::Hit>,
     pub drag: Option<(usize, ratatui::layout::Rect)>,
     pub recovery: Option<DraftRecoveryStore>,
+    pub(crate) local_recovery: Option<LocalRecoveryStore>,
 }
 
 impl App {
@@ -86,6 +89,7 @@ impl App {
             hits: Vec::new(),
             drag: None,
             recovery: None,
+            local_recovery: None,
             status: "OFFLINE: file edits only; no HID access. Save to mouse is unavailable.".into(),
         }
     }
@@ -148,14 +152,34 @@ impl App {
                 Modal::Recovery(picker) => match picker.key(key) {
                     crate::recovery_picker::Outcome::Close => return,
                     crate::recovery_picker::Outcome::Refresh => {
-                        if let Some(store) = &self.recovery {
-                            if let Err(error) = picker.refresh(store) {
+                        if let (Some(store), Some(local)) = (&self.recovery, &self.local_recovery) {
+                            if let Err(error) = picker.refresh(store, local) {
                                 picker.error =
                                     Some(format!("Cannot refresh recovery list: {error:#}"));
                             }
                         }
                     }
-                    crate::recovery_picker::Outcome::Restore(path) => {
+                    crate::recovery_picker::Outcome::Restore(EntryKind::LocalEditor, path) => {
+                        let restoration = (|| -> Result<_> {
+                            let store = self
+                                .local_recovery
+                                .as_mut()
+                                .context("local editor recovery store is unavailable")?;
+                            store.restore_into(&path, &self.document)
+                        })();
+                        match restoration {
+                            Ok(restored) => {
+                                self.modal = Some(restored);
+                                self.status = "Restored an uncommitted local editor. Accept explicitly to edit the FILE draft; no HID access.".into();
+                                return;
+                            }
+                            Err(error) => {
+                                picker.error =
+                                    Some(format!("Cannot restore local editor: {error:#}"))
+                            }
+                        }
+                    }
+                    crate::recovery_picker::Outcome::Restore(EntryKind::FileDraft, path) => {
                         let replacement = (|| -> Result<_> {
                             let store = self
                                 .recovery
@@ -193,7 +217,28 @@ impl App {
                             }
                         }
                     }
-                    crate::recovery_picker::Outcome::Discard(path) => {
+                    crate::recovery_picker::Outcome::Discard(EntryKind::LocalEditor, path) => {
+                        if let Some(store) = &self.local_recovery {
+                            match store.discard(&path) {
+                                Ok(()) => {
+                                    self.status = "Discarded only the selected unfinished editor snapshot; no FILE draft or mouse state changed.".into();
+                                    if let (Some(files), Some(local)) =
+                                        (&self.recovery, &self.local_recovery)
+                                    {
+                                        if let Err(error) = picker.refresh(files, local) {
+                                            picker.error = Some(format!("Snapshot was discarded, but the list could not be refreshed: {error:#}"));
+                                        }
+                                    }
+                                }
+                                Err(error) => {
+                                    picker.error = Some(format!(
+                                        "Cannot discard local editor snapshot: {error:#}"
+                                    ))
+                                }
+                            }
+                        }
+                    }
+                    crate::recovery_picker::Outcome::Discard(EntryKind::FileDraft, path) => {
                         if let Some(store) = &self.recovery {
                             if store.active_path() == Some(path.as_path()) {
                                 picker.error = Some("Cannot discard this session's active unsaved FILE draft snapshot. Save or revert the draft first.".into());
@@ -201,8 +246,10 @@ impl App {
                                 match store.discard(&path) {
                                     Ok(()) => {
                                         self.status = "Discarded only the selected offline recovery snapshot. No profile or mouse state changed.".into();
-                                        if let Err(error) = picker.refresh(store) {
-                                            picker.error = Some(format!("Snapshot was discarded, but the list could not be refreshed: {error:#}"));
+                                        if let Some(local) = &self.local_recovery {
+                                            if let Err(error) = picker.refresh(store, local) {
+                                                picker.error = Some(format!("Snapshot was discarded, but the list could not be refreshed: {error:#}"));
+                                            }
                                         }
                                     }
                                     Err(error) => {
@@ -531,6 +578,12 @@ impl App {
                 // Replace only AFTER reading/parsing succeeds. Failed opens keep
                 // the current document, including unsaved edits.
                 self.adopt_document(ProfileDocument::open(Path::new(text.trim()))?);
+            }
+            EditAction::OpenRecovered => {
+                if self.document.dirty() {
+                    bail!("current FILE draft has unsaved edits; save it or use the normal Open confirmation before replacing it");
+                }
+                self.accept(EditAction::Open, text)?;
             }
             EditAction::ProfileName => {
                 self.document

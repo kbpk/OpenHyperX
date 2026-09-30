@@ -13,4 +13,5 @@ hyperx-app = { path = "../hyperx-app" }
 hyperx-core = { path = "../hyperx-core" }
 ratatui.workspace = true
 serde.workspace = true
+serde_json = "1"
 toml.workspace = true

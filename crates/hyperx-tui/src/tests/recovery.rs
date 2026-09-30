@@ -9,7 +9,7 @@ use crossterm::event::{Event, KeyCode, KeyModifiers, MouseButton, MouseEvent, Mo
 use hyperx_app::{DraftRecoveryStore, ProfileDocument, RecoveryClient};
 
 use super::{app, key, screen};
-use crate::{app::Modal, handle_event, widgets::Action};
+use crate::{app::Modal, handle_event, local_recovery::LocalRecoveryStore, widgets::Action};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
@@ -46,6 +46,7 @@ fn recovery_panel_requires_confirmation_and_retains_displaced_dirty_draft() {
     let mut current = DraftRecoveryStore::new(&dir, RecoveryClient::Tui).unwrap();
     let current_path = current.capture(&tui.document).unwrap().unwrap();
     tui.recovery = Some(current);
+    tui.local_recovery = Some(LocalRecoveryStore::new(&dir).unwrap());
     tui.tab = 4;
     tui.handle_key(key(KeyCode::F(7)));
     let Modal::Recovery(picker) = tui.modal.as_mut().unwrap() else {
@@ -99,6 +100,7 @@ fn recovery_panel_refuses_active_discard_and_can_discard_a_corrupt_old_snapshot(
     let corrupt = dir.join("draft-tui-corrupt.toml");
     fs::write(&corrupt, "not a recovery snapshot").unwrap();
     tui.recovery = Some(store);
+    tui.local_recovery = Some(LocalRecoveryStore::new(&dir).unwrap());
     tui.tab = 4;
     tui.handle_key(key(KeyCode::F(7)));
     {
@@ -153,6 +155,7 @@ fn restore_refuses_to_displace_a_dirty_draft_when_fresh_snapshot_fails() {
     edited.name = "Unsaved latest edit".into();
     tui.document.replace(edited);
     tui.recovery = Some(DraftRecoveryStore::new(&dir, RecoveryClient::Tui).unwrap());
+    tui.local_recovery = Some(LocalRecoveryStore::new(&dir).unwrap());
     tui.tab = 4;
     tui.handle_key(key(KeyCode::F(7)));
     let moved = dir.with_extension("away");
@@ -176,6 +179,7 @@ fn mouse_selects_visible_snapshot_without_restoring_it() {
     let second = snapshot(&dir, "Second profile");
     let mut tui = app();
     tui.recovery = Some(DraftRecoveryStore::new(&dir, RecoveryClient::Tui).unwrap());
+    tui.local_recovery = Some(LocalRecoveryStore::new(&dir).unwrap());
     tui.tab = 4;
     tui.handle_key(key(KeyCode::F(7)));
     screen(&mut tui, 45, 12);

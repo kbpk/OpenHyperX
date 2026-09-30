@@ -326,8 +326,8 @@ impl App {
             ),
             KeyCode::F(4) => self.open_browser(Mode::SaveNew),
             KeyCode::F(7) => {
-                if let Some(store) = &self.recovery {
-                    match crate::recovery_picker::RecoveryPicker::new(store) {
+                if let (Some(store), Some(local)) = (&self.recovery, &self.local_recovery) {
+                    match crate::recovery_picker::RecoveryPicker::new(store, local) {
                         Ok(picker) => {
                             self.modal = Some(Modal::Recovery(Box::new(picker)));
                             self.drag = None;

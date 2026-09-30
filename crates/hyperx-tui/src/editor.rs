@@ -1,4 +1,15 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct EditorRecovery {
+    pub text: String,
+    pub row: usize,
+    pub column: usize,
+    pub single_line: bool,
+    pub selected: bool,
+}
 
 /// Small Unicode-safe text editor. Content is only a draft until Ctrl+S parses it.
 pub struct Editor {
@@ -10,6 +21,37 @@ pub struct Editor {
 }
 
 impl Editor {
+    pub(crate) fn recovery(&self) -> EditorRecovery {
+        EditorRecovery {
+            text: self.text(),
+            row: self.row,
+            column: self.column,
+            single_line: self.single_line,
+            selected: self.selected,
+        }
+    }
+
+    pub(crate) fn from_recovery(saved: EditorRecovery) -> anyhow::Result<Self> {
+        anyhow::ensure!(
+            saved.text.len() <= hyperx_app::MAX_PROFILE_BYTES,
+            "local editor snapshot exceeds profile text limit"
+        );
+        anyhow::ensure!(
+            !saved.single_line || !saved.text.contains('\n'),
+            "single-line editor snapshot contains a newline"
+        );
+        let mut editor = Self::new(&saved.text, saved.single_line);
+        anyhow::ensure!(
+            saved.row < editor.lines.len()
+                && saved.column <= editor.lines[saved.row].chars().count(),
+            "local editor snapshot has an invalid cursor"
+        );
+        editor.row = saved.row;
+        editor.column = saved.column;
+        editor.selected = saved.selected;
+        Ok(editor)
+    }
+
     pub fn new(text: &str, single_line: bool) -> Self {
         Self {
             lines: text.split('\n').map(str::to_owned).collect(),

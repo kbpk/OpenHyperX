@@ -38,7 +38,8 @@ must reuse `hyperx-app`; completing GUI work must not remove terminal features.
 - [x] Bounded in-session undo/redo of complete FILE drafts without stripping provenance.
 - [x] Recover accepted FILE document edits after restart from an explicit private snapshot.
 - [x] Add an interactive TUI panel to list, restore and discard FILE-draft snapshots.
-- [ ] Include uncommitted modal fields and macro timelines in crash recovery.
+- [x] Recover unaccepted text-editor fields and macro timelines separately from FILE drafts.
+- [ ] Decide whether transient file-browser/binding/resolution search filters merit crash recovery.
 
 ## Connected mode — blocked on hardware evidence
 

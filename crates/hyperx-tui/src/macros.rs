@@ -8,11 +8,40 @@ use hyperx_app::{
 use hyperx_core::{
     MacroDefinition, MacroEvent, MacroPlayback, NamedMacro, SoftwareButtonBinding, SoftwareProfile,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::{
     app::{App, Modal},
-    editor::Editor,
+    editor::{Editor, EditorRecovery},
 };
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub(crate) enum MacroPromptRecovery {
+    Name {
+        editor: EditorRecovery,
+    },
+    Delay {
+        index: usize,
+        editor: EditorRecovery,
+    },
+    Input {
+        index: usize,
+        search: EditorRecovery,
+        choices: Vec<String>,
+        selected: Option<usize>,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MacroRecovery {
+    pub draft: NamedMacro,
+    pub original: Option<NamedMacro>,
+    pub selected: usize,
+    pub is_new: bool,
+    pub prompt: Option<MacroPromptRecovery>,
+}
 
 #[derive(Clone, Copy)]
 pub enum TextField {
@@ -83,6 +112,103 @@ fn set_delay(event: &mut MacroEvent, value: u16) {
 }
 
 impl MacroEditor {
+    pub(crate) fn recovery(&self) -> MacroRecovery {
+        let prompt = match &self.prompt {
+            Some(Prompt::Text {
+                field: TextField::Name,
+                editor,
+            }) => Some(MacroPromptRecovery::Name {
+                editor: editor.recovery(),
+            }),
+            Some(Prompt::Text {
+                field: TextField::Delay(index),
+                editor,
+            }) => Some(MacroPromptRecovery::Delay {
+                index: *index,
+                editor: editor.recovery(),
+            }),
+            Some(Prompt::Input {
+                index,
+                search,
+                choices,
+                selected,
+            }) => Some(MacroPromptRecovery::Input {
+                index: *index,
+                search: search.recovery(),
+                choices: choices.clone(),
+                selected: *selected,
+            }),
+            Some(Prompt::Info { .. } | Prompt::Confirm(_)) | None => None,
+        };
+        MacroRecovery {
+            draft: self.draft.clone(),
+            original: self.original.clone(),
+            selected: self.selected,
+            is_new: self.is_new,
+            prompt,
+        }
+    }
+
+    pub(crate) fn from_recovery(saved: MacroRecovery) -> Result<Self> {
+        if saved.is_new != saved.original.is_none() {
+            bail!("local macro snapshot has inconsistent new/existing identity");
+        }
+        if saved
+            .original
+            .as_ref()
+            .is_some_and(|original| original.source_id != saved.draft.source_id)
+        {
+            bail!("local macro snapshot changed its source identifier");
+        }
+        if saved.selected > saved.draft.definition.events.len().saturating_sub(1) {
+            bail!("local macro snapshot has an invalid selected event");
+        }
+        let prompt = match saved.prompt {
+            Some(MacroPromptRecovery::Name { editor }) => Some(Prompt::Text {
+                field: TextField::Name,
+                editor: Editor::from_recovery(editor)?,
+            }),
+            Some(MacroPromptRecovery::Delay { index, editor }) => {
+                if index >= saved.draft.definition.events.len() {
+                    bail!("local macro snapshot names a missing delay row");
+                }
+                Some(Prompt::Text {
+                    field: TextField::Delay(index),
+                    editor: Editor::from_recovery(editor)?,
+                })
+            }
+            Some(MacroPromptRecovery::Input {
+                index,
+                search,
+                choices,
+                selected,
+            }) => {
+                if index >= saved.draft.definition.events.len()
+                    || selected.is_some_and(|value| value >= choices.len())
+                    || choices.len() > 512
+                {
+                    bail!("local macro snapshot has invalid input choices");
+                }
+                Some(Prompt::Input {
+                    index,
+                    search: Editor::from_recovery(search)?,
+                    choices,
+                    selected,
+                })
+            }
+            None => None,
+        };
+        Ok(Self {
+            draft: saved.draft,
+            original: saved.original,
+            selected: saved.selected,
+            prompt,
+            error: None,
+            confirmed: false,
+            is_new: saved.is_new,
+        })
+    }
+
     fn existing(definition: NamedMacro) -> Self {
         Self {
             draft: definition.clone(),

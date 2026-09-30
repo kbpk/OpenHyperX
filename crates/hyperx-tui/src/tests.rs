@@ -7,6 +7,7 @@ use hyperx_app::{parse_profile, ProfileDocument, ProfileSection};
 use ratatui::{backend::TestBackend, style::Color, Terminal};
 
 mod bindings;
+mod local_recovery;
 mod macros;
 mod mouse;
 mod profiles;

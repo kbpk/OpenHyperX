@@ -5,8 +5,18 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 use hyperx_app::DraftRecoveryStore;
 
+use crate::local_recovery::LocalRecoveryStore;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EntryKind {
+    FileDraft,
+    LocalEditor,
+}
+
 #[derive(Clone, Debug)]
 pub struct Entry {
+    pub kind: EntryKind,
+    pub label: String,
     pub path: PathBuf,
     pub profile: Option<String>,
     pub original_file: Option<PathBuf>,
@@ -23,8 +33,8 @@ pub enum Outcome {
     Stay,
     Close,
     Refresh,
-    Restore(PathBuf),
-    Discard(PathBuf),
+    Restore(EntryKind, PathBuf),
+    Discard(EntryKind, PathBuf),
 }
 
 pub struct RecoveryPicker {
@@ -35,33 +45,41 @@ pub struct RecoveryPicker {
 }
 
 impl RecoveryPicker {
-    pub fn new(store: &DraftRecoveryStore) -> Result<Self> {
+    pub fn new(store: &DraftRecoveryStore, local: &LocalRecoveryStore) -> Result<Self> {
         let mut picker = Self {
             entries: Vec::new(),
             selected: 0,
             confirmation: None,
             error: None,
         };
-        picker.refresh(store)?;
+        picker.refresh(store, local)?;
         Ok(picker)
     }
 
-    pub fn refresh(&mut self, store: &DraftRecoveryStore) -> Result<()> {
+    pub fn refresh(
+        &mut self,
+        store: &DraftRecoveryStore,
+        local: &LocalRecoveryStore,
+    ) -> Result<()> {
         let selected_path = self
             .entries
             .get(self.selected)
             .map(|entry| entry.path.clone());
-        self.entries = store
+        let mut entries: Vec<Entry> = store
             .list()?
             .into_iter()
             .map(|path| match store.load(&path) {
                 Ok(document) => Entry {
+                    kind: EntryKind::FileDraft,
+                    label: "FILE draft".into(),
                     path,
                     profile: Some(document.profile().name.clone()),
                     original_file: document.path().map(ToOwned::to_owned),
                     error: None,
                 },
                 Err(error) => Entry {
+                    kind: EntryKind::FileDraft,
+                    label: "FILE draft".into(),
                     path,
                     profile: None,
                     original_file: None,
@@ -69,6 +87,31 @@ impl RecoveryPicker {
                 },
             })
             .collect();
+        entries.extend(
+            local
+                .list()?
+                .into_iter()
+                .map(|path| match local.load(&path) {
+                    Ok(record) => Entry {
+                        kind: EntryKind::LocalEditor,
+                        label: record.kind().into(),
+                        profile: Some(record.profile_name().into()),
+                        original_file: record.source_path().map(ToOwned::to_owned),
+                        error: None,
+                        path,
+                    },
+                    Err(error) => Entry {
+                        kind: EntryKind::LocalEditor,
+                        label: "local editor".into(),
+                        profile: None,
+                        original_file: None,
+                        error: Some(format!("{error:#}")),
+                        path,
+                    },
+                }),
+        );
+        entries.sort_by(|left, right| left.path.cmp(&right.path));
+        self.entries = entries;
         self.selected = selected_path
             .and_then(|path| self.entries.iter().position(|entry| entry.path == path))
             .unwrap_or_else(|| self.selected.min(self.entries.len().saturating_sub(1)));
@@ -102,8 +145,8 @@ impl RecoveryPicker {
                         return Outcome::Stay;
                     };
                     match reason {
-                        Confirmation::Restore => Outcome::Restore(entry.path.clone()),
-                        Confirmation::Discard => Outcome::Discard(entry.path.clone()),
+                        Confirmation::Restore => Outcome::Restore(entry.kind, entry.path.clone()),
+                        Confirmation::Discard => Outcome::Discard(entry.kind, entry.path.clone()),
                     }
                 }
                 KeyCode::Char('n') | KeyCode::Esc => {
