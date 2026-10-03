@@ -307,6 +307,13 @@ do not replace an operator test of native Windows dialogs/WebView2.
 
 ### Native Windows operator pass (not yet verified)
 
+Partial operator result (2026-10-03, Windows version not recorded): with the
+newly built native GUI open, the operator confirmed that Tab/Shift+Tab stayed
+inside Review and Escape returned focus to its Review opener. The native Open
+dialog appeared on top; cancelling it preserved the same OFFLINE demo profile.
+Opening a file, save/close flow and minimum-size pass below are still
+unverified.
+
 Run this on the rebuilt Windows EXE in a real desktop session. It is entirely
 offline: do not use a device command, and do not treat the demo as live state.
 Record Windows/WebView2 versions and any failed step. Use a unique filename in
