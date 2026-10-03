@@ -91,9 +91,18 @@ restoration requires the matching FILE path and unchanged original macro. Open
 the original file (or restore its FILE draft) first if the editor says the
 current document does not match. A recovered timeline is still not a FILE edit
 until **Add macro to file** or **Update file macro** is pressed. Invalid local
-snapshots are never silently overwritten. This local storage is not a portable
-profile backup and may be unavailable or cleared by the WebView. Other
-uncommitted input fields are not yet covered by crash recovery.
+snapshots are never silently overwritten. The desktop WebView also keeps
+bounded, best-effort snapshots of unfinished profile-name, DPI-stage number,
+stage-color and zone-color inputs. A restart requires an explicit per-field
+**Restore** or **Discard**; restore is offered only for the same FILE path,
+target model, profile name and original field value. A restored value is still
+local input until confirmed in its editor. Save, replace, undo and native close
+are guarded while these fields are unfinished. An unreadable snapshot is not
+silently overwritten. This local storage is not a portable profile backup and
+may be unavailable or cleared by the WebView. Transient selector searches,
+unsubmitted binding choices and the Add stage dialog are not recoverable;
+they are not FILE edits. The local-input snapshot is separate from accepted
+FILE-document recovery.
 
 ## Editing bindings
 
@@ -329,7 +338,8 @@ Sources: [Rust IPC](https://v2.tauri.app/develop/calling-rust/),
 - [x] Recover accepted FILE-document edits after restart through an explicit offline choice.
 - [x] Manage and explicitly discard old GUI recovery snapshots without granting arbitrary filesystem access.
 - [x] Offer explicit best-effort recovery of uncommitted local macro timelines.
-- [ ] Recover other uncommitted input fields.
+- [x] Recover unfinished profile name, DPI and color inputs with explicit restore/discard.
+- [ ] Decide whether transient binding/resolution selectors and Add stage dialog need crash recovery.
 - [ ] Connected app facade **only after** usable hardware baseline/readback is restored.
 - [ ] Separate Preview, Apply and confirmed Save to mouse; no reports in React.
 - [ ] Installer, signing and releases after native behavior is validated.

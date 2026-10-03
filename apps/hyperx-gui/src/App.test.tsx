@@ -11,7 +11,10 @@ import App from "./App";
 import fixture from "./demo.json";
 import type { Snapshot } from "./types";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
 // jsdom has no native dialog implementation; browsers are covered by Playwright.
 HTMLDialogElement.prototype.showModal = function () {
   this.setAttribute("open", "");
@@ -80,6 +83,183 @@ function fakeBackend(initial = structuredClone(fixture) as Snapshot) {
   };
 }
 describe("offline profile UI", () => {
+  it("offers explicit recovery of an unfinished DPI value after restart", async () => {
+    const first = fakeBackend();
+    const mounted = render(<App backend={first} />);
+    const input = await screen.findByRole("spinbutton", {
+      name: "Stage 1 DPI",
+    });
+    fireEvent.change(input, { target: { value: "900" } });
+    await waitFor(() =>
+      expect(first.setLocalDraft).toHaveBeenLastCalledWith(true),
+    );
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Save new file",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    mounted.unmount();
+
+    const second = fakeBackend();
+    render(<App backend={second} />);
+    await screen.findByRole("button", { name: "Restore stage:0:dpi" });
+    expect(
+      (
+        screen.getByRole("spinbutton", {
+          name: "Stage 1 DPI",
+        }) as HTMLInputElement
+      ).disabled,
+    ).toBe(true);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Restore stage:0:dpi" }),
+    );
+    expect(
+      (
+        screen.getByRole("spinbutton", {
+          name: "Stage 1 DPI",
+        }) as HTMLInputElement
+      ).value,
+    ).toBe("900");
+    fireEvent.blur(screen.getByRole("spinbutton", { name: "Stage 1 DPI" }));
+    await waitFor(() =>
+      expect(second.request).toHaveBeenCalledWith("gui_edit", {
+        expectedRevision: 0,
+        edit: { kind: "stage-dpi", index: 0, dpi: 900 },
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Discard stage:0:dpi" }),
+      ).toBeNull(),
+    );
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Save new file",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+  });
+
+  it("requires explicit discard for a draft from another document", async () => {
+    localStorage.setItem(
+      "openhyperx.gui.local-field-drafts.v1",
+      JSON.stringify({
+        version: 1,
+        drafts: [
+          {
+            field: "profile.name",
+            value: "Unfinished",
+            baseline: "Original",
+            path: "elsewhere.toml",
+            device: "pulsefire-raid",
+            name: "Original",
+          },
+        ],
+      }),
+    );
+    const backend = fakeBackend();
+    render(<App backend={backend} />);
+    await screen.findByRole("button", { name: "Discard profile.name" });
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Restore profile.name",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Save new file",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Discard profile.name" }),
+    );
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Save new file",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+    expect(backend.request).toHaveBeenCalledTimes(1);
+  });
+
+  it("discards a live DPI input without committing it on blur", async () => {
+    const backend = fakeBackend();
+    render(<App backend={backend} />);
+    const input = await screen.findByRole("spinbutton", {
+      name: "Stage 1 DPI",
+    });
+    await userEvent.click(input);
+    fireEvent.change(input, { target: { value: "900" } });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Discard stage:0:dpi" }),
+    );
+    expect(backend.request).toHaveBeenCalledTimes(1);
+    expect((input as HTMLInputElement).value).toBe("800");
+  });
+
+  it("recovers a profile name only after explicit restore", async () => {
+    const mounted = render(<App backend={fakeBackend()} />);
+    await screen.findByRole("spinbutton", { name: "Stage 1 DPI" });
+    await userEvent.click(screen.getByRole("button", { name: "Profiles" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Profile name" }), {
+      target: { value: "Recovered name" },
+    });
+    mounted.unmount();
+
+    const backend = fakeBackend();
+    render(<App backend={backend} />);
+    await screen.findByRole("button", { name: "Restore profile.name" });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Restore profile.name" }),
+    );
+    const name = screen.getByRole("textbox", { name: "Profile name" });
+    expect((name as HTMLInputElement).value).toBe("Recovered name");
+    fireEvent.blur(name);
+    await waitFor(() =>
+      expect(backend.request).toHaveBeenCalledWith("gui_edit", {
+        expectedRevision: 0,
+        edit: { kind: "name", name: "Recovered name" },
+      }),
+    );
+  });
+
+  it("recovers an unfinished zone hex value without writing the mouse", async () => {
+    const mounted = render(<App backend={fakeBackend()} />);
+    await screen.findByRole("spinbutton", { name: "Stage 1 DPI" });
+    await userEvent.click(screen.getByRole("button", { name: "Lighting" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Logo color" }), {
+      target: { value: "#123456" },
+    });
+    mounted.unmount();
+
+    const backend = fakeBackend();
+    render(<App backend={backend} />);
+    await screen.findByRole("button", { name: "Restore zone:logo:color" });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Restore zone:logo:color" }),
+    );
+    const color = screen.getByRole("textbox", { name: "Logo color" });
+    expect((color as HTMLInputElement).value).toBe("#123456");
+    fireEvent.blur(color);
+    await waitFor(() =>
+      expect(backend.request).toHaveBeenCalledWith("gui_edit", {
+        expectedRevision: 0,
+        edit: { kind: "solid-zone", zone: "logo", color: "#123456" },
+      }),
+    );
+    expect(
+      backend.request.mock.calls.some(([command]) => command.includes("mouse")),
+    ).toBe(false);
+  });
+
   it("restores a listed offline draft by token without a frontend-supplied path", async () => {
     const initial = structuredClone(fixture) as Snapshot;
     initial.pending_recovery = [

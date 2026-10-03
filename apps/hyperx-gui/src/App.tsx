@@ -17,6 +17,16 @@ import { DeviceRender, MouseArt } from "./mouse-art";
 import { ButtonAssignments } from "./button-assignments";
 import { MacroLibrary } from "./macro-library";
 import { UnresolvedAssignments } from "./unresolved-assignments";
+import {
+  discardFieldRecovery,
+  emptyFieldRecovery,
+  fieldMatches,
+  fieldPage,
+  readFieldRecovery,
+  removeFieldDraft,
+  writeFieldDraft,
+  type FieldDraft,
+} from "./field-recovery";
 import type { Edit, Page, Snapshot, Stage } from "./types";
 
 const pages: Page[] = [
@@ -79,25 +89,48 @@ function ColorField({
   color,
   disabled,
   commit,
+  restored,
+  resetVersion,
+  field,
+  onDraft,
+  clearDraft,
 }: {
   label: string;
   color?: string;
   disabled: boolean;
-  commit: (color: string) => void;
+  commit: (color: string) => Promise<boolean>;
+  restored?: string;
+  resetVersion: number;
+  field: string;
+  onDraft: (value: string) => void;
+  clearDraft: () => void;
 }) {
   const [text, setText] = useState(color ?? "");
   const [invalid, setInvalid] = useState(false);
+  const lastReset = useRef(resetVersion);
   useEffect(() => {
     setText(color ?? "");
     setInvalid(false);
   }, [color]);
-  function submit() {
+  useEffect(() => {
+    if (restored !== undefined) setText(restored);
+  }, [restored]);
+  useEffect(() => {
+    if (lastReset.current !== resetVersion) {
+      setText(color ?? "");
+      setInvalid(false);
+      lastReset.current = resetVersion;
+    }
+  }, [resetVersion]);
+  async function submit() {
     if (!/^#[0-9a-f]{6}$/i.test(text)) {
       setInvalid(true);
       return;
     }
     setInvalid(false);
-    if (text.toUpperCase() !== color?.toUpperCase()) commit(text.toUpperCase());
+    if (text.toUpperCase() !== color?.toUpperCase()) {
+      if (await commit(text.toUpperCase())) clearDraft();
+    } else clearDraft();
   }
   return (
     <div className="color-field">
@@ -112,7 +145,10 @@ function ColorField({
           disabled={disabled}
           onChange={(event) => {
             setText(event.target.value.toUpperCase());
-            commit(event.target.value.toUpperCase());
+            onDraft(event.target.value.toUpperCase());
+            void commit(event.target.value.toUpperCase()).then((saved) => {
+              if (saved) clearDraft();
+            });
           }}
         />
       </label>
@@ -123,12 +159,18 @@ function ColorField({
         placeholder="#RRGGBB"
         disabled={disabled}
         aria-invalid={invalid}
-        onChange={(event) => setText(event.target.value)}
-        onBlur={submit}
+        onChange={(event) => {
+          setText(event.target.value);
+          onDraft(event.target.value);
+        }}
+        onBlur={(event) => {
+          if (event.relatedTarget?.getAttribute("data-discard-field") !== field)
+            void submit();
+        }}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             event.preventDefault();
-            submit();
+            void submit();
           }
         }}
       />
@@ -144,6 +186,11 @@ function StageCard({
   limits,
   disabled,
   edit,
+  restoredDpi,
+  restoredColor,
+  resetVersions,
+  onDraft,
+  clearDraft,
 }: {
   stage: Stage;
   index: number;
@@ -151,13 +198,32 @@ function StageCard({
   limits: NonNullable<NonNullable<Snapshot["capabilities"]>["dpi"]>;
   disabled: boolean;
   edit: (edit: Edit) => Promise<boolean>;
+  restoredDpi?: string;
+  restoredColor?: string;
+  resetVersions: Record<string, number>;
+  onDraft: (field: string, value: string, baseline: string) => void;
+  clearDraft: (field: string) => void;
 }) {
+  const dpiField = `stage:${index}:dpi`;
+  const colorField = `stage:${index}:color`;
+  const baseline = JSON.stringify(stage);
   const [value, setValue] = useState(String(stage.x));
   const [error, setError] = useState(false);
+  const lastReset = useRef(resetVersions[dpiField]);
   useEffect(() => {
     setValue(String(stage.x));
     setError(false);
   }, [stage.x, stage.y]);
+  useEffect(() => {
+    if (restoredDpi !== undefined) setValue(restoredDpi);
+  }, [restoredDpi]);
+  useEffect(() => {
+    if (lastReset.current !== resetVersions[dpiField]) {
+      setValue(String(stage.x));
+      setError(false);
+      lastReset.current = resetVersions[dpiField];
+    }
+  }, [resetVersions[dpiField]]);
   const commit = async () => {
     const dpi = Number(value);
     if (
@@ -171,8 +237,9 @@ function StageCard({
       return;
     }
     setError(false);
-    if (dpi !== stage.x || dpi !== stage.y)
-      await edit({ kind: "stage-dpi", index, dpi });
+    if (dpi !== stage.x || dpi !== stage.y) {
+      if (await edit({ kind: "stage-dpi", index, dpi })) clearDraft(dpiField);
+    } else clearDraft(dpiField);
   };
   return (
     <article className={`stage-card ${active ? "active" : ""}`}>
@@ -200,8 +267,17 @@ function StageCard({
           step={limits.step}
           disabled={disabled}
           aria-invalid={error}
-          onChange={(event) => setValue(event.target.value)}
-          onBlur={() => void commit()}
+          onChange={(event) => {
+            setValue(event.target.value);
+            onDraft(dpiField, event.target.value, baseline);
+          }}
+          onBlur={(event) => {
+            if (
+              event.relatedTarget?.getAttribute("data-discard-field") !==
+              dpiField
+            )
+              void commit();
+          }}
           onKeyDown={(event) => {
             if (event.key === "Enter") event.currentTarget.blur();
           }}
@@ -217,10 +293,18 @@ function StageCard({
         step={limits.step}
         value={Number(value) || limits.minimum}
         disabled={disabled}
-        onChange={(event) => setValue(event.target.value)}
+        onChange={(event) => {
+          setValue(event.target.value);
+          onDraft(dpiField, event.target.value, baseline);
+        }}
         onPointerUp={() => void commit()}
         onKeyUp={() => void commit()}
-        onBlur={() => void commit()}
+        onBlur={(event) => {
+          if (
+            event.relatedTarget?.getAttribute("data-discard-field") !== dpiField
+          )
+            void commit();
+        }}
       />
       <div className="range-labels">
         <span>{limits.minimum}</span>
@@ -242,7 +326,12 @@ function StageCard({
           label={`Stage ${index + 1} color`}
           color={stage.color}
           disabled={disabled}
-          commit={(color) => void edit({ kind: "stage-color", index, color })}
+          restored={restoredColor}
+          resetVersion={resetVersions[colorField] ?? 0}
+          field={colorField}
+          onDraft={(color) => onDraft(colorField, color, baseline)}
+          clearDraft={() => clearDraft(colorField)}
+          commit={(color) => edit({ kind: "stage-color", index, color })}
         />
       </div>
     </article>
@@ -267,6 +356,17 @@ export default function App({
   const [addedDpi, setAddedDpi] = useState(800);
   const [addedColor, setAddedColor] = useState("#FFFFFF");
   const [name, setName] = useState("");
+  const [fieldRecovery, setFieldRecovery] = useState(() =>
+    backend.desktop ? readFieldRecovery() : emptyFieldRecovery,
+  );
+  const [restoredFields, setRestoredFields] = useState<Record<string, string>>(
+    {},
+  );
+  const [resetVersions, setResetVersions] = useState<Record<string, number>>(
+    {},
+  );
+  const [fieldWriteError, setFieldWriteError] = useState<string | null>(null);
+  const [volatileFields, setVolatileFields] = useState<string[]>([]);
   const [macroDraft, setMacroDraft] = useState(false);
   const [macroGeneration, setMacroGeneration] = useState(0);
   const reportMacroDraft = useCallback((pending: boolean) => {
@@ -275,6 +375,13 @@ export default function App({
   }, []);
   const [draftGuardError, setDraftGuardError] = useState<string | null>(null);
   const draftGuardQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const fieldDraft =
+    fieldRecovery.drafts.length > 0 ||
+    fieldRecovery.error !== null ||
+    volatileFields.length > 0;
+  const unresolvedFieldRecovery =
+    fieldRecovery.error !== null ||
+    fieldRecovery.drafts.some((draft) => !(draft.field in restoredFields));
   useEffect(() => {
     if (!backend.desktop || !backend.setLocalDraft) return;
     // Keep true/false notifications ordered, separately from document edits.
@@ -282,15 +389,15 @@ export default function App({
       .catch(() => undefined)
       .then(async () => {
         try {
-          await backend.setLocalDraft!(macroDraft);
+          await backend.setLocalDraft!(macroDraft || fieldDraft);
           setDraftGuardError(null);
         } catch {
           setDraftGuardError(
-            "Cannot notify the native close guard. Keep this window open until your timeline is updated or discarded.",
+            "Cannot notify the native close guard. Keep this window open until local input is updated or discarded.",
           );
         }
       });
-  }, [backend, macroDraft, macroGeneration]);
+  }, [backend, macroDraft, macroGeneration, fieldDraft]);
   useEffect(() => {
     const unsubscribe = client.subscribe(setState);
     void client.request("gui_snapshot").catch(() => undefined);
@@ -299,6 +406,65 @@ export default function App({
   useEffect(() => {
     setName(state.snapshot?.profile.name ?? "");
   }, [state.snapshot?.profile.name]);
+  useEffect(() => {
+    if (restoredFields["profile.name"] !== undefined)
+      setName(restoredFields["profile.name"]);
+  }, [restoredFields]);
+  useEffect(() => {
+    setName(state.snapshot?.profile.name ?? "");
+  }, [resetVersions["profile.name"]]);
+  useEffect(() => {
+    if (!fieldDraft) return;
+    const prevent = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", prevent);
+    return () => window.removeEventListener("beforeunload", prevent);
+  }, [fieldDraft]);
+  function saveFieldInput(field: string, value: string, baseline: string) {
+    if (!backend.desktop || !state.snapshot) return;
+    const snapshot = state.snapshot;
+    const draft: FieldDraft = {
+      field,
+      value,
+      baseline,
+      path: snapshot.path,
+      device: snapshot.profile.device,
+      name: snapshot.profile.name,
+    };
+    try {
+      setFieldRecovery(writeFieldDraft(draft));
+      setRestoredFields((fields) => ({ ...fields, [field]: value }));
+      setVolatileFields((fields) => fields.filter((entry) => entry !== field));
+      setFieldWriteError(null);
+    } catch {
+      setVolatileFields((fields) => [...new Set([...fields, field])]);
+      setFieldWriteError(
+        "Could not save this unfinished input for crash recovery. Keep the window open and commit or discard it.",
+      );
+    }
+  }
+  function clearFieldInput(field: string) {
+    try {
+      setFieldRecovery(removeFieldDraft(field));
+      setVolatileFields((fields) => fields.filter((entry) => entry !== field));
+      setRestoredFields((fields) => {
+        const next = { ...fields };
+        delete next[field];
+        return next;
+      });
+      setFieldWriteError(null);
+    } catch {
+      setFieldWriteError(
+        "Could not clear local input recovery. Inspect or discard the saved draft before closing.",
+      );
+    }
+  }
+  function discardFieldInput(field: string) {
+    clearFieldInput(field);
+    setResetVersions((versions) => ({
+      ...versions,
+      [field]: (versions[field] ?? 0) + 1,
+    }));
+  }
   async function request(command: string, args?: Record<string, unknown>) {
     try {
       if (
@@ -311,8 +477,10 @@ export default function App({
           "gui_reset",
           "gui_restore_recovery",
         ].includes(command)
-      )
+      ) {
+        if (fieldDraft) return false;
         await draftGuardQueue.current;
+      }
       await client.request(command, args);
       return true;
     } catch {
@@ -328,7 +496,7 @@ export default function App({
     }
   }
   function replace(action: "open" | "empty" | "demo") {
-    if (macroDraft) return;
+    if (macroDraft || fieldDraft) return;
     setReplacement(action);
     if (state.snapshot?.dirty) setModal("discard");
     else void doReplace(action, false);
@@ -348,7 +516,7 @@ export default function App({
   }
   const snapshot = state.snapshot;
   const profile = snapshot?.profile;
-  const disabled = !backend.desktop || state.busy;
+  const disabled = !backend.desktop || state.busy || unresolvedFieldRecovery;
   const changes =
     (snapshot?.changes.settings.length ?? 0) +
     (snapshot?.changes.metadata.length ?? 0);
@@ -415,7 +583,7 @@ export default function App({
           </div>
           <div className="toolbar-actions">
             <button
-              disabled={disabled || macroDraft}
+              disabled={disabled || macroDraft || fieldDraft}
               onClick={() => replace("open")}
             >
               <Icon name="open" />
@@ -423,7 +591,7 @@ export default function App({
             </button>
             <button
               className="primary"
-              disabled={disabled || !snapshot || macroDraft}
+              disabled={disabled || !snapshot || macroDraft || fieldDraft}
               onClick={() => void request("gui_save_profile")}
             >
               <Icon name="save" />
@@ -521,6 +689,90 @@ export default function App({
               {draftGuardError}
             </div>
           )}
+          {fieldWriteError && (
+            <div className="notice error" role="alert">
+              {fieldWriteError}
+            </div>
+          )}
+          {fieldDraft && (
+            <section className="notice" aria-label="Unfinished input recovery">
+              <strong>Unfinished input fields</strong>
+              <p>
+                These values are not in the FILE draft. Restore a matching
+                field, then confirm it in its editor; or discard the local
+                input. Saving or replacing the file is paused meanwhile.
+              </p>
+              {fieldRecovery.error && <p role="alert">{fieldRecovery.error}</p>}
+              {fieldRecovery.drafts.map((draft) => {
+                const matches = !!snapshot && fieldMatches(snapshot, draft);
+                const restored = draft.field in restoredFields;
+                return (
+                  <div key={draft.field}>
+                    <span>
+                      {draft.field}: {draft.value}
+                      {!matches && " · different document or original value"}
+                      {restored && " · restored in editor"}
+                    </span>
+                    {!restored && (
+                      <button
+                        disabled={!matches}
+                        onClick={() => {
+                          setRestoredFields((fields) => ({
+                            ...fields,
+                            [draft.field]: draft.value,
+                          }));
+                          setPage(fieldPage(draft.field));
+                        }}
+                      >
+                        Restore {draft.field}
+                      </button>
+                    )}
+                    <button
+                      data-discard-field={draft.field}
+                      onClick={() => discardFieldInput(draft.field)}
+                    >
+                      Discard {draft.field}
+                    </button>
+                  </div>
+                );
+              })}
+              {volatileFields
+                .filter(
+                  (field) =>
+                    !fieldRecovery.drafts.some(
+                      (draft) => draft.field === field,
+                    ),
+                )
+                .map((field) => (
+                  <div key={field}>
+                    <span>{field} · recovery unavailable</span>
+                    <button
+                      data-discard-field={field}
+                      onClick={() => discardFieldInput(field)}
+                    >
+                      Discard {field}
+                    </button>
+                  </div>
+                ))}
+              {fieldRecovery.error && (
+                <button
+                  onClick={() => {
+                    try {
+                      discardFieldRecovery();
+                      setFieldRecovery(emptyFieldRecovery);
+                      setFieldWriteError(null);
+                    } catch {
+                      setFieldWriteError(
+                        "Could not discard unreadable local input recovery.",
+                      );
+                    }
+                  }}
+                >
+                  Discard unreadable input recovery
+                </button>
+              )}
+            </section>
+          )}
           {macroDraft && page !== "Macros" && (
             <div className="notice">
               Uncommitted macro timeline preserved. Update or discard it before
@@ -616,6 +868,11 @@ export default function App({
                           limits={limits}
                           disabled={disabled}
                           edit={edit}
+                          restoredDpi={restoredFields[`stage:${index}:dpi`]}
+                          restoredColor={restoredFields[`stage:${index}:color`]}
+                          resetVersions={resetVersions}
+                          onDraft={saveFieldInput}
+                          clearDraft={clearFieldInput}
                         />
                       ))}
                     </div>
@@ -710,8 +967,23 @@ export default function App({
                             label={`${zone.name} color`}
                             color={zones?.[zone.id]}
                             disabled={disabled}
+                            restored={restoredFields[`zone:${zone.id}:color`]}
+                            resetVersion={
+                              resetVersions[`zone:${zone.id}:color`] ?? 0
+                            }
+                            field={`zone:${zone.id}:color`}
+                            onDraft={(value) =>
+                              saveFieldInput(
+                                `zone:${zone.id}:color`,
+                                value,
+                                zones?.[zone.id] ?? "",
+                              )
+                            }
+                            clearDraft={() =>
+                              clearFieldInput(`zone:${zone.id}:color`)
+                            }
                             commit={(color) =>
-                              void edit({
+                              edit({
                                 kind: "solid-zone",
                                 zone: zone.id,
                                 color,
@@ -883,10 +1155,26 @@ export default function App({
                         value={name}
                         disabled={disabled}
                         maxLength={128}
-                        onChange={(event) => setName(event.target.value)}
-                        onBlur={() => {
-                          if (name !== profile.name)
-                            void edit({ kind: "name", name });
+                        onChange={(event) => {
+                          setName(event.target.value);
+                          saveFieldInput(
+                            "profile.name",
+                            event.target.value,
+                            profile.name,
+                          );
+                        }}
+                        onBlur={(event) => {
+                          if (
+                            event.relatedTarget?.getAttribute(
+                              "data-discard-field",
+                            ) === "profile.name"
+                          )
+                            return;
+                          if (name !== profile.name) {
+                            void edit({ kind: "name", name }).then((saved) => {
+                              if (saved) clearFieldInput("profile.name");
+                            });
+                          } else clearFieldInput("profile.name");
                         }}
                         onKeyDown={(event) => {
                           if (event.key === "Enter") event.currentTarget.blur();
@@ -947,31 +1235,41 @@ export default function App({
                     </dl>
                     <div className="inline-actions">
                       <button
-                        disabled={disabled || macroDraft || !snapshot.can_undo}
+                        disabled={
+                          disabled ||
+                          macroDraft ||
+                          fieldDraft ||
+                          !snapshot.can_undo
+                        }
                         onClick={() => void request("gui_undo_file_edit")}
                       >
                         Undo file edit
                       </button>
                       <button
-                        disabled={disabled || macroDraft || !snapshot.can_redo}
+                        disabled={
+                          disabled ||
+                          macroDraft ||
+                          fieldDraft ||
+                          !snapshot.can_redo
+                        }
                         onClick={() => void request("gui_redo_file_edit")}
                       >
                         Redo file edit
                       </button>
                       <button
-                        disabled={disabled || macroDraft}
+                        disabled={disabled || macroDraft || fieldDraft}
                         onClick={() => replace("empty")}
                       >
                         New draft
                       </button>
                       <button
-                        disabled={disabled || macroDraft}
+                        disabled={disabled || macroDraft || fieldDraft}
                         onClick={() => replace("demo")}
                       >
                         Load demo
                       </button>
                       <button
-                        disabled={disabled || macroDraft}
+                        disabled={disabled || macroDraft || fieldDraft}
                         onClick={() => replace("open")}
                       >
                         <Icon name="open" />
@@ -981,6 +1279,7 @@ export default function App({
                         disabled={
                           disabled ||
                           macroDraft ||
+                          fieldDraft ||
                           !snapshot.path ||
                           !snapshot.dirty
                         }
@@ -1037,7 +1336,7 @@ export default function App({
           <div>
             <i
               className={
-                snapshot?.dirty || macroDraft
+                snapshot?.dirty || macroDraft || fieldDraft
                   ? "status-dot unsaved"
                   : "status-dot"
               }
@@ -1045,11 +1344,13 @@ export default function App({
             <span>
               {state.busy
                 ? "Working on file…"
-                : macroDraft
-                  ? "Uncommitted macro timeline"
-                  : snapshot?.dirty
-                    ? "Unsaved file changes"
-                    : "No unsaved file changes"}
+                : fieldDraft
+                  ? "Unfinished input fields"
+                  : macroDraft
+                    ? "Uncommitted macro timeline"
+                    : snapshot?.dirty
+                      ? "Unsaved file changes"
+                      : "No unsaved file changes"}
             </span>
             <button
               className="text-button"
@@ -1144,7 +1445,11 @@ export default function App({
             <button
               className="primary"
               disabled={
-                state.busy || macroDraft || !snapshot.path || !snapshot.dirty
+                state.busy ||
+                macroDraft ||
+                fieldDraft ||
+                !snapshot.path ||
+                !snapshot.dirty
               }
               onClick={() =>
                 void request("gui_overwrite_profile", { confirmed: true }).then(
