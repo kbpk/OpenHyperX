@@ -8,8 +8,8 @@ use hyperx_core::HidInterfaceInfo;
 use hyperx_devices::PULSEFIRE_RAID;
 use hyperx_hid::{HidApiTransport, HidDiscovery, HidTransport};
 use hyperx_protocol::pulsefire_raid::{
-    encode_profile_read_request, encode_runtime_profile_read_prelude, DIRECT_REPORT_ID,
-    DIRECT_REPORT_LENGTH,
+    encode_profile_read_request, encode_runtime_profile_read_prelude, PerformanceProfile,
+    ProfileSection, DIRECT_REPORT_ID, DIRECT_REPORT_LENGTH,
 };
 
 const READ_REQUEST_DELAY: Duration = Duration::from_millis(110);
@@ -44,6 +44,27 @@ enum Probe {
     PassiveGet,
     ReadRequestGet,
     RuntimeSelectOnly,
+}
+
+#[derive(Debug)]
+enum FeatureObservation {
+    Onboard(PerformanceProfile),
+    Runtime(PerformanceProfile),
+    Opaque(String),
+}
+
+fn classify_feature_response(report: &[u8; DIRECT_REPORT_LENGTH]) -> FeatureObservation {
+    let profile = match PerformanceProfile::parse(report) {
+        Ok(profile) => profile,
+        Err(error) => return FeatureObservation::Opaque(error.to_string()),
+    };
+    if let Err(error) = profile.validate_confirmed_read_settings() {
+        return FeatureObservation::Opaque(error.to_string());
+    }
+    match profile.section() {
+        ProfileSection::Onboard => FeatureObservation::Onboard(profile),
+        ProfileSection::Runtime => FeatureObservation::Runtime(profile),
+    }
 }
 
 pub fn run(command: LabCommand, discovery: &dyn HidDiscovery) -> Result<()> {
@@ -98,7 +119,20 @@ pub fn run(command: LabCommand, discovery: &dyn HidDiscovery) -> Result<()> {
         "Nonzero bytes after offset 2: {}.",
         report[3..].iter().filter(|&&byte| byte != 0).count()
     );
-    println!("This is one returned feature response, not a validated current/runtime profile. Inspect the capture and physical behavior before any further experiment. No selector, automatic retry or restoration.");
+    match classify_feature_response(&report) {
+        FeatureObservation::Onboard(profile) => {
+            println!("Observed onboard-section image: all currently decoded setting fields are valid. This is not a verified fresh onboard snapshot or current runtime state.");
+            super::print_profile_settings(&profile);
+        }
+        FeatureObservation::Runtime(profile) => {
+            println!("Observed runtime-section image: all currently decoded setting fields are valid. This is not a verified fresh/current runtime snapshot or a safe write baseline.");
+            super::print_profile_settings(&profile);
+        }
+        FeatureObservation::Opaque(reason) => {
+            println!("Opaque or unusable feature response ({reason}); no settings inferred.");
+        }
+    }
+    println!("The response section reflects the device's session state; no selector was sent. Known-field validation does not interpret opaque bytes, prove freshness or permit a write. Inspect the capture and physical behavior before any further experiment. No automatic retry or restoration.");
     println!(
         "Feature SET_REPORT count: {} (only the fixed 07 81 request when enabled).",
         usize::from(matches!(probe, Probe::ReadRequestGet))
@@ -196,6 +230,85 @@ fn read_one_feature_response(
 mod tests {
     use super::*;
     use hyperx_hid::{testing::MockHidTransport, HidError};
+    use hyperx_protocol::capture::parse_report_log;
+
+    fn fixture_response(source: &str, index: usize) -> [u8; DIRECT_REPORT_LENGTH] {
+        let log = parse_report_log(source).unwrap();
+        log.records[index]
+            .report
+            .bytes
+            .as_slice()
+            .try_into()
+            .unwrap()
+    }
+
+    #[test]
+    fn captured_selector_free_request_is_observed_onboard_not_runtime() {
+        let response = fixture_response(
+            include_str!("../../hyperx-protocol/tests/fixtures/read-request-get-onboard.hex"),
+            1,
+        );
+        let mut transport = MockHidTransport::new(1);
+        transport.expect_feature_report(encode_profile_read_request());
+        transport.queue_feature_response(response);
+        let mut waits = Vec::new();
+        let received = read_request_then_get(&mut transport, |delay| waits.push(delay)).unwrap();
+        assert_eq!(received, response);
+        assert!(matches!(
+            classify_feature_response(&received),
+            FeatureObservation::Onboard(_)
+        ));
+        assert_eq!(waits, [READ_REQUEST_DELAY]);
+        assert_eq!(transport.feature_reports_sent().len(), 1);
+        assert_eq!(transport.feature_read_attempts(), 1);
+        transport.assert_drained();
+    }
+
+    #[test]
+    fn classification_rejects_passive_opaque_empty_invalid_and_host_write_images() {
+        let mut opaque = [0; DIRECT_REPORT_LENGTH];
+        opaque[..4].copy_from_slice(&[7, 0xFF, 0xFF, 0xFF]);
+        assert!(matches!(
+            classify_feature_response(&opaque),
+            FeatureObservation::Opaque(_)
+        ));
+        let empty = fixture_response(
+            include_str!("../../hyperx-protocol/tests/fixtures/cold-legacy-startup-images.hex"),
+            0,
+        );
+        assert!(matches!(
+            classify_feature_response(&empty),
+            FeatureObservation::Opaque(_)
+        ));
+        let onboard = fixture_response(
+            include_str!("../../hyperx-protocol/tests/fixtures/read-request-get-onboard.hex"),
+            1,
+        );
+        let mut invalid_polling = onboard;
+        invalid_polling[0x18] = 3;
+        assert!(matches!(
+            classify_feature_response(&invalid_polling),
+            FeatureObservation::Opaque(_)
+        ));
+        let mut host_write = onboard;
+        host_write[1] = 1;
+        assert!(matches!(
+            classify_feature_response(&host_write),
+            FeatureObservation::Opaque(_)
+        ));
+    }
+
+    #[test]
+    fn captured_warm_runtime_response_is_observation_not_write_authority() {
+        let response = fixture_response(
+            include_str!("../../hyperx-protocol/tests/fixtures/warm-legacy-startup-images.hex"),
+            0,
+        );
+        assert!(matches!(
+            classify_feature_response(&response),
+            FeatureObservation::Runtime(_)
+        ));
+    }
 
     #[test]
     fn passive_get_reads_once_without_any_tx_even_for_empty_or_opaque_response() {

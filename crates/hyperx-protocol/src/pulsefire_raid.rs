@@ -386,6 +386,8 @@ pub enum PerformanceProfileError {
     },
     #[error("expected a runtime profile as the onboard-save source, got {0:?}")]
     ExpectedRuntimeSettingsSource(ProfileSection),
+    #[error("expected a device read-response image, got {0:?}")]
+    ExpectedDeviceReadResponse(ProfileImageKind),
 }
 
 /// Axis identifying an invalid DPI value in a profile.
@@ -716,6 +718,25 @@ impl PerformanceProfile {
                 self.section,
             ));
         }
+        self.validate_confirmed_settings()
+    }
+
+    /// Validate every currently decoded setting in a captured read response.
+    ///
+    /// This checks known fields in either profile section, not opaque bytes,
+    /// response freshness, physical effect of the query or write readiness.
+    /// In particular, a selector-free request can return an onboard image even
+    /// when the caller hoped to inspect volatile runtime state.
+    pub fn validate_confirmed_read_settings(&self) -> Result<(), PerformanceProfileError> {
+        if self.kind != ProfileImageKind::DeviceReadResponse {
+            return Err(PerformanceProfileError::ExpectedDeviceReadResponse(
+                self.kind,
+            ));
+        }
+        self.validate_confirmed_settings()
+    }
+
+    fn validate_confirmed_settings(&self) -> Result<(), PerformanceProfileError> {
         self.polling_rate()?;
         // Decode layout first, then apply the same per-axis numeric constraints
         // as set_dpi_profile. Check all enabled stages, not just the active one;

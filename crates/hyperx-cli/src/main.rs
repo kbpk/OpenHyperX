@@ -31,8 +31,8 @@ use hyperx_protocol::{
         NgenuityMacroItem, NgenuityMouseButton, NgenuityPreset,
     },
     pulsefire_raid::{
-        inspect_captured_report, PerformanceProfile, ProfileSection, PulsefireRaidControl,
-        RaidReportInspection,
+        inspect_captured_report, PerformanceProfile, ProfileImageKind, ProfileSection,
+        PulsefireRaidControl, RaidReportInspection,
     },
 };
 use tracing_subscriber::EnvFilter;
@@ -1798,6 +1798,12 @@ fn inspect_capture_file(path: &Path, raw: bool, all_raw: bool) -> Result<()> {
                 if empty {
                     println!("  WARNING: empty body after the report header; not a usable settings snapshot. Do not write, retry or infer restored state from this response.");
                 } else {
+                    if profile.kind() == ProfileImageKind::DeviceReadResponse {
+                        match profile.validate_confirmed_read_settings() {
+                            Ok(()) => println!("  Known setting fields validate for inspection; opaque bytes, freshness and write safety are not established."),
+                            Err(error) => println!("  WARNING: read-response known fields do not fully validate: {error}"),
+                        }
+                    }
                     if profile.section() == ProfileSection::Runtime {
                         if let Err(error) = profile.validate_confirmed_runtime_settings() {
                             println!("  WARNING: not a safe runtime write baseline: {error}");

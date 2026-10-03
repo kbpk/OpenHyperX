@@ -1919,6 +1919,30 @@ Clippy/tests/build and native Windows CLI all-target tests/build pass again;
 the rebuilt native executable also inspects the fixture offline successfully.
 No further hardware query was used for this regression verification.
 
+#### Offline classification of a diagnostic response (2026-10-03)
+
+The existing hidden `lab raid-read-request-get --unsafe` diagnostic now
+classifies its **already received** 264-byte response without sending any
+additional HID report. It recognizes an onboard or runtime *section image*
+only when the envelope is a device read response and every currently decoded
+polling, DPI-stage and button field validates. Otherwise it labels the response
+opaque or unusable and infers no settings. The selector-free captured fixture
+classifies as onboard; the cold all-zero runtime body, the passive `07 FF FF FF`
+response, an invalid polling code and a host-write image do not classify as
+usable observations. A previously captured warm runtime RX classifies as a
+runtime-section observation. Golden fixtures and mock transport tests verify
+the classification and unchanged one-request/one-GET sequence; an executable
+offline capture-inspection test uses the same known-field validation.
+
+This is **not** a pure read: `raid-read-request-get` sends `07 81` before GET.
+It is also not a live-state API. The device's selected section is session
+dependent; known-field validity cannot prove freshness, identify opaque bytes,
+recover macro timelines or authorize a write. A bare GET was separately
+observed to return `07 FF FF FF` with no profile. Normal `info`, runtime and
+save commands remain gated, and no new live probe was performed for this
+classification change. Any further hardware use needs a separate exact plan,
+operator consent and a physical-behavior check.
+
 ### Isolating the runtime selector (2026-09-27)
 
 The next narrowly consented diagnostic sends only the exact repeated

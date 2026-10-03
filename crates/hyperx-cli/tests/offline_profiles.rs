@@ -382,6 +382,7 @@ fn selector_free_request_fixture_is_onboard_not_an_assumed_runtime_read() {
         "2 report(s)",
         "no section in this packet",
         "Profile image: Onboard DeviceReadResponse",
+        "Known setting fields validate for inspection; opaque bytes, freshness and write safety are not established.",
         "1000 Hz",
         "800 DPI",
         "6400 DPI",
