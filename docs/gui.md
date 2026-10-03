@@ -297,9 +297,42 @@ delays, reorder/removal, referenced replacement consent, stale-definition guards
 local-draft preservation and native close-guard notifications. A browser test
 also exercises editable timeline layout using explicitly mocked native IPC;
 this does not replace native-window operator verification.
+The Chromium E2E suite also activates every section by keyboard and checks that
+Tab/Shift+Tab wrap inside the Review dialog and Escape/Done return focus to its
+opener. WebView2 and native Windows file dialogs still need the operator pass
+below; passing browser E2E alone does not close that item.
 Rust tests cover the real shared validation, preservation of unknown values,
 failed actions, safe new-file writes and the demo JSON contract. Browser tests
 do not replace an operator test of native Windows dialogs/WebView2.
+
+### Native Windows operator pass (not yet verified)
+
+Run this on the rebuilt Windows EXE in a real desktop session. It is entirely
+offline: do not use a device command, and do not treat the demo as live state.
+Record Windows/WebView2 versions and any failed step. Use a unique filename in
+`$env:TEMP` for Save NEW; keep the resulting file for inspection rather than
+overwriting an existing profile.
+
+1. Start `hyperx-gui.exe --demo`. Confirm the window shows **OFFLINE** and
+   **DEMO PROFILE**, and that Apply/Save to mouse are disabled. Switch all six
+   sections by mouse, then focus each sidebar button and activate it with Enter.
+   At the minimum 900×640 window size, controls and status bar must remain
+   reachable without horizontal clipping.
+2. Focus **Review**, press Space, then cycle Tab and Shift+Tab several times.
+   Focus must remain on the dialog's controls. Escape must close it and return
+   focus to Review; reopen with Enter, choose Done and verify the same return.
+3. Choose **Open profile** and cancel the Windows file dialog. The demo must
+   remain loaded. Open `examples/profiles/pulsefire-raid.toml` explicitly;
+   confirm the source becomes a local FILE and no device connection is claimed.
+4. Change the profile name, choose **Save new file**, and select a unique TOML
+   path under `$env:TEMP` in the native dialog. Verify the file exists and the
+   GUI shows a clean FILE draft. Make another name edit, request window close,
+   cancel the dirty-draft confirmation, then close again and confirm. No
+   setting should be applied to the mouse in any of these steps.
+
+If the native dialog opens behind the window, focus escapes, paste/typing is
+lost, the window cannot be closed after cancel, or the file differs from the
+shown draft, record the exact step and screenshot before changing anything else.
 
 ## Boundary
 
@@ -332,7 +365,7 @@ Sources: [Rust IPC](https://v2.tauri.app/develop/calling-rust/),
 - [x] General binding selectors, legal choices from shared model metadata.
 - [x] Editable macro timeline with target-specific limits and library management.
 - [x] Partial/unresolved import inspection and explicit resolution/omission controls.
-- [ ] Keyboard navigation/operator tests of native dialogs and WebView2.
+- [ ] Keyboard navigation/operator tests of native dialogs and WebView2 (Chromium E2E done; native checklist above remains).
 - [x] Deliberate recoverable overwrite of an opened FILE with a separate review.
 - [x] Bounded in-session undo/redo for complete FILE drafts.
 - [x] Recover accepted FILE-document edits after restart through an explicit offline choice.

@@ -44,6 +44,56 @@ test("preview navigation stays offline and read-only", async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test("keyboard navigation and review dialog keep focus in the active surface", async ({
+  page,
+}) => {
+  await page.goto("/");
+  for (const name of [
+    "Device",
+    "Performance",
+    "Buttons",
+    "Macros",
+    "Lighting",
+    "Profiles",
+  ]) {
+    const section = page.getByRole("button", { name, exact: true });
+    await section.focus();
+    await page.keyboard.press("Enter");
+    await expect(section).toHaveAttribute("aria-current", "page");
+    await expect(
+      page.getByRole("heading", { name, exact: true }),
+    ).toBeVisible();
+  }
+
+  const review = page.getByRole("button", { name: "Review", exact: true });
+  await review.focus();
+  await page.keyboard.press("Space");
+  const dialog = page.getByRole("dialog", { name: "Review file changes" });
+  await expect(dialog).toBeVisible();
+  const close = dialog.getByRole("button", { name: "Close dialog" });
+  const done = dialog.getByRole("button", { name: "Done" });
+  await close.focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(done).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(close).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(done).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(close).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(review).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Done" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(review).toBeFocused();
+  await expect(
+    page.getByText("No unsaved file changes", { exact: true }),
+  ).toBeVisible();
+});
+
 test("real graphical hit targets select all 11 controls, without edits", async ({
   page,
 }) => {

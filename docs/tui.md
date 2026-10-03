@@ -21,6 +21,45 @@ If launching directly from WSL would give the Windows executable redirected
 stdin/stdout, use Windows Terminal instead. The TUI refuses noninteractive
 streams rather than hanging. Linux/macOS can run their native executable.
 
+### Windows Terminal operator smoke (not yet verified)
+
+Use a real interactive Windows Terminal PowerShell, not redirected WSL
+stdin/stdout. The isolated recovery directory below is under the current
+user's temp directory and does not touch ordinary profiles or USB devices.
+
+```powershell
+$ohxCase = Join-Path $env:TEMP ("openhyperx-tui-operator-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+New-Item -ItemType Directory -Path $ohxCase | Out-Null
+& '.\target\x86_64-pc-windows-msvc\debug\hyperx-tui.exe' --demo --recovery-dir $ohxCase
+```
+
+1. Confirm **OFFLINE** and **DEMO DATA**. Switch Performance/Buttons/Macros/
+   Lighting/Profiles by clicking their tabs, then with Tab and Shift+Tab.
+   Click a DPI slider and its exact-number editor; change one stage only.
+   Check wheel scrolling outside the slider and click a color swatch. These
+   are FILE-draft edits, never live DPI/lighting writes.
+2. In Buttons, open a non-primary binding selector. Use mouse and keyboard to
+   change categories, paste `left-shift` into Keyboard search with Windows
+   Terminal's Ctrl+Shift+V, and cancel with Esc. The binding must remain
+   unchanged. Open Macros, inspect a timeline with keyboard and mouse, and
+   cancel without accepting it into the FILE draft.
+3. Resize from about 100×30 to 45×12. The selected tab, bottom actions and
+   row/scroll hint must remain reachable; modal controls must stay on screen.
+   Resize back and verify mouse clicks hit the current controls, not stale
+   coordinates. At smaller than 45×12, expect a resize notice, not a crash.
+4. Because the DPI edit is unsaved, press `q`, confirm quitting with `y`, and
+   start the same command again using the unchanged `$ohxCase`. In Profiles,
+   open **F7 / Recovery**, select the FILE snapshot, press `r`, then `y`.
+   The edited DPI should return as an **UNSAVED** FILE draft; nothing is saved
+   to the mouse. Exit with `q`, then `y` if prompted.
+5. Back at the PowerShell prompt, verify ordinary selection, mouse-wheel
+   scrolling and paste work. This checks that mouse capture and bracketed paste
+   were disabled on exit. Keep `$ohxCase` if a failure needs diagnosis.
+
+Record Windows Terminal version, terminal size and the first failing step.
+Headless `--render`/`--check` and unit tests do not establish this interactive
+behavior.
+
 The interactive TUI automatically writes a private offline recovery snapshot
 after each accepted FILE draft edit. It preserves the original file baseline
 and exact bytes for the stale-file overwrite check. A normal Save NEW or
