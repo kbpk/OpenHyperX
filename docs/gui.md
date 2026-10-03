@@ -339,7 +339,7 @@ Sources: [Rust IPC](https://v2.tauri.app/develop/calling-rust/),
 - [x] Manage and explicitly discard old GUI recovery snapshots without granting arbitrary filesystem access.
 - [x] Offer explicit best-effort recovery of uncommitted local macro timelines.
 - [x] Recover unfinished profile name, DPI and color inputs with explicit restore/discard.
-- [ ] Decide whether transient binding/resolution selectors and Add stage dialog need crash recovery.
+- [x] Keep transient binding/resolution selectors and the Add stage dialog out of crash recovery: choices are not FILE edits and must be explicitly submitted again; recover typed name/DPI/color fields instead.
 - [ ] Connected app facade **only after** usable hardware baseline/readback is restored.
 - [ ] Separate Preview, Apply and confirmed Save to mouse; no reports in React.
 - [ ] Installer, signing and releases after native behavior is validated.

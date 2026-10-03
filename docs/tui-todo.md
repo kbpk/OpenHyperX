@@ -10,7 +10,7 @@ must reuse `hyperx-app`; completing GUI work must not remove terminal features.
 - [x] Color swatches/palette, with text values retained for accessibility.
 - [x] Main views retain visible scroll position and mouse actions at the 45x12 minimum.
 - [x] Extend compact layouts to editors/dialogs and verify keyboard/mouse reachability at 45x12.
-- [ ] Review keyboard shortcuts and focus navigation alongside mouse controls.
+- [x] Review keyboard shortcuts and focus navigation alongside mouse controls; both BackTab and Shift+Tab work in tabs/binding categories, modal editors isolate keys.
 - [ ] Native Windows Terminal operator smoke test for mouse, paste and restoration.
 
 ## Buttons
@@ -39,7 +39,7 @@ must reuse `hyperx-app`; completing GUI work must not remove terminal features.
 - [x] Recover accepted FILE document edits after restart from an explicit private snapshot.
 - [x] Add an interactive TUI panel to list, restore and discard FILE-draft snapshots.
 - [x] Recover unaccepted text-editor fields and macro timelines separately from FILE drafts.
-- [ ] Decide whether transient file-browser/binding/resolution search filters merit crash recovery.
+- [x] Keep transient file-browser/binding/resolution search filters out of crash recovery: they are reconstructible navigation, not accepted FILE edits; the separately recoverable local editors hold actual input.
 
 ## Connected mode — blocked on hardware evidence
 

@@ -74,6 +74,23 @@ fn button_table_lists_all_controls_and_primary_clicks_never_open_individual_edit
 }
 
 #[test]
+fn tab_variants_navigate_picker_categories_without_changing_the_main_tab_or_file() {
+    let mut app = app();
+    let before = app.document.profile().clone();
+    select_control(&mut app, "button4");
+    let original = screen(&mut app, 120, 40);
+    assert!(original.contains("[<] Mouse function [>]"));
+    app.handle_key(key(KeyCode::Tab));
+    assert!(screen(&mut app, 120, 40).contains("[<] Multimedia [>]"));
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT));
+    assert!(screen(&mut app, 120, 40).contains("[<] Mouse function [>]"));
+    app.handle_key(key(KeyCode::BackTab));
+    assert!(screen(&mut app, 120, 40).contains("[<] Not specified (preserve) [>]"));
+    assert_eq!(app.tab, 1);
+    assert_eq!(app.document.profile(), &before);
+}
+
+#[test]
 fn searchable_keys_preview_then_accept_one_semantic_binding_preserving_every_other_field() {
     let mut app = app();
     let before = app.document.profile().clone();

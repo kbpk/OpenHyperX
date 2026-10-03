@@ -1,7 +1,7 @@
 //! Semantic file-binding selector. Choices and target validation belong to the
 //! app layer; picking a row is only a preview until explicit acceptance.
 use anyhow::{bail, Context, Result};
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use hyperx_app::{profile_binding_choices, profile_controls, ProfileValueEdit};
 use hyperx_core::{SoftwareButtonBinding, SoftwareProfile};
 use ratatui::{
@@ -205,6 +205,7 @@ impl BindingPicker {
     pub fn key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Left | KeyCode::BackTab => self.category_move(-1),
+            KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => self.category_move(-1),
             KeyCode::Right | KeyCode::Tab => self.category_move(1),
             KeyCode::Up => self.move_selection(-1),
             KeyCode::Down => self.move_selection(1),

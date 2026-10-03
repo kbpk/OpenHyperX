@@ -65,8 +65,12 @@ scrollable lists and compact macro controls. At smaller sizes the TUI shows a
 resize notice instead of panicking. `--view` selects
 performance, buttons, macros, lighting or profiles on startup and in `--render`;
 it cannot be combined with validation-only `--check`.
-In Performance, `[` / `]` keeps the keyboard-selected DPI stage on screen even
-when the compact viewport shows only one stage at a time.
+Tab / Shift+Tab (or BackTab) moves between main views; inside the binding
+picker it moves forward/backward between assignment categories instead. An
+open editor keeps keyboard focus, so Tab inserts indentation in a multiline
+TOML field rather than switching the main view. In Performance, `[` / `]` keeps
+the keyboard-selected DPI stage on screen even when the compact viewport shows
+only one stage at a time.
 
 Profile views use readable action/macro names and explicit `<not present>`,
 `<unknown>` or `<not saved>` labels instead of Rust `Some(...)`/enum debug text.

@@ -470,6 +470,10 @@ impl App {
             return;
         }
         match key.code {
+            KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                self.tab = (self.tab + 4) % 5;
+                self.scroll = 0;
+            }
             KeyCode::Tab | KeyCode::Right => {
                 self.tab = (self.tab + 1) % 5;
                 self.scroll = 0;

@@ -282,8 +282,34 @@ fn windows_release_events_do_not_repeat_navigation_or_actions() {
     assert_eq!(app.tab, 1);
     app.handle_key(key(KeyCode::BackTab));
     assert_eq!(app.tab, 0);
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT));
+    assert_eq!(app.tab, 4);
+    app.handle_key(key(KeyCode::Tab));
+    assert_eq!(app.tab, 0);
     app.handle_key(key(KeyCode::Char('5')));
     assert_eq!(app.tab, 4);
+}
+
+#[test]
+fn modal_keyboard_focus_keeps_tab_navigation_inside_the_editor() {
+    let mut app = app();
+    let before = app.document.profile().clone();
+    app.handle_key(key(KeyCode::Char('e')));
+    assert!(matches!(app.modal, Some(Modal::Editor { .. })));
+    let length = match &app.modal {
+        Some(Modal::Editor { editor, .. }) => editor.text().len(),
+        _ => unreachable!(),
+    };
+    app.handle_key(key(KeyCode::Tab));
+    assert_eq!(app.tab, 0);
+    assert!(
+        matches!(&app.modal, Some(Modal::Editor { editor, .. }) if editor.text().len() == length + 4)
+    );
+    app.handle_key(key(KeyCode::Esc));
+    assert!(app.modal.is_none());
+    assert_eq!(app.document.profile(), &before);
+    app.handle_key(key(KeyCode::Tab));
+    assert_eq!(app.tab, 1);
 }
 
 #[test]
