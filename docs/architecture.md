@@ -242,6 +242,12 @@ Raw TX/RX logging is emitted only at `trace` level.
 The Raid codec has one target-encoding table containing each confirmed macro
 target's wire code and `MacroCapabilities`. Encoding, parsing and onboard
 conversion all use this table; target gates are not duplicated in the driver.
+`PulsefireRaidProfileObservation` is a read-only projection of one complete
+device read-response image. It exposes the response section and validated
+polling, DPI, primary-button layout and all 11 binding records, with macro
+references kept distinct from definitions. It retains no raw report and has no
+write conversion. The hidden lab diagnostic may display this projection after
+its existing request/GET sequence; normal live device access remains gated.
 
 ### `hyperx-devices`
 

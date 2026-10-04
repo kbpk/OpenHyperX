@@ -6,6 +6,8 @@ use thiserror::Error;
 
 mod inspection;
 pub use inspection::{inspect_captured_report, RaidReportInspection};
+mod observation;
+pub use observation::{PulsefireRaidObservedBinding, PulsefireRaidProfileObservation};
 
 // Shared interface-1 feature framing, despite the historical DIRECT_* names:
 // descriptor payload is 263 bytes; all API offsets include the report ID byte.

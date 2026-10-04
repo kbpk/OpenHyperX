@@ -1943,6 +1943,20 @@ save commands remain gated, and no new live probe was performed for this
 classification change. Any further hardware use needs a separate exact plan,
 operator consent and a physical-behavior check.
 
+#### Typed read-response projection (2026-10-04)
+
+The same offline classifier now produces an immutable
+`PulsefireRaidProfileObservation` using the existing profile field decoders and
+known-field validation. It holds only typed settings and the response's
+onboard/runtime section; it cannot produce a host-write report. Button 4/5
+macro records are represented as references, never inferred timelines or
+playback modes. Golden tests cover the selector-free onboard RX and previously
+captured warm runtime RX, plus rejection of empty, opaque, host-write, invalid
+polling and unknown-button images. The lab diagnostic's HID traffic, normal
+runtime safety gate and CLI `info` behavior are unchanged. This is still only
+an observation of one response, not evidence of a fresh live state or safe
+write baseline. No device reports were sent for this change.
+
 ### Isolating the runtime selector (2026-09-27)
 
 The next narrowly consented diagnostic sends only the exact repeated
