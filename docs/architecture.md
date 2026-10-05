@@ -7,14 +7,15 @@ A TUI or Tauri UI must not know HID paths, report IDs or packet layouts. Adding 
 mouse should normally mean adding one driver and registry entry, not changing
 the CLI or GUI.
 
-**2026-09-27 safety suspension:** descriptor-only CLI `info` no longer constructs
-the model driver or queries runtime settings. The CLI's runtime and save/ACK
-openers reject access before discovery, so DPI, polling, live buttons and all
-profile apply/save/probe paths cannot send the query. Direct RGB uses a distinct
+**2026-09-27 safety suspension, extended in 2026-10:** descriptor-only CLI
+`info` no longer constructs the model driver or queries runtime settings. The
+CLI's runtime and save/ACK openers reject access before discovery. The model
+driver now also rejects every public runtime/profile read, setter, preview,
+apply, session/ACK probe and onboard save before any HID report. Its retained
+capture-backed sequence is available only through a private mock-transport
+test constructor; normal clients cannot enable it. Direct RGB uses a distinct
 opener and no runtime selector/request. Offline operations retain their codecs
-and mocks. This is a host safety block, not a protocol fix: the low-level driver
-still contains the capture-backed sequence for research/tests, and must not be
-used by a connected client until its cold-device side effects are established.
+and mocks. This is a safety block, not a protocol fix.
 An explicitly consented isolated `07 03 04 64` SET later reproduced physical
 loss of mouse operation without request `81` or GET; USB reconnect recovered it.
 This selector must be treated as potentially disruptive profile activation,
@@ -257,6 +258,10 @@ read, DPI-stage/polling/button runtime setters, volatile direct RGB and an
 explicit onboard save. A model driver may depend on the core, protocol and
 transport traits, but never on CLI/Tauri types. Its stage API uses zero-based
 indexes internally; user-facing clients translate those to one-based numbers.
+The runtime/profile entrypoints are presently suspended at the driver boundary
+even if a client bypasses the CLI. Only mock-backed unit tests can run the
+retained packet sequences; an integration test verifies the production API
+does not attempt a feature TX/GET and direct RGB remains independent.
 Device-specific, target-aware assignment evidence gates and persistent-write
 validation live in the driver so a future GUI cannot bypass the CLI's
 restricted writable set.

@@ -317,6 +317,8 @@ fn parse_macro_mouse_button(
 pub enum PulsefireRaidError {
     #[error("Pulsefire Raid configuration requires HID interface 1, got {0}")]
     WrongInterface(i32),
+    #[error("Pulsefire Raid runtime/profile access is suspended: the confirmed runtime selector disabled cursor, clicks and lighting on the tested mouse; no HID report was sent")]
+    RuntimeAccessSuspended,
     #[error("feature report write was short: expected {expected} bytes, wrote {actual}")]
     ShortFeatureWrite { expected: usize, actual: usize },
     #[error("expected a 264-byte Pulsefire Raid profile response, got {0} bytes")]
@@ -414,8 +416,19 @@ impl PulsefireRaidOnboardMacros {
     }
 }
 
+/// Pulsefire Raid driver. Runtime/profile operations are suspended in normal
+/// builds; only independent volatile direct RGB remains available. Captured
+/// runtime sequences are exercised by a private mock-only unit-test constructor.
 pub struct PulsefireRaid<T> {
     transport: T,
+    profile_access: ProfileAccess,
+}
+
+#[derive(Clone, Copy)]
+enum ProfileAccess {
+    Suspended,
+    #[cfg(test)]
+    MockProtocolTest,
 }
 
 impl<T: HidTransport> PulsefireRaid<T> {
@@ -424,7 +437,18 @@ impl<T: HidTransport> PulsefireRaid<T> {
         if interface != PULSEFIRE_RAID.configuration_interface.interface_number {
             return Err(PulsefireRaidError::WrongInterface(interface));
         }
-        Ok(Self { transport })
+        Ok(Self {
+            transport,
+            profile_access: ProfileAccess::Suspended,
+        })
+    }
+
+    fn require_profile_access(&self) -> Result<(), PulsefireRaidError> {
+        match self.profile_access {
+            ProfileAccess::Suspended => Err(PulsefireRaidError::RuntimeAccessSuspended),
+            #[cfg(test)]
+            ProfileAccess::MockProtocolTest => Ok(()),
+        }
     }
 
     /// Set volatile direct colors for both physical LEDs.
@@ -442,17 +466,15 @@ impl<T: HidTransport> PulsefireRaid<T> {
         Ok(())
     }
 
-    /// Read the current volatile performance/button profile.
+    /// Historical runtime performance/button-profile read sequence.
     ///
-    /// WARNING: this sends two SET_REPORT packets before GET_REPORT. After a
-    /// cold-device query on 2026-09-27 the operator reported loss of cursor,
-    /// clicks and lighting. The CLI currently blocks this path before opening
-    /// HID. Clients must not treat it as passive discovery or safe inspection;
-    /// the exact selector/request side effects remain under investigation.
+    /// Suspended in normal builds: returns `RuntimeAccessSuspended` before any
+    /// HID report. Its captured selector `07 03 04 64` independently disabled
+    /// cursor, clicks and lighting on the tested mouse. The CLI also rejects
+    /// this path before discovery/opening; neither layer has an unsafe override.
     ///
-    /// This replays the exact read sequence observed twice in one local
-    /// capture and in earlier isolated setting captures. It performs no
-    /// profile write and deliberately does not retry an ambiguous failure.
+    /// The retained sequence exists only for mock packet tests and future
+    /// evidence-backed work; it must not be treated as passive inspection.
     pub fn runtime_profile(&mut self) -> Result<PerformanceProfile, PulsefireRaidError> {
         self.runtime_profile_with_wait(std::thread::sleep)
     }
@@ -461,6 +483,7 @@ impl<T: HidTransport> PulsefireRaid<T> {
         &mut self,
         mut wait: impl FnMut(Duration),
     ) -> Result<PerformanceProfile, PulsefireRaidError> {
+        self.require_profile_access()?;
         let prelude = encode_runtime_profile_read_prelude();
         self.send_feature_report(&prelude)?;
         wait(PROFILE_PRELUDE_DELAY);
@@ -551,9 +574,8 @@ impl<T: HidTransport> PulsefireRaid<T> {
     /// Start a volatile vendor session using only the repeated Legacy startup
     /// sequence. No profile image, lighting snapshot or macro is written.
     ///
-    /// This is an explicit diagnostic operation, not an automatic save retry.
-    /// Hardware validation must start after a fresh USB power-cycle with all
-    /// competing device writers closed.
+    /// Currently suspended with all other profile access in normal builds.
+    /// Retained for mock packet tests, not an automatic save retry or recovery.
     pub fn initialize_vendor_session<A: HidTransport>(
         &mut self,
         acknowledgements: &mut A,
@@ -566,6 +588,7 @@ impl<T: HidTransport> PulsefireRaid<T> {
         acknowledgements: &mut A,
         mut wait: impl FnMut(Duration),
     ) -> Result<(), PulsefireRaidError> {
+        self.require_profile_access()?;
         if acknowledgements.interface_number()
             != PULSEFIRE_RAID_ACKNOWLEDGEMENT_INTERFACE.interface_number
         {
@@ -588,12 +611,14 @@ impl<T: HidTransport> PulsefireRaid<T> {
 
     /// Test only the known runtime-section selection and its acknowledgement.
     ///
-    /// This does not select or write the onboard section. It is useful for
-    /// checking the Windows acknowledgement collection before a save.
+    /// Currently suspended in normal builds: the runtime selector alone was
+    /// physically disruptive. The mock-only path verifies ACK framing without
+    /// selecting or writing the onboard section.
     pub fn check_save_ack_path<A: HidTransport>(
         &mut self,
         acknowledgements: &mut A,
     ) -> Result<(), PulsefireRaidError> {
+        self.require_profile_access()?;
         if acknowledgements.interface_number()
             != PULSEFIRE_RAID_ACKNOWLEDGEMENT_INTERFACE.interface_number
         {
@@ -615,6 +640,7 @@ impl<T: HidTransport> PulsefireRaid<T> {
         macros: &PulsefireRaidOnboardMacros,
         mut wait: impl FnMut(Duration),
     ) -> Result<PulsefireRaidOnboardSaveResult, PulsefireRaidError> {
+        self.require_profile_access()?;
         if acknowledgements.interface_number()
             != PULSEFIRE_RAID_ACKNOWLEDGEMENT_INTERFACE.interface_number
         {
@@ -970,6 +996,7 @@ impl<T: HidTransport> PulsefireRaid<T> {
         &mut self,
         profile: &PerformanceProfile,
     ) -> Result<(), PulsefireRaidError> {
+        self.require_profile_access()?;
         if profile.section() != ProfileSection::Runtime {
             return Err(PulsefireRaidError::WrongProfileResponse {
                 kind: profile.kind(),
@@ -1044,6 +1071,20 @@ impl<T: HidTransport> PulsefireRaid<T> {
 
     pub fn into_transport(self) -> T {
         self.transport
+    }
+}
+
+#[cfg(test)]
+impl PulsefireRaid<hyperx_hid::testing::MockHidTransport> {
+    // Unit tests retain their golden TX/RX coverage without exposing a runtime
+    // enable path in production. The constructor is intentionally restricted to
+    // MockHidTransport; it cannot be used with a physical HID handle.
+    fn new_for_mock_protocol_test(
+        transport: hyperx_hid::testing::MockHidTransport,
+    ) -> Result<Self, PulsefireRaidError> {
+        let mut device = Self::new(transport)?;
+        device.profile_access = ProfileAccess::MockProtocolTest;
+        Ok(device)
     }
 }
 
@@ -1236,7 +1277,7 @@ mod tests {
         transport.expect_feature_report(request);
         transport.queue_feature_response(response);
 
-        let mut device = PulsefireRaid::new(transport).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
         let mut waits = Vec::new();
         let profile = device
             .runtime_profile_with_wait(|duration| waits.push(duration))
@@ -1438,7 +1479,7 @@ mod tests {
             None,
         );
 
-        let mut device = PulsefireRaid::new(configuration).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(configuration).unwrap();
         let mut waits = Vec::new();
         let result = device
             .save_runtime_to_onboard_with_wait(
@@ -1487,7 +1528,7 @@ mod tests {
             Some(&macro_definition),
         );
 
-        let mut device = PulsefireRaid::new(configuration).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(configuration).unwrap();
         let result = device
             .save_runtime_to_onboard_with_wait(
                 &mut acknowledgements,
@@ -1534,7 +1575,7 @@ mod tests {
             RgbColor::new(0, 0, 0xFF),
             &macros,
         );
-        let mut device = PulsefireRaid::new(configuration).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(configuration).unwrap();
         let saved = device
             .save_runtime_to_onboard_with_wait(
                 &mut acknowledgements,
@@ -1616,7 +1657,7 @@ mod tests {
         configuration.expect_feature_report(macros.reports[1].to_onboard_report().unwrap());
         acknowledgements.queue_input_report(Vec::new());
         acknowledgements.queue_input_report([0, 0, 0x07, 0x01, 0, 0, 0, 0]);
-        let mut device = PulsefireRaid::new(configuration).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(configuration).unwrap();
         assert!(matches!(
             device.save_runtime_to_onboard_with_wait(
                 &mut acknowledgements,
@@ -1641,7 +1682,7 @@ mod tests {
         for _ in 0..3 {
             acknowledgements.queue_input_report(Vec::new());
         }
-        let mut device = PulsefireRaid::new(configuration).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(configuration).unwrap();
         assert!(matches!(
             device.save_runtime_to_onboard_with_wait(
                 &mut acknowledgements,
@@ -1678,7 +1719,7 @@ mod tests {
         let ab = captured_ab_macro();
         let macros =
             PulsefireRaidOnboardMacros::new(&[(PulsefireRaidControl::Button4, &ab)]).unwrap();
-        let mut device = PulsefireRaid::new(configuration).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(configuration).unwrap();
         assert!(matches!(
             device.save_runtime_to_onboard_with_wait(
                 &mut acknowledgements,
@@ -1713,7 +1754,7 @@ mod tests {
         );
         configuration.queue_feature_response(runtime);
 
-        let mut device = PulsefireRaid::new(configuration).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(configuration).unwrap();
         assert!(matches!(
             device.save_runtime_to_onboard_with_wait(
                 &mut acknowledgements,
@@ -1759,7 +1800,8 @@ mod tests {
                     configuration.queue_feature_response(runtime);
                     // No expectations for onboard selection, auxiliary lighting,
                     // macro definitions or writes: every such TX must fail.
-                    let mut device = PulsefireRaid::new(configuration).unwrap();
+                    let mut device =
+                        PulsefireRaid::new_for_mock_protocol_test(configuration).unwrap();
                     let mut waits = Vec::new();
                     let result = device.save_runtime_to_onboard_with_wait(
                         &mut acknowledgements,
@@ -1810,7 +1852,7 @@ mod tests {
         configuration.queue_feature_response(runtime);
 
         let macro_definition = captured_coverage_macro();
-        let mut device = PulsefireRaid::new(configuration).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(configuration).unwrap();
         assert!(matches!(
             device.save_runtime_to_onboard_with_wait(
                 &mut acknowledgements,
@@ -1836,7 +1878,7 @@ mod tests {
         acknowledgements.queue_input_report(Vec::new());
         acknowledgements.queue_input_report([0x00; SAVE_ACK_LENGTH]);
 
-        let mut device = PulsefireRaid::new(configuration).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(configuration).unwrap();
         assert!(matches!(
             device.save_runtime_to_onboard_with_wait(
                 &mut acknowledgements,
@@ -1861,7 +1903,7 @@ mod tests {
             encode_runtime_profile_read_prelude(),
         );
 
-        let mut device = PulsefireRaid::new(configuration).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(configuration).unwrap();
         device.check_save_ack_path(&mut acknowledgements).unwrap();
         device.into_transport().assert_drained();
         acknowledgements.assert_drained();
@@ -1877,7 +1919,7 @@ mod tests {
         expect_acked_feature(&mut configuration, &mut acknowledgements, second);
         let mut delays = Vec::new();
 
-        let mut device = PulsefireRaid::new(configuration).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(configuration).unwrap();
         device
             .initialize_vendor_session_with_wait(&mut acknowledgements, |delay| {
                 delays.push(delay);
@@ -1895,7 +1937,7 @@ mod tests {
     fn session_start_rejects_wrong_interface_without_any_io() {
         let configuration = MockHidTransport::new(1);
         let mut acknowledgements = MockHidTransport::new(1);
-        let mut device = PulsefireRaid::new(configuration).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(configuration).unwrap();
         assert!(matches!(
             device.initialize_vendor_session_with_wait(&mut acknowledgements, |_| panic!(
                 "unexpected wait"
@@ -1911,7 +1953,7 @@ mod tests {
         let configuration = MockHidTransport::new(1);
         let mut acknowledgements = MockHidTransport::new(2);
         acknowledgements.queue_input_report([0x00, 0x00, 0x07, 0x03, 0, 0, 0, 0]);
-        let mut device = PulsefireRaid::new(configuration).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(configuration).unwrap();
         assert!(matches!(
             device.initialize_vendor_session_with_wait(&mut acknowledgements, |_| panic!(
                 "unexpected wait"
@@ -1933,7 +1975,7 @@ mod tests {
             acknowledgements.queue_input_report(Vec::new());
         }
         let mut delays = Vec::new();
-        let mut device = PulsefireRaid::new(configuration).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(configuration).unwrap();
         assert!(matches!(
             device.initialize_vendor_session_with_wait(&mut acknowledgements, |delay| delays
                 .push(delay)),
@@ -1957,7 +1999,7 @@ mod tests {
         acknowledgements.queue_input_report(Vec::new());
         acknowledgements.queue_input_report(Vec::new());
         acknowledgements.queue_input_report([0x00, 0x00, 0x07, 0x03, 0, 0, 0, 0]);
-        let mut device = PulsefireRaid::new(configuration).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(configuration).unwrap();
         assert!(matches!(
             device.initialize_vendor_session_with_wait(&mut acknowledgements, |_| {}),
             Err(PulsefireRaidError::UnexpectedSaveAcknowledgement { opcode: 0x07, .. })
@@ -1972,7 +2014,7 @@ mod tests {
         let mut acknowledgements = MockHidTransport::new(2);
         acknowledgements.queue_input_report([0x00, 0x00, 0x07, 0x03, 0, 0, 0, 0]);
 
-        let mut device = PulsefireRaid::new(configuration).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(configuration).unwrap();
         assert!(matches!(
             device.check_save_ack_path(&mut acknowledgements),
             Err(PulsefireRaidError::PreexistingSaveInput {
@@ -1993,7 +2035,7 @@ mod tests {
         acknowledgements.queue_input_report(Vec::new());
         acknowledgements.queue_input_report(Vec::new());
 
-        let mut device = PulsefireRaid::new(configuration).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(configuration).unwrap();
         assert!(matches!(
             device.check_save_ack_path(&mut acknowledgements),
             Err(PulsefireRaidError::WrongSaveAcknowledgementLength {
@@ -2009,7 +2051,7 @@ mod tests {
     fn driver_rejects_the_wrong_acknowledgement_interface_before_io() {
         let configuration = MockHidTransport::new(1);
         let mut wrong_acknowledgements = MockHidTransport::new(1);
-        let mut device = PulsefireRaid::new(configuration).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(configuration).unwrap();
 
         assert!(matches!(
             device.save_runtime_to_onboard_with_wait(
@@ -2039,7 +2081,7 @@ mod tests {
         transport.queue_feature_response(response);
         transport.expect_feature_report(expected_write);
 
-        let mut device = PulsefireRaid::new(transport).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
         let dpi_profile = device
             .set_runtime_active_dpi_with_wait(900, |_| {})
             .unwrap();
@@ -2052,7 +2094,7 @@ mod tests {
     #[test]
     fn driver_rejects_invalid_dpi_before_any_hid_io() {
         let transport = MockHidTransport::new(1);
-        let mut device = PulsefireRaid::new(transport).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
 
         assert!(matches!(
             device.set_runtime_active_dpi_with_wait(225, |_| {}),
@@ -2079,7 +2121,7 @@ mod tests {
         transport.queue_feature_response(response);
         transport.expect_feature_report(expected_write);
 
-        let mut device = PulsefireRaid::new(transport).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
         let dpi_profile = device
             .set_runtime_dpi_stage_with_wait(
                 1,
@@ -2114,7 +2156,7 @@ mod tests {
         transport.queue_feature_response(response);
         transport.expect_feature_report(expected_write);
 
-        let mut device = PulsefireRaid::new(transport).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
         let dpi_profile = device
             .add_runtime_dpi_stage_with_wait(1600, RgbColor::new(0xFF, 0, 0), true, |_| {})
             .unwrap();
@@ -2142,7 +2184,7 @@ mod tests {
         transport.queue_feature_response(response);
         transport.expect_feature_report(expected_write);
 
-        let mut device = PulsefireRaid::new(transport).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
         let dpi_profile = device
             .remove_runtime_last_dpi_stage_with_wait(|_| {})
             .unwrap();
@@ -2155,7 +2197,7 @@ mod tests {
     #[test]
     fn driver_rejects_missing_or_empty_dpi_stage_updates() {
         let transport = MockHidTransport::new(1);
-        let mut device = PulsefireRaid::new(transport).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
         assert!(matches!(
             device.set_runtime_dpi_stage_with_wait(0, None, None, false, |_| {}),
             Err(PulsefireRaidError::EmptyDpiStageUpdate)
@@ -2167,7 +2209,7 @@ mod tests {
         transport.expect_feature_report(encode_runtime_profile_read_prelude());
         transport.expect_feature_report(encode_profile_read_request());
         transport.queue_feature_response(response);
-        let mut device = PulsefireRaid::new(transport).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
         assert!(matches!(
             device.set_runtime_dpi_stage_with_wait(1, Some(1600), None, false, |_| {}),
             Err(PulsefireRaidError::DpiStageNotFound {
@@ -2185,7 +2227,7 @@ mod tests {
         transport.expect_feature_report(encode_runtime_profile_read_prelude());
         transport.expect_feature_report(encode_profile_read_request());
         transport.queue_feature_response(response);
-        let mut device = PulsefireRaid::new(transport).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
         assert!(matches!(
             device.add_runtime_dpi_stage_with_wait(16000, RgbColor::BLACK, false, |_| {}),
             Err(PulsefireRaidError::TooManyDpiStages(5))
@@ -2197,7 +2239,7 @@ mod tests {
         transport.expect_feature_report(encode_runtime_profile_read_prelude());
         transport.expect_feature_report(encode_profile_read_request());
         transport.queue_feature_response(response);
-        let mut device = PulsefireRaid::new(transport).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
         assert!(matches!(
             device.remove_runtime_last_dpi_stage_with_wait(|_| {}),
             Err(PulsefireRaidError::CannotRemoveOnlyDpiStage)
@@ -2224,7 +2266,7 @@ mod tests {
             ButtonBinding::Mouse(MouseFunction::Forward),
         )
         .unwrap();
-        let mut device = PulsefireRaid::new(transport).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
         assert_eq!(
             device
                 .set_runtime_button_assignment_with_wait(assignment.clone(), |_| {})
@@ -2254,7 +2296,7 @@ mod tests {
         transport.queue_feature_response(response);
         transport.expect_feature_report(expected_write);
 
-        let mut device = PulsefireRaid::new(transport).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
         assert_eq!(
             device
                 .set_runtime_primary_button_layout_with_wait(PrimaryButtonLayout::Swapped, |_| {})
@@ -2284,7 +2326,7 @@ mod tests {
             ButtonBinding::Mouse(MouseFunction::ScrollUp),
         )
         .unwrap();
-        let mut device = PulsefireRaid::new(transport).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
         assert_eq!(
             device
                 .set_runtime_button_assignment_with_wait(assignment.clone(), |_| {})
@@ -2313,7 +2355,7 @@ mod tests {
             ButtonBinding::Multimedia(MultimediaFunction::PlayPause),
         )
         .unwrap();
-        let mut device = PulsefireRaid::new(transport).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
         assert_eq!(
             device
                 .set_runtime_button_assignment_with_wait(assignment.clone(), |_| {})
@@ -2342,7 +2384,7 @@ mod tests {
             ButtonBinding::WindowsShortcut(WindowsShortcut::CycleApps),
         )
         .unwrap();
-        let mut device = PulsefireRaid::new(transport).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
         assert_eq!(
             device
                 .set_runtime_button_assignment_with_wait(assignment.clone(), |_| {})
@@ -2371,7 +2413,7 @@ mod tests {
             ButtonBinding::Mouse(MouseFunction::DpiToggle),
         )
         .unwrap();
-        let mut device = PulsefireRaid::new(transport).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
         assert_eq!(
             device
                 .set_runtime_button_assignment_with_wait(assignment.clone(), |_| {})
@@ -2400,7 +2442,7 @@ mod tests {
             ButtonBinding::Multimedia(MultimediaFunction::VolumeDown),
         )
         .unwrap();
-        let mut device = PulsefireRaid::new(transport).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
         assert_eq!(
             device
                 .set_runtime_button_assignment_with_wait(assignment.clone(), |_| {})
@@ -2429,7 +2471,7 @@ mod tests {
             ButtonBinding::Mouse(MouseFunction::Back),
         )
         .unwrap();
-        let mut device = PulsefireRaid::new(transport).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
         assert_eq!(
             device
                 .set_runtime_button_assignment_with_wait(assignment.clone(), |_| {})
@@ -2467,7 +2509,7 @@ mod tests {
             captured_coverage_macro(),
         )
         .unwrap();
-        let mut device = PulsefireRaid::new(transport).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
         assert_eq!(
             device
                 .set_runtime_button_assignment_with_wait(assignment.clone(), |_| {})
@@ -2502,7 +2544,7 @@ mod tests {
             captured_ab_macro(),
         )
         .unwrap();
-        let mut device = PulsefireRaid::new(transport).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
         assert_eq!(
             device
                 .set_runtime_button_assignment_with_wait(assignment.clone(), |_| {})
@@ -2641,7 +2683,7 @@ mod tests {
                 definition,
             )
             .unwrap();
-            let mut device = PulsefireRaid::new(transport).unwrap();
+            let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
             assert_eq!(
                 device
                     .set_runtime_button_assignment_with_wait(assignment.clone(), |_| {},)
@@ -2689,7 +2731,7 @@ mod tests {
         transport.queue_feature_response(response);
         transport.expect_feature_report(expected_write);
 
-        let mut device = PulsefireRaid::new(transport).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
         assert_eq!(
             device
                 .set_runtime_polling_rate_with_wait(PollingRate::Hz1000, |_| {})
@@ -2706,7 +2748,7 @@ mod tests {
         transport.expect_feature_report(encode_profile_read_request());
         transport.queue_feature_response([0x07, 0x81, 0x04]);
 
-        let mut device = PulsefireRaid::new(transport).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(transport).unwrap();
         let error = device
             .runtime_profile_with_wait(|_| {})
             .expect_err("a truncated profile must be rejected");

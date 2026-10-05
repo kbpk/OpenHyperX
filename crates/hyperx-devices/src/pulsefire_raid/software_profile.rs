@@ -804,7 +804,7 @@ mod tests {
         let settings = PulsefireRaidSoftwareProfile::new(&profile).unwrap();
         let mut mock = MockHidTransport::new(1);
         expect_read(&mut mock, baseline());
-        let mut device = PulsefireRaid::new(mock).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(mock).unwrap();
         let preview = device
             .preview_software_profile_with_wait(&settings, |_| {})
             .unwrap();
@@ -838,7 +838,7 @@ mod tests {
             .any(|warning| warning.contains("provenance")));
         let mut mock = MockHidTransport::new(1);
         expect_read(&mut mock, *source.as_bytes());
-        let mut device = PulsefireRaid::new(mock).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(mock).unwrap();
         assert!(device
             .apply_software_profile_with_wait(&settings, |_| {})
             .is_err());
@@ -901,7 +901,7 @@ mod tests {
         rgb[..8].copy_from_slice(&[7, 0x0A, 0, 0, 0, 0, 0, 255]);
         rgb[8] = 0xA0; // Captured direct-mode selector, not part of either color.
         mock.expect_feature_report(rgb);
-        let mut device = PulsefireRaid::new(mock).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(mock).unwrap();
         let mut waits = Vec::new();
         let preview = device
             .apply_software_profile_with_wait(&settings, |delay| waits.push(delay))
@@ -937,7 +937,7 @@ mod tests {
         let settings = PulsefireRaidSoftwareProfile::new(&profile).unwrap();
         let mut mock = MockHidTransport::new(1);
         expect_read(&mut mock, baseline());
-        let mut device = PulsefireRaid::new(mock).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(mock).unwrap();
         let preview = device
             .apply_software_profile_with_wait(&settings, |_| {})
             .unwrap();
@@ -968,7 +968,7 @@ mod tests {
         write[1] = 1;
         mock.expect_feature_report(write);
         expect_read(&mut mock, response);
-        let mut device = PulsefireRaid::new(mock).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(mock).unwrap();
         assert_eq!(
             device
                 .apply_software_profile_with_wait(&settings, |_| {})
@@ -1004,7 +1004,7 @@ mod tests {
         let mut empty_readback = [0_u8; DIRECT_REPORT_LENGTH];
         empty_readback[..3].copy_from_slice(&[7, 0x81, 4]);
         expect_read(&mut mock, empty_readback);
-        let mut device = PulsefireRaid::new(mock).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(mock).unwrap();
         let error = device
             .apply_software_profile_with_wait(&settings, |_| {})
             .unwrap_err();
@@ -1047,7 +1047,7 @@ mod tests {
             for preview in [false, true] {
                 let mut mock = MockHidTransport::new(1);
                 expect_read(&mut mock, empty);
-                let mut device = PulsefireRaid::new(mock).unwrap();
+                let mut device = PulsefireRaid::new_for_mock_protocol_test(mock).unwrap();
                 let result = if preview {
                     device.preview_software_profile_with_wait(&settings, |_| {})
                 } else {
@@ -1079,7 +1079,7 @@ mod tests {
             definition.as_bytes().to_vec(),
             Err(HidError::Transport("injected macro upload failure".into())),
         );
-        let mut device = PulsefireRaid::new(mock).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(mock).unwrap();
         let error = device
             .apply_software_profile_with_wait(&settings, |_| {})
             .unwrap_err();
@@ -1164,7 +1164,7 @@ mod tests {
                     ))
                 },
             );
-            let mut device = PulsefireRaid::new(mock).unwrap();
+            let mut device = PulsefireRaid::new_for_mock_protocol_test(mock).unwrap();
             let error = device
                 .apply_software_profile_with_wait(&settings, |_| {})
                 .unwrap_err();
@@ -1213,7 +1213,7 @@ mod tests {
                 Ok(report) => mock.queue_feature_response(report),
                 Err(error) => mock.queue_feature_error(error),
             }
-            let mut device = PulsefireRaid::new(mock).unwrap();
+            let mut device = PulsefireRaid::new_for_mock_protocol_test(mock).unwrap();
             let error = device
                 .apply_software_profile_with_wait(&settings, |_| {})
                 .unwrap_err();

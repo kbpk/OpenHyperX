@@ -1957,6 +1957,24 @@ runtime safety gate and CLI `info` behavior are unchanged. This is still only
 an observation of one response, not evidence of a fresh live state or safe
 write baseline. No device reports were sent for this change.
 
+#### Driver-level runtime safety gate (2026-10-06)
+
+The CLI's before-discovery suspension was insufficient for future GUI/TUI or
+third-party clients of `hyperx-devices`: they could construct `PulsefireRaid`
+and invoke its public runtime/profile methods directly. The production driver
+now returns `RuntimeAccessSuspended` before any HID report for the profile read,
+DPI/stage/polling/button setters, preview/apply, vendor-session and ACK probes,
+and onboard save. The retained golden sequences run only behind a private
+`MockHidTransport` constructor compiled for the crate's unit tests. A separate
+integration test links the ordinary production API and asserts zero feature
+TX/GET attempts across those entrypoints; independent volatile direct RGB is
+still available. The CLI's earlier pre-discovery gate remains as defense in
+depth. No new report, live hardware query, write, or recovery was performed;
+this does not make the runtime selector or cold startup safe.
+Linux workspace format, Clippy (`-D warnings`), tests and build passed, as did
+the native Windows aggregate tests/build and offline CLI/TUI/GUI smoke with
+`-SkipDeviceDiscovery -Gui`. No hardware test was run.
+
 ### Isolating the runtime selector (2026-09-27)
 
 The next narrowly consented diagnostic sends only the exact repeated

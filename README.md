@@ -17,6 +17,8 @@ starting with the wired HyperX Pulsefire Raid on Windows 10/11 x64.
 > TUI and GUI remain available. Isolated lab probes require separate explicit
 > consent and captures; they do not lift the runtime block (see
 > [reverse-engineering workflow](docs/reverse-engineering.md)).
+> The model driver independently blocks those runtime/profile methods before
+> sending a report, so another client cannot bypass the CLI's early gate.
 > Direct RGB uses a separate volatile write path and is not a recovery command.
 > Firmware update, bootloader and DFU operations are deliberately out of scope.
 > No current command writes firmware.

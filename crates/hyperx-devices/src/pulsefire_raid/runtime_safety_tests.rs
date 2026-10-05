@@ -148,7 +148,7 @@ fn every_runtime_mutation_rejects_unusable_baseline_before_any_setting_or_macro_
         for operation in Mutation::ALL {
             let mut mock = read_script();
             mock.queue_feature_response(response);
-            let mut device = PulsefireRaid::new(mock).unwrap();
+            let mut device = PulsefireRaid::new_for_mock_protocol_test(mock).unwrap();
             let error = operation.run(&mut device).expect_err(name);
             assert!(
                 matches!(error, PulsefireRaidError::InvalidProfile(_)),
@@ -169,7 +169,7 @@ fn every_runtime_mutation_stops_on_truncated_wrong_section_and_wrong_kind_respon
         for operation in Mutation::ALL {
             let mut mock = read_script();
             mock.queue_feature_response(response.clone());
-            let mut device = PulsefireRaid::new(mock).unwrap();
+            let mut device = PulsefireRaid::new_for_mock_protocol_test(mock).unwrap();
             assert!(matches!(
                 operation.run(&mut device),
                 Err(PulsefireRaidError::WrongProfileResponseLength(3))
@@ -185,7 +185,7 @@ fn every_runtime_mutation_stops_on_read_error_without_retry_or_settings_writes()
     for operation in Mutation::ALL {
         let mut mock = read_script();
         mock.queue_feature_error(HidError::Transport("injected GET_REPORT timeout".into()));
-        let mut device = PulsefireRaid::new(mock).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(mock).unwrap();
         let error = operation.run(&mut device).unwrap_err();
         assert!(error.to_string().contains("injected GET_REPORT timeout"));
         assert_only_one_read(device.into_transport());
@@ -216,7 +216,7 @@ fn every_runtime_mutation_stops_at_a_failed_read_selector_or_request() {
                         mock.expect_feature_report(packet.to_vec());
                     }
                 }
-                let mut device = PulsefireRaid::new(mock).unwrap();
+                let mut device = PulsefireRaid::new_for_mock_protocol_test(mock).unwrap();
                 assert!(matches!(
                     operation.run(&mut device),
                     Err(PulsefireRaidError::ShortFeatureWrite { .. })
@@ -242,7 +242,7 @@ fn final_runtime_write_guard_rejects_invalid_images_without_io() {
     let mut invalid = baseline();
     invalid[0x18] = 0;
     let profile = PerformanceProfile::parse(&invalid).unwrap();
-    let mut device = PulsefireRaid::new(MockHidTransport::new(1)).unwrap();
+    let mut device = PulsefireRaid::new_for_mock_protocol_test(MockHidTransport::new(1)).unwrap();
     assert!(matches!(
         device.write_runtime_profile(&profile),
         Err(PulsefireRaidError::InvalidProfile(_))
@@ -268,7 +268,7 @@ fn macro_upload_short_write_or_error_stops_before_reference_and_without_retry() 
         let mut mock = read_script();
         mock.queue_feature_response(baseline());
         mock.expect_feature_report_result(macro_report.as_bytes().to_vec(), result);
-        let mut device = PulsefireRaid::new(mock).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(mock).unwrap();
         assert!(matches!(
             device.set_runtime_button_assignment_with_wait(assignment.clone(), |_| {}),
             Err(PulsefireRaidError::ShortFeatureWrite { .. })
@@ -306,7 +306,7 @@ fn failed_macro_reference_write_does_not_retry_or_claim_to_undo_uploaded_definit
                 ))
             },
         );
-        let mut device = PulsefireRaid::new(mock).unwrap();
+        let mut device = PulsefireRaid::new_for_mock_protocol_test(mock).unwrap();
         assert!(device
             .set_runtime_button_assignment_with_wait(assignment.clone(), |_| {})
             .is_err());
