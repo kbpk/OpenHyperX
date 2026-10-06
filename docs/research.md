@@ -1,6 +1,6 @@
 # Pulsefire Raid research
 
-Last updated: 2026-09-27.
+Last updated: 2026-10-06.
 
 This document separates manufacturer facts, public implementation evidence,
 local observations and hypotheses. Do not promote a hypothesis into a device
@@ -39,6 +39,10 @@ command without a capture or an independently reviewed implementation.
   Keyboard/Keypad and Consumer usage IDs used to interpret captured binding
   records. The USB-IF document is the source of truth for those usage values;
   it does not by itself prove the surrounding HyperX record format.
+- [Pulsefire Dart reverse-engineering dissector](https://github.com/santeri3700/hyperx_pulsefire_dart_reverse_engineering/blob/main/misc/wireshark_ngenuity2_dissector.lua)
+  targets different PIDs (`16E1`/`16E2`) and 64-byte packets. Its named DPI,
+  binding and lighting opcodes are **not** evidence for Raid `16E4`'s 264-byte
+  interface-1 feature protocol; none is imported as a Raid send path.
 
 OpenHyperX does not copy OpenRGB code. Names, IDs, observed report layout and
 USB behavior are recorded as attributed interoperability facts. Any later

@@ -9,9 +9,11 @@ param(
     [switch]$ConfirmRuntimeSelector
 )
 
-# Three fixed experiments, each with separate consent. Only the selector-only
-# mode selects runtime and MAY disable input/lighting. No settings/firmware
-# writes, initializer, persistent save, retry or software recovery.
+# Three fixed experiments, each with separate consent. The selector-only mode
+# has disabled input/lighting in a real test. The standalone 81 request also
+# sends a SET_REPORT, and its physical effects are not fully established; none
+# of these probes is guaranteed harmless. No settings/firmware writes,
+# initializer, persistent save, retry or software recovery.
 $ErrorActionPreference = 'Stop'
 $choices = @(
     if ($ConfirmPassiveGet) { 'raid-feature-get' }
@@ -78,7 +80,7 @@ try {
     Start-Sleep -Milliseconds 300
     $description = switch ($labCommand) {
         'raid-feature-get' { 'One GET_REPORT only: no SET_REPORT, selector, initializer, RGB or onboard writes.' }
-        'raid-read-request-get' { 'One fixed SET_REPORT 07 81, wait 110 ms, then one GET_REPORT. No selector, initializer, RGB or onboard writes.' }
+        'raid-read-request-get' { 'One fixed SET_REPORT 07 81, wait 110 ms, then one GET_REPORT. Physical effects are not fully established: have USB reconnect available. No selector, initializer, RGB or onboard writes.' }
         'raid-runtime-select-only' { 'WARNING: one SET_REPORT 07 03 04 64 only; MAY disable cursor/clicks/lighting. NO request 81, GET, initializer, recovery or onboard write.' }
     }
     Write-Host $description -ForegroundColor Cyan
