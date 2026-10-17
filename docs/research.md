@@ -1,6 +1,6 @@
 # Pulsefire Raid research
 
-Last updated: 2026-10-06.
+Last updated: 2026-10-17.
 
 This document separates manufacturer facts, public implementation evidence,
 local observations and hypotheses. Do not promote a hypothesis into a device
@@ -641,6 +641,22 @@ physical controls with these record starts:
 | DPI button | `0x9C` | position correlated; captured profile had been remapped to A |
 | wheel tilt left | `0xA0` | position inferred from remaining records and `02 F5 00 00` |
 | wheel tilt right | `0xA4` | position inferred from remaining records and `02 F6 00 00` |
+
+Four complete retained images (the selector-free onboard RX, warm runtime
+RX/TX, and cold Legacy runtime TX) also contain `02 F3 00 00` at `0xA8..0xAB`
+and `02 F4 00 00` at `0xAC..0xAF`; the cold empty runtime RX has zeros there.
+Those four-byte values match the separately captured Scroll Down and Scroll Up
+*binding encodings*, respectively. Their presence after the 11 identified
+controls does **not** prove what physical inputs these extra slots represent,
+whether Legacy exposes them, or whether they are writable. The driver leaves
+both records outside its declared control set and preserves their bytes when
+copying confirmed settings to onboard memory. A targeted, isolated source-UI
+transition would be needed before assigning either slot a target or send path.
+TODO: first check read-only whether Legacy exposes wheel-up/wheel-down as
+separate physical targets. Only if it does, capture a no-op, one such target
+changed to Disabled, and an explicit restoration in separate identity-filtered
+files; compare the full profile and physical wheel behavior. If it does not,
+leave these records opaque rather than sending a guessed slot write.
 
 The protocol crate decodes these known records and has a capture-backed runtime
 patcher. Named keyboard keys, all NGENUITY Legacy Mouse and Multimedia
@@ -2220,6 +2236,19 @@ second sanitized image-only fixture,
 events omitted). Golden tests verify its RX-to-TX opcode-only change and its
 exact contrast with cold TX and the prior onboard RX. The sample-wide counts
 above come from private captures, not from the committed fixtures.
+
+An offline profile-image diff now labels byte ranges by the currently decoded
+layout. It confirms that all 24 onboard-vs-cold differences above are outside
+the mapped polling/DPI/11-button regions. In the cold empty-RX to Legacy-TX
+comparison, 43 changed body bytes fall within mapped regions and five do not:
+`0x16` plus the four nonzero bytes in the two extra records at `0xA8` and
+`0xAC`. This is a *range classification*, not proof that every possible value
+in a mapped region is understood or that an unclassified byte is safe padding.
+The new golden tests cover the four retained `0xA8..0xAF` records, unknown
+offsets and preservation during onboard settings copy. Linux workspace
+format, strict Clippy, tests and build passed; so did the native Windows
+aggregate tests/build and offline CLI/TUI/GUI smoke with device discovery
+skipped. No HID report was sent for this analysis.
 
 For a possible software-state source, the installed Legacy Store package's
 read-only `LocalState/Master.hxp` (version 40, last modified before the cold

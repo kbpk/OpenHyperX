@@ -3,8 +3,9 @@
 use hyperx_protocol::{
     capture::parse_report_log,
     pulsefire_raid::{
-        inspect_captured_report, PerformanceProfile, ProfileImageKind, ProfileSection,
-        PulsefireRaidControl, RaidReportInspection,
+        classify_profile_image_byte, inspect_captured_report, PerformanceProfile,
+        ProfileImageByteClass, ProfileImageKind, ProfileSection, PulsefireRaidControl,
+        RaidReportInspection, DIRECT_REPORT_LENGTH,
     },
     Direction,
 };
@@ -106,6 +107,62 @@ fn cold_legacy_write_matches_known_onboard_settings_but_not_opaque_bytes() {
     assert!(differing_body_offsets
         .iter()
         .all(|offset| write.as_bytes()[*offset] == 0));
+    assert!(differing_body_offsets.iter().all(|&offset| {
+        classify_profile_image_byte(offset) == Some(ProfileImageByteClass::UninterpretedBody)
+    }));
+}
+
+#[test]
+fn profile_byte_layout_marks_only_confirmed_setting_regions() {
+    for offset in 0..3 {
+        assert_eq!(
+            classify_profile_image_byte(offset),
+            Some(ProfileImageByteClass::Envelope)
+        );
+    }
+    for offset in [
+        0x18, 0x19, 0x22, 0x25, 0x2E, 0x31, 0x32, 0x36, 0x69, 0x77, 0x7C, 0xA7,
+    ] {
+        assert_eq!(
+            classify_profile_image_byte(offset),
+            Some(ProfileImageByteClass::MappedSettingRegion),
+            "offset 0x{offset:02X}"
+        );
+    }
+    for offset in [
+        0x17, 0x23, 0x24, 0x2F, 0x30, 0x37, 0x38, 0x68, 0x78, 0xA8, 0xE3,
+    ] {
+        assert_eq!(
+            classify_profile_image_byte(offset),
+            Some(ProfileImageByteClass::UninterpretedBody),
+            "offset 0x{offset:02X}"
+        );
+    }
+    assert_eq!(classify_profile_image_byte(DIRECT_REPORT_LENGTH), None);
+}
+
+#[test]
+fn extra_records_after_the_eleven_controls_are_retained_but_not_mapped() {
+    let (empty, cold_write, onboard) = captured_profiles();
+    let warm = parse_report_log(WARM).unwrap();
+    let expected = [0x02, 0xF3, 0x00, 0x00, 0x02, 0xF4, 0x00, 0x00];
+
+    assert_eq!(&empty.as_bytes()[0xA8..0xB0], &[0; 8]);
+    for profile in [cold_write, onboard] {
+        assert_eq!(&profile.as_bytes()[0xA8..0xB0], &expected);
+    }
+    for record in &warm.records {
+        let RaidReportInspection::Profile(profile) = inspect_captured_report(record) else {
+            panic!("expected a captured warm profile image");
+        };
+        assert_eq!(&profile.as_bytes()[0xA8..0xB0], &expected);
+    }
+    for offset in 0xA8..0xB0 {
+        assert_eq!(
+            classify_profile_image_byte(offset),
+            Some(ProfileImageByteClass::UninterpretedBody)
+        );
+    }
 }
 
 #[test]

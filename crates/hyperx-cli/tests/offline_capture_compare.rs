@@ -31,8 +31,9 @@ fn compares_cross_section_images_without_inventing_opaque_field_semantics() {
         "Onboard DeviceReadResponse",
         "Runtime HostWrite",
         "26 total; 24 profile-body byte(s)",
+        "0 mapped setting-region byte(s), 24 uninterpreted byte(s)",
         "0x0001: 81 -> 01 (report envelope)",
-        "0x0024:",
+        "0x0024: 02 -> 00 (uninterpreted body byte)",
         "Decoded known settings: equal",
         "Offline comparison only",
     ] {
@@ -61,6 +62,10 @@ fn empty_cold_runtime_is_not_presented_as_a_valid_known_settings_baseline() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(
         stdout.contains("comparison unavailable (before: empty profile body; after: decoded)"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("43 mapped setting-region byte(s), 5 uninterpreted byte(s)"),
         "{stdout}"
     );
     assert!(!stdout.contains("Decoded known settings: equal"));

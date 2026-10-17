@@ -152,8 +152,10 @@ For future evidence, `hyperx-cli profile diff-capture-images BEFORE AFTER
 --before-report N --after-report M` compares only the explicitly chosen complete
 profile images, including envelope and opaque body bytes. It accepts the same
 bounded UTF-8 hex/trace input as `inspect-capture`, never PCAPNG directly, and
-does not infer that two reports are one transaction. For example, compare
-report 2 of `read-request-get-onboard.hex` against report 2 of
+labels changes inside mapped setting regions separately from currently
+uninterpreted body bytes; a mapped region is not permission to write arbitrary
+values. It does not infer that two reports are one transaction. For example,
+compare report 2 of `read-request-get-onboard.hex` against report 2 of
 `cold-legacy-startup-images.hex`; the 24 body-byte differences are evidence,
 not a source for a cold-runtime encoder. Keep real macro-containing captures
 outside Git.

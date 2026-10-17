@@ -99,6 +99,50 @@ pub enum ProfileSection {
     Runtime,
 }
 
+/// Where an offset falls in the currently mapped profile-image layout.
+///
+/// This classifies byte ranges, not the meaning of every possible value in a
+/// range. In particular, an uninterpreted body byte is not reserved padding,
+/// and a mapped button record is not evidence for an uncaptured binding.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProfileImageByteClass {
+    Envelope,
+    MappedSettingRegion,
+    UninterpretedBody,
+}
+
+/// Classify one offset in a 264-byte Pulsefire Raid profile image without
+/// parsing, changing or constructing any report.
+pub fn classify_profile_image_byte(offset: usize) -> Option<ProfileImageByteClass> {
+    if offset >= DIRECT_REPORT_LENGTH {
+        return None;
+    }
+    if offset < 3 {
+        return Some(ProfileImageByteClass::Envelope);
+    }
+
+    let mapped = offset == POLLING_INTERVAL_OFFSET
+        || DPI_X_OFFSETS
+            .iter()
+            .chain(DPI_Y_OFFSETS.iter())
+            .any(|&start| (start..start + 2).contains(&offset))
+        || offset == ACTIVE_DPI_STAGE_OFFSET
+        || DPI_STAGE_ENABLED_OFFSETS.contains(&offset)
+        || DPI_STAGE_COLOR_OFFSETS
+            .iter()
+            .any(|&start| (start..start + 3).contains(&offset))
+        || PulsefireRaidControl::ALL.iter().any(|control| {
+            let start = control.profile_offset();
+            (start..start + BUTTON_RECORD_LENGTH).contains(&offset)
+        });
+
+    Some(if mapped {
+        ProfileImageByteClass::MappedSettingRegion
+    } else {
+        ProfileImageByteClass::UninterpretedBody
+    })
+}
+
 /// Physical controls shown in the Pulsefire Raid button editor.
 ///
 /// Kingston's manual supplies the numbered side-button names. The profile
@@ -1846,6 +1890,12 @@ mod tests {
         );
         onboard_bytes[0x10] = 0xA5;
         onboard_bytes[0x7C..0xA8].fill(0xCC);
+        // Two additional captured records follow the 11 model-declared
+        // controls. Their target semantics are not isolated, so a settings
+        // copy must preserve the destination bytes rather than treating them
+        // as newly writable buttons.
+        onboard_bytes[0xA8..0xB0]
+            .copy_from_slice(&[0x02, 0xF3, 0x00, 0x00, 0x02, 0xF4, 0x00, 0x00]);
         let mut onboard = PerformanceProfile::parse(&onboard_bytes).unwrap();
 
         onboard
@@ -1864,6 +1914,10 @@ mod tests {
         assert_eq!(
             &onboard.as_bytes()[0x7C..0xA8],
             &runtime.as_bytes()[0x7C..0xA8]
+        );
+        assert_eq!(
+            &onboard.as_bytes()[0xA8..0xB0],
+            &[0x02, 0xF3, 0x00, 0x00, 0x02, 0xF4, 0x00, 0x00]
         );
         assert_eq!(&onboard.to_write_report()[..3], &[0x07, 0x01, 0x01]);
     }

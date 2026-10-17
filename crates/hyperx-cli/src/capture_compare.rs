@@ -7,7 +7,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use hyperx_protocol::{
     capture::{diff_captures, CaptureRecord},
     pulsefire_raid::{
-        inspect_captured_report, PerformanceProfile, PulsefireRaidControl, RaidReportInspection,
+        classify_profile_image_byte, inspect_captured_report, PerformanceProfile,
+        ProfileImageByteClass, PulsefireRaidControl, RaidReportInspection,
     },
 };
 
@@ -42,8 +43,26 @@ pub(super) fn diff_images(
         changes.len(),
         body_count
     );
+    let uninterpreted_count = changes
+        .iter()
+        .filter(|change| {
+            classify_profile_image_byte(change.offset)
+                == Some(ProfileImageByteClass::UninterpretedBody)
+        })
+        .count();
+    println!(
+        "Profile-body layout: {} mapped setting-region byte(s), {} uninterpreted byte(s). Neither category authorizes a write.",
+        body_count - uninterpreted_count,
+        uninterpreted_count
+    );
     let limit = if all_raw { changes.len() } else { 32 };
     for change in changes.iter().take(limit) {
+        let region = match classify_profile_image_byte(change.offset) {
+            Some(ProfileImageByteClass::Envelope) => " (report envelope)",
+            Some(ProfileImageByteClass::MappedSettingRegion) => " (mapped setting region)",
+            Some(ProfileImageByteClass::UninterpretedBody) => " (uninterpreted body byte)",
+            None => " (outside a complete profile image)",
+        };
         println!(
             "  0x{:04X}: {} -> {}{}",
             change.offset,
@@ -53,11 +72,7 @@ pub(super) fn diff_images(
             change
                 .after
                 .map_or_else(|| "--".into(), |byte| format!("{byte:02X}")),
-            if change.offset < 3 {
-                " (report envelope)"
-            } else {
-                ""
-            }
+            region
         );
     }
     if changes.len() > limit {
