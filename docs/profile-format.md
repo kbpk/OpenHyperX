@@ -25,10 +25,16 @@ the Legacy parser must not be extended by guessing that the formats match.
 active raw assignment-function fields, then lists exact byte offsets in the
 embedded presets. It compares source macro references by their position
 rather than their regenerated identifiers. The raw section deliberately
-remains available for finding
-polling, lighting and assignment fields that are not decoded yet. By default
-it prints at most 256 changed bytes; `--all-raw` removes that display limit. If
-file lengths differ, offsets after the first insertion/removal may be shifted.
+remains available for finding polling, lighting and assignment fields that are
+not decoded yet. By default it prints at most 256 changed bytes; `--all-raw`
+removes that display limit. If file lengths differ, offsets after the first
+insertion/removal may be shifted.
+
+Assignment records are matched by their raw source key code, not file order:
+reordering records alone does not look like a button change. Added and removed
+keys are reported with their active raw values. Duplicate records for one key
+are ambiguous; the semantic diff says so and leaves those records to the raw
+offset diff rather than pairing them arbitrarily.
 
 The output path must not already exist. The importer currently normalizes:
 

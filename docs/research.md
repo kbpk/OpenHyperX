@@ -2616,6 +2616,14 @@ usage `0x05`, matching the keyboard record in the cold TX. This remains
 corroboration only: the historical preset ID and exact source values at
 capture time are unproven. No raw GUID or macro content is committed.
 
+The Legacy semantic diff now pairs assignment records by their raw source key
+(`KeyCode`), not their serialization order. A reordered `KeyAssignment` list
+is not evidence of changed button behavior; added/removed keys and changed
+active values are reported separately. Duplicate records for one key are
+reported as ambiguous and left to the byte-level diff rather than guessed
+into a physical binding. This improves offline experiments only and does not
+change the runtime safety gate.
+
 ## Unknowns and required evidence
 
 The table records **historical capture-backed capabilities**, not commands

@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::Write,
     path::{Path, PathBuf},
@@ -27,8 +27,9 @@ use hyperx_protocol::{
     hid_descriptor::parse_report_layouts,
     ngenuity_legacy::{
         format_ngenuity_legacy_id, keyboard_usage_name, ngenuity_legacy_embedded_payload,
-        parse_ngenuity_legacy_preset, NgenuityContainer, NgenuityInputAction, NgenuityMacro,
-        NgenuityMacroItem, NgenuityMouseButton, NgenuityPreset,
+        parse_ngenuity_legacy_preset, NgenuityContainer, NgenuityInputAction,
+        NgenuityKeyAssignment, NgenuityMacro, NgenuityMacroItem, NgenuityMouseButton,
+        NgenuityPreset,
     },
     pulsefire_raid::{
         inspect_captured_report, PerformanceProfile, ProfileImageKind, ProfileSection,
@@ -1255,74 +1256,115 @@ fn semantic_ngenuity_legacy_changes(
             after.key_assignments.len()
         ));
     }
-    for index in 0..before
-        .key_assignments
-        .len()
-        .max(after.key_assignments.len())
-    {
-        if let (Some(left), Some(right)) = (
-            before.key_assignments.get(index),
-            after.key_assignments.get(index),
-        ) {
-            if left.source_key_code != right.source_key_code {
-                changes.push(format!(
-                    "assignment {} source key: 0x{:04X} -> 0x{:04X}",
-                    index + 1,
-                    left.source_key_code,
-                    right.source_key_code
-                ));
-            }
-            if left.assignment_type_code != right.assignment_type_code {
-                changes.push(format!(
-                    "assignment {} raw type: 0x{:02X} -> 0x{:02X}",
-                    index + 1,
-                    left.assignment_type_code,
-                    right.assignment_type_code
-                ));
-            }
-            if left.active_function_code != right.active_function_code {
-                changes.push(format!(
-                    "assignment {} active Legacy value: {} -> {}",
-                    index + 1,
-                    format_ngenuity_legacy_function_code(left.active_function_code),
-                    format_ngenuity_legacy_function_code(right.active_function_code)
-                ));
-            }
-            if left.macro_playback_option_code != right.macro_playback_option_code {
-                changes.push(format!(
-                    "assignment {} raw macro playback option: {} -> {}",
-                    index + 1,
-                    format_ngenuity_legacy_option_code(left.macro_playback_option_code),
-                    format_ngenuity_legacy_option_code(right.macro_playback_option_code)
-                ));
-            }
-            if left.macro_times != right.macro_times {
-                changes.push(format!(
-                    "assignment {} raw macro count: {} -> {}",
-                    index + 1,
-                    format_ngenuity_legacy_count(left.macro_times),
-                    format_ngenuity_legacy_count(right.macro_times)
-                ));
-            }
-        }
-        let left = before
-            .key_assignments
-            .get(index)
-            .and_then(|assignment| macro_reference_index(before, assignment.macro_source_id));
-        let right = after
-            .key_assignments
-            .get(index)
-            .and_then(|assignment| macro_reference_index(after, assignment.macro_source_id));
-        if left != right {
-            changes.push(format!(
-                "assignment {} macro reference: {} -> {}",
-                index + 1,
-                format_macro_reference(left),
-                format_macro_reference(right),
-            ));
+    let before_by_key = index_ngenuity_legacy_assignments(before);
+    let after_by_key = index_ngenuity_legacy_assignments(after);
+    let keys: BTreeSet<_> = before_by_key
+        .keys()
+        .chain(after_by_key.keys())
+        .copied()
+        .collect();
+    for key in keys {
+        let left = before_by_key.get(&key).map_or(&[][..], Vec::as_slice);
+        let right = after_by_key.get(&key).map_or(&[][..], Vec::as_slice);
+        let label = format!("assignment key 0x{key:04X}");
+        match (left, right) {
+            ([left], [right]) => compare_ngenuity_legacy_assignment(
+                &label,
+                before,
+                left,
+                after,
+                right,
+                &mut changes,
+            ),
+            ([], [right]) => changes.push(format!(
+                "{label} added: {}",
+                summarize_ngenuity_legacy_assignment(after, right)
+            )),
+            ([left], []) => changes.push(format!(
+                "{label} removed: {}",
+                summarize_ngenuity_legacy_assignment(before, left)
+            )),
+            _ => changes.push(format!(
+                "{label} has ambiguous duplicate records (before {}, after {}); semantic comparison skipped; inspect raw offsets",
+                left.len(),
+                right.len()
+            )),
         }
     }
     changes
+}
+
+fn compare_ngenuity_legacy_assignment(
+    label: &str,
+    before: &NgenuityPreset,
+    left: &NgenuityKeyAssignment,
+    after: &NgenuityPreset,
+    right: &NgenuityKeyAssignment,
+    changes: &mut Vec<String>,
+) {
+    if left.assignment_type_code != right.assignment_type_code {
+        changes.push(format!(
+            "{label} raw type: 0x{:02X} -> 0x{:02X}",
+            left.assignment_type_code, right.assignment_type_code
+        ));
+    }
+    if left.active_function_code != right.active_function_code {
+        changes.push(format!(
+            "{label} active Legacy value: {} -> {}",
+            format_ngenuity_legacy_function_code(left.active_function_code),
+            format_ngenuity_legacy_function_code(right.active_function_code)
+        ));
+    }
+    if left.macro_playback_option_code != right.macro_playback_option_code {
+        changes.push(format!(
+            "{label} raw macro playback option: {} -> {}",
+            format_ngenuity_legacy_option_code(left.macro_playback_option_code),
+            format_ngenuity_legacy_option_code(right.macro_playback_option_code)
+        ));
+    }
+    if left.macro_times != right.macro_times {
+        changes.push(format!(
+            "{label} raw macro count: {} -> {}",
+            format_ngenuity_legacy_count(left.macro_times),
+            format_ngenuity_legacy_count(right.macro_times)
+        ));
+    }
+    let left_reference = macro_reference_index(before, left.macro_source_id);
+    let right_reference = macro_reference_index(after, right.macro_source_id);
+    if left_reference != right_reference {
+        changes.push(format!(
+            "{label} macro reference: {} -> {}",
+            format_macro_reference(left_reference),
+            format_macro_reference(right_reference),
+        ));
+    }
+}
+
+fn index_ngenuity_legacy_assignments(
+    preset: &NgenuityPreset,
+) -> BTreeMap<u16, Vec<&NgenuityKeyAssignment>> {
+    let mut by_key = BTreeMap::<_, Vec<_>>::new();
+    for assignment in &preset.key_assignments {
+        by_key
+            .entry(assignment.source_key_code)
+            .or_default()
+            .push(assignment);
+    }
+    by_key
+}
+
+fn summarize_ngenuity_legacy_assignment(
+    preset: &NgenuityPreset,
+    assignment: &NgenuityKeyAssignment,
+) -> String {
+    format!(
+        "type=0x{:02X}, active value={}, macro option={}, macro count={}, macro reference={}",
+        assignment.assignment_type_code,
+        format_ngenuity_legacy_function_code(assignment.active_function_code),
+        format_ngenuity_legacy_option_code(assignment.macro_playback_option_code),
+        format_ngenuity_legacy_count(assignment.macro_times),
+        format_macro_reference(macro_reference_index(preset, assignment.macro_source_id))
+    )
 }
 
 fn format_ngenuity_legacy_function_code(code: Option<u16>) -> String {
@@ -2938,7 +2980,7 @@ mod tests {
 
     #[test]
     fn ngenuity_legacy_diff_reports_semantics_but_ignores_source_ids() {
-        use hyperx_protocol::ngenuity_legacy::{NgenuityDpiStage, NgenuityKeyAssignment};
+        use hyperx_protocol::ngenuity_legacy::NgenuityDpiStage;
 
         let before = NgenuityPreset {
             container: NgenuityContainer::Export,
@@ -2987,11 +3029,66 @@ mod tests {
                 "stored active-stage index: 1 -> 2",
                 "raw polling code: 0x01 -> 0x02",
                 "raw lift-off code: 0x01 -> 0x03",
-                "assignment 1 source key: 0x0203 -> 0x0204",
-                "assignment 1 raw type: 0x02 -> 0x04",
-                "assignment 1 active Legacy value: 0x0004 -> none",
-                "assignment 1 raw macro playback option: none -> 0x01",
-                "assignment 1 raw macro count: none -> 2",
+                "assignment key 0x0203 removed: type=0x02, active value=0x0004, macro option=none, macro count=none, macro reference=none/unresolved",
+                "assignment key 0x0204 added: type=0x04, active value=none, macro option=0x01, macro count=2, macro reference=none/unresolved",
+            ]
+        );
+    }
+
+    #[test]
+    fn legacy_assignment_diff_matches_source_keys_not_record_order() {
+        use hyperx_protocol::ngenuity_legacy::NgenuityDpiStage;
+
+        let first = NgenuityKeyAssignment {
+            source_id: [1; 16],
+            source_key_code: 0x203,
+            assignment_type_code: 2,
+            active_function_code: Some(4),
+            macro_source_id: None,
+            macro_playback_option_code: None,
+            macro_times: None,
+        };
+        let second = NgenuityKeyAssignment {
+            source_id: [2; 16],
+            source_key_code: 0x206,
+            assignment_type_code: 3,
+            active_function_code: Some(2),
+            macro_source_id: None,
+            macro_playback_option_code: None,
+            macro_times: None,
+        };
+        let before = NgenuityPreset {
+            container: NgenuityContainer::InternalPreset,
+            embedded_length: 100,
+            version: 40,
+            name: "Preset".to_owned(),
+            dpi_stages: Vec::<NgenuityDpiStage>::new(),
+            active_dpi_stage: 0,
+            polling_rate_code: 1,
+            lift_off_distance_code: 1,
+            macros: Vec::new(),
+            key_assignments: vec![first, second],
+        };
+        let mut reordered = before.clone();
+        reordered.key_assignments.reverse();
+        reordered.key_assignments[0].source_id = [9; 16];
+        assert!(semantic_ngenuity_legacy_changes(&before, &reordered).is_empty());
+
+        reordered.key_assignments[1].active_function_code = Some(5);
+        assert_eq!(
+            semantic_ngenuity_legacy_changes(&before, &reordered),
+            ["assignment key 0x0203 active Legacy value: 0x0004 -> 0x0005"]
+        );
+
+        let mut ambiguous = before.clone();
+        ambiguous
+            .key_assignments
+            .push(before.key_assignments[0].clone());
+        assert_eq!(
+            semantic_ngenuity_legacy_changes(&before, &ambiguous),
+            [
+                "assignment count: 2 -> 3",
+                "assignment key 0x0203 has ambiguous duplicate records (before 1, after 2); semantic comparison skipped; inspect raw offsets",
             ]
         );
     }
