@@ -2539,6 +2539,15 @@ offset `0x31`. The read-only parser, CLI marker, tests and format docs now use
 the correct offset and zero-based interpretation; importing a partial `.hxp`
 still cannot trigger a device write.
 
+The same version-40 mouse block exposes raw `PollingRate` and
+`LiftOffDistance` bytes at offsets `0x1B` and `0x1C`. In the current
+`Master.hxp` both are `0x01`; its polling code matches the captured cold Raid
+image's `0x01` (1000 Hz in the separately confirmed Raid report codec). This
+is another field-level corroboration, **not** proof that the later-modified
+local file generated that capture. The `.hxp` inspector/diff now show both
+raw codes, while the portable importer deliberately leaves polling and
+lift-off unset. The lift-off value mapping and safe write path are unknown.
+
 ## Unknowns and required evidence
 
 The table records **historical capture-backed capabilities**, not commands

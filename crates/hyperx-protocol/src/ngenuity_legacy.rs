@@ -19,6 +19,8 @@ const HEADER_MACRO: u32 = 0x2545_C654;
 const HEADER_MACRO_ITEM: u32 = 0x1B35_A31E;
 const SUPPORTED_PRESET_VERSION: u32 = 40;
 const ACTIVE_DPI_STAGE_OFFSET: usize = 23;
+const POLLING_CODE_OFFSET: usize = 27;
+const LIFT_OFF_CODE_OFFSET: usize = 28;
 const DPI_COUNT_OFFSET: usize = 29;
 const DPI_RECORD_OFFSET: usize = 33;
 const DPI_RECORD_LENGTH: usize = 64;
@@ -41,6 +43,10 @@ pub struct NgenuityPreset {
     pub dpi_stages: Vec<NgenuityDpiStage>,
     /// Zero-based stage index stored by NGENUITY Legacy version 40.
     pub active_dpi_stage: u32,
+    /// Raw Legacy value; this parser does not turn it into a portable setting.
+    pub polling_rate_code: u8,
+    /// Raw Legacy value with no confirmed Pulsefire Raid value mapping.
+    pub lift_off_distance_code: u8,
     pub macros: Vec<NgenuityMacro>,
     pub key_assignments: Vec<NgenuityKeyAssignment>,
 }
@@ -244,6 +250,16 @@ pub fn parse_ngenuity_legacy_preset(bytes: &[u8]) -> Result<NgenuityPreset, Ngen
         mouse_offset + ACTIVE_DPI_STAGE_OFFSET,
         "active DPI stage",
     )?;
+    let polling_rate_code = read_u8(
+        payload,
+        mouse_offset + POLLING_CODE_OFFSET,
+        "polling rate code",
+    )?;
+    let lift_off_distance_code = read_u8(
+        payload,
+        mouse_offset + LIFT_OFF_CODE_OFFSET,
+        "lift-off distance code",
+    )?;
     let dpi_count = usize::try_from(read_u32(
         payload,
         mouse_offset + DPI_COUNT_OFFSET,
@@ -274,6 +290,8 @@ pub fn parse_ngenuity_legacy_preset(bytes: &[u8]) -> Result<NgenuityPreset, Ngen
         name,
         dpi_stages,
         active_dpi_stage,
+        polling_rate_code,
+        lift_off_distance_code,
         macros,
         key_assignments,
     })
@@ -718,6 +736,8 @@ mod tests {
         assert_eq!(preset.dpi_stages[0].dpi, 800);
         assert_eq!(preset.dpi_stages[0].color, RgbColor::new(0x2B, 0, 0xFF));
         assert_eq!(preset.active_dpi_stage, 0);
+        assert_eq!(preset.polling_rate_code, 0x01);
+        assert_eq!(preset.lift_off_distance_code, 0x01);
         assert_eq!(preset.macros.len(), 1);
         assert_eq!(preset.macros[0].items.len(), 2);
         assert_eq!(preset.key_assignments[0].macro_source_id, Some(MACRO_ID));
@@ -837,10 +857,11 @@ mod tests {
 
         push_u32(&mut inner, HEADER_MOUSE_PRESET);
         inner.extend_from_slice(&[0x10; 16]);
-        // Three flags, zero-based active stage 0, polling code 0, lift-off 0.
+        // Three flags, zero-based active stage 0, polling code 1, lift-off 1.
         // The effect-count Int32 after the DPI record is deliberately 1 so a
         // regression back to that old offset fails the assertions above.
-        inner.extend_from_slice(&[0; 9]);
+        inner.extend_from_slice(&[0; 7]);
+        inner.extend_from_slice(&[0x01, 0x01]);
         push_u32(&mut inner, 1);
         let mut dpi = [0_u8; DPI_RECORD_LENGTH];
         dpi[..16].fill(0x11);

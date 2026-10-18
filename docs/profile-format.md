@@ -43,6 +43,9 @@ not yet mapped their polling, lighting or physical key-assignment fields.
 Source assignment identifiers and macro references are retained under
 `unresolved_button_assignments` so later decoders can resolve them without
 silently inventing a target.
+The version-40 Legacy mouse block's polling and lift-off bytes are displayed
+as raw codes by `inspect-ngenuity-legacy` and compared by
+`diff-ngenuity-legacy`; they are not imported as portable settings.
 
 The NGENUITY Legacy version-40 active-stage value is a zero-based index.
 It is retained as `dpi.source_active_stage`; `dpi.active_stage` remains absent

@@ -1209,6 +1209,18 @@ fn semantic_ngenuity_legacy_changes(
             before.active_dpi_stage, after.active_dpi_stage
         ));
     }
+    if before.polling_rate_code != after.polling_rate_code {
+        changes.push(format!(
+            "raw polling code: 0x{:02X} -> 0x{:02X}",
+            before.polling_rate_code, after.polling_rate_code
+        ));
+    }
+    if before.lift_off_distance_code != after.lift_off_distance_code {
+        changes.push(format!(
+            "raw lift-off code: 0x{:02X} -> 0x{:02X}",
+            before.lift_off_distance_code, after.lift_off_distance_code
+        ));
+    }
 
     if before.macros.len() != after.macros.len() {
         changes.push(format!(
@@ -1415,6 +1427,10 @@ fn print_ngenuity_legacy_preset(preset: &NgenuityPreset) {
         "  Stored active-stage index: {} (zero-based; imported as provenance only).",
         preset.active_dpi_stage
     );
+    println!(
+        "Raw polling code: 0x{:02X}; raw lift-off code: 0x{:02X} (not imported).",
+        preset.polling_rate_code, preset.lift_off_distance_code
+    );
 
     println!("Macros:");
     if preset.macros.is_empty() {
@@ -1437,7 +1453,7 @@ fn print_ngenuity_legacy_preset(preset: &NgenuityPreset) {
         );
     }
     println!(
-        "Not decoded from .hxp yet: polling rate, lighting fields, and physical targets for assignments."
+        "Not decoded to portable settings: polling code, lift-off code, lighting fields, and physical targets for assignments."
     );
     println!("Inspection was offline; no HID device was opened.");
 }
@@ -2854,6 +2870,8 @@ mod tests {
                 color: RgbColor::new(1, 2, 3),
             }],
             active_dpi_stage: 1,
+            polling_rate_code: 0x01,
+            lift_off_distance_code: 0x01,
             macros: Vec::new(),
             key_assignments: Vec::new(),
         };
@@ -2864,11 +2882,15 @@ mod tests {
         let mut changed = identifiers_only;
         changed.dpi_stages[0].dpi = 900;
         changed.active_dpi_stage = 2;
+        changed.polling_rate_code = 0x02;
+        changed.lift_off_distance_code = 0x03;
         assert_eq!(
             semantic_ngenuity_legacy_changes(&before, &changed),
             vec![
                 "DPI stage 1: 800 DPI #010203/alpha 255 -> 900 DPI #010203/alpha 255",
                 "stored active-stage index: 1 -> 2",
+                "raw polling code: 0x01 -> 0x02",
+                "raw lift-off code: 0x01 -> 0x03",
             ]
         );
     }
