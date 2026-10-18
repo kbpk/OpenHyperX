@@ -1288,6 +1288,22 @@ fn semantic_ngenuity_legacy_changes(
                     format_ngenuity_legacy_function_code(right.active_function_code)
                 ));
             }
+            if left.macro_playback_option_code != right.macro_playback_option_code {
+                changes.push(format!(
+                    "assignment {} raw macro playback option: {} -> {}",
+                    index + 1,
+                    format_ngenuity_legacy_option_code(left.macro_playback_option_code),
+                    format_ngenuity_legacy_option_code(right.macro_playback_option_code)
+                ));
+            }
+            if left.macro_times != right.macro_times {
+                changes.push(format!(
+                    "assignment {} raw macro count: {} -> {}",
+                    index + 1,
+                    format_ngenuity_legacy_count(left.macro_times),
+                    format_ngenuity_legacy_count(right.macro_times)
+                ));
+            }
         }
         let left = before
             .key_assignments
@@ -1311,6 +1327,14 @@ fn semantic_ngenuity_legacy_changes(
 
 fn format_ngenuity_legacy_function_code(code: Option<u16>) -> String {
     code.map_or_else(|| "none".to_owned(), |value| format!("0x{value:04X}"))
+}
+
+fn format_ngenuity_legacy_option_code(code: Option<u8>) -> String {
+    code.map_or_else(|| "none".to_owned(), |value| format!("0x{value:02X}"))
+}
+
+fn format_ngenuity_legacy_count(count: Option<u16>) -> String {
+    count.map_or_else(|| "none".to_owned(), |value| value.to_string())
 }
 
 fn compare_ngenuity_legacy_macro(
@@ -1493,8 +1517,17 @@ fn print_ngenuity_legacy_preset(preset: &NgenuityPreset) {
                 format!("Legacy value=0x{code:04X}{name}")
             },
         );
+        let macro_policy = assignment
+            .macro_playback_option_code
+            .map_or_else(String::new, |code| {
+                let name = assignment
+                    .macro_playback_option_name()
+                    .map_or_else(String::new, |name| format!(" ({name})"));
+                let count = format_ngenuity_legacy_count(assignment.macro_times);
+                format!(", macro option=0x{code:02X}{name}, count={count}")
+            });
         println!(
-            "  {}: key=0x{:04X}, type=0x{:02X} ({source_type}), {active_value}, {raid_target}; source_id={}, {reference}; binding not imported",
+            "  {}: key=0x{:04X}, type=0x{:02X} ({source_type}), {active_value}{macro_policy}, {raid_target}; source_id={}, {reference}; binding not imported",
             index + 1,
             assignment.source_key_code,
             assignment.assignment_type_code,
@@ -2928,6 +2961,8 @@ mod tests {
                 assignment_type_code: 2,
                 active_function_code: Some(4),
                 macro_source_id: None,
+                macro_playback_option_code: None,
+                macro_times: None,
             }],
         };
         let mut identifiers_only = before.clone();
@@ -2943,6 +2978,8 @@ mod tests {
         changed.key_assignments[0].source_key_code = 0x204;
         changed.key_assignments[0].assignment_type_code = 4;
         changed.key_assignments[0].active_function_code = None;
+        changed.key_assignments[0].macro_playback_option_code = Some(1);
+        changed.key_assignments[0].macro_times = Some(2);
         assert_eq!(
             semantic_ngenuity_legacy_changes(&before, &changed),
             vec![
@@ -2953,6 +2990,8 @@ mod tests {
                 "assignment 1 source key: 0x0203 -> 0x0204",
                 "assignment 1 raw type: 0x02 -> 0x04",
                 "assignment 1 active Legacy value: 0x0004 -> none",
+                "assignment 1 raw macro playback option: none -> 0x01",
+                "assignment 1 raw macro count: none -> 2",
             ]
         );
     }

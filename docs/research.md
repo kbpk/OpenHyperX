@@ -2569,7 +2569,8 @@ overlay but does **not** make the cold TX a valid general restore template.
 93-byte assignment: the source GUID at `+0x04`, a little-endian `KeyCode` at
 `+0x14`, `AssignmentType` at `+0x16`, a little-endian keyboard-function code at
 `+0x17`, a mouse-function byte at `+0x19`, a multimedia byte at `+0x1A`, the
-macro GUID at `+0x1B`, and a Windows-shortcut byte at `+0x2E`. The old
+macro GUID at `+0x1B`, a macro playback-option byte at `+0x2B`, a little-endian
+macro play count at `+0x2C`, and a Windows-shortcut byte at `+0x2E`. The old
 parser searched for a known macro GUID *anywhere* in the record; it now reads
 only the dedicated field and treats it as an active link only for Macro type
 `4`, with regressions for a matching GUID at another offset and an inactive
@@ -2587,6 +2588,14 @@ Undo. These are *Legacy enum values*, not the four-byte Raid report values.
 The same method returns zero for Disabled and uses a separate `_normalKeys`
 dictionary for keyboard codes. Its mappings establish serializer intent,
 not an independent hardware test or permission to write a cold profile.
+Legacy's assignment-level `PlaybackOption` enum names `0` None, `1`
+PlayOnce, `2` PlayMultipleTimes, `3` UseAssignedKey and `4`
+AssignedKeyPressed. These are not the referenced macro definition's playback
+mode. In the installed Raid class, `InitProfile` reads `MacroID` but has no
+read of either assignment-level playback field; the current `Master.hxp` has
+`0/0` there for its assigned Button 5 macro. Therefore the inspector and
+diff expose the raw values, but the importer does not treat them as Raid
+repeat behavior.
 `MousePulsefireRaid.InitProfile` maps source keys `0x200..0x20A` to Raid's
 eleven known physical controls; its key `0x205` targets device slot 6
 (Button 6), while `0x206` targets slot 5 (Button 7). Keys `0x20B` and
@@ -2601,11 +2610,11 @@ key `0x208`/KeyboardFunction `0x0005`, `0x204`/Macro, `0x203`/MouseFunction
 `2` (Right) and `0x200`/MouseFunction `1` (Left). Those targets align with
 the cold capture's DPI button, Button 5, Button 4, Button 7 and primary
 pair; the decoded mouse/multimedia values are consistent with it. The other
-report button records can come from `InitProfile` defaults. This is
-corroboration only: the historical preset ID
-and exact source values at capture time are unproven, and Legacy keyboard
-code `0x0005` has not been translated through `_normalKeys`. No raw GUID or
-macro content is committed.
+report button records can come from `InitProfile` defaults. Static
+inspection of Raid's `InitNormalKeys` maps Legacy `KeyCode 0x0005` to HID
+usage `0x05`, matching the keyboard record in the cold TX. This remains
+corroboration only: the historical preset ID and exact source values at
+capture time are unproven. No raw GUID or macro content is committed.
 
 ## Unknowns and required evidence
 

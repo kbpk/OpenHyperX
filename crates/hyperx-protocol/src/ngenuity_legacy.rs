@@ -174,6 +174,10 @@ pub struct NgenuityKeyAssignment {
     /// WindowsShortcut. This is a Legacy enum/code, not a Raid wire value.
     pub active_function_code: Option<u16>,
     pub macro_source_id: Option<[u8; 16]>,
+    /// Active only for Macro assignments; distinct from the referenced macro
+    /// definition's playback mode and not translated to hardware behavior.
+    pub macro_playback_option_code: Option<u8>,
+    pub macro_times: Option<u16>,
 }
 
 impl NgenuityKeyAssignment {
@@ -222,6 +226,18 @@ impl NgenuityKeyAssignment {
             (5, Some(8)) => Some("Copy"),
             (5, Some(9)) => Some("Paste"),
             (5, Some(10)) => Some("Undo"),
+            _ => None,
+        }
+    }
+
+    /// Name of the assignment-level Legacy enum, not a verified Raid mode.
+    pub const fn macro_playback_option_name(&self) -> Option<&'static str> {
+        match self.macro_playback_option_code {
+            Some(0) => Some("None"),
+            Some(1) => Some("PlayOnce"),
+            Some(2) => Some("PlayMultipleTimes"),
+            Some(3) => Some("UseAssignedKey"),
+            Some(4) => Some("AssignedKeyPressed"),
             _ => None,
         }
     }
@@ -636,12 +652,22 @@ fn parse_key_assignments(
         } else {
             None
         };
+        let (macro_playback_option_code, macro_times) = if assignment_type_code == 4 {
+            (
+                Some(read_u8(record, 43, "macro assignment playback option")?),
+                Some(read_u16(record, 44, "macro assignment play count")?),
+            )
+        } else {
+            (None, None)
+        };
         assignments.push(NgenuityKeyAssignment {
             source_id,
             source_key_code,
             assignment_type_code,
             active_function_code,
             macro_source_id,
+            macro_playback_option_code,
+            macro_times,
         });
     }
     Ok(assignments)
@@ -853,6 +879,15 @@ mod tests {
         );
         assert_eq!(preset.key_assignments[0].macro_source_id, Some(MACRO_ID));
         assert_eq!(preset.key_assignments[0].active_function_code, None);
+        assert_eq!(
+            preset.key_assignments[0].macro_playback_option_code,
+            Some(1)
+        );
+        assert_eq!(
+            preset.key_assignments[0].macro_playback_option_name(),
+            Some("PlayOnce")
+        );
+        assert_eq!(preset.key_assignments[0].macro_times, Some(1));
 
         let imported = preset.to_software_profile("pulsefire-raid").unwrap();
         assert!(imported.partial);
@@ -900,6 +935,11 @@ mod tests {
 
         let preset = parse_ngenuity_legacy_preset(&bytes).unwrap();
         assert_eq!(preset.key_assignments[0].macro_source_id, None);
+        assert_eq!(
+            preset.key_assignments[0].macro_playback_option_code,
+            Some(1)
+        );
+        assert_eq!(preset.key_assignments[0].macro_times, Some(1));
     }
 
     #[test]
@@ -914,6 +954,8 @@ mod tests {
             Some("MouseFunction")
         );
         assert_eq!(preset.key_assignments[0].macro_source_id, None);
+        assert_eq!(preset.key_assignments[0].macro_playback_option_code, None);
+        assert_eq!(preset.key_assignments[0].macro_times, None);
     }
 
     #[test]
@@ -933,12 +975,23 @@ mod tests {
             bytes[first + 23..first + 25].copy_from_slice(&0x0123_u16.to_le_bytes());
             bytes[first + 25] = 4;
             bytes[first + 26] = 2;
+            bytes[first + 43] = 2;
+            bytes[first + 44..first + 46].copy_from_slice(&3_u16.to_le_bytes());
             bytes[first + 46] = 10;
             let preset = parse_ngenuity_legacy_preset(&bytes).unwrap();
             let assignment = &preset.key_assignments[0];
             assert_eq!(assignment.active_function_code, expected_code);
             assert_eq!(assignment.active_function_name(), expected_name);
             assert_eq!(assignment.macro_source_id.is_some(), assignment_type == 4);
+            assert_eq!(
+                assignment.macro_playback_option_code,
+                (assignment_type == 4).then_some(2)
+            );
+            assert_eq!(
+                assignment.macro_playback_option_name(),
+                (assignment_type == 4).then_some("PlayMultipleTimes")
+            );
+            assert_eq!(assignment.macro_times, (assignment_type == 4).then_some(3));
         }
     }
 
@@ -952,6 +1005,23 @@ mod tests {
         let assignment = &preset.key_assignments[0];
         assert_eq!(assignment.active_function_code, Some(0xFE));
         assert_eq!(assignment.active_function_name(), None);
+    }
+
+    #[test]
+    fn unknown_macro_playback_option_stays_raw_and_unimported() {
+        let mut bytes = fixture(false);
+        let first = find_header(&bytes, HEADER_KEY_ASSIGNMENT).unwrap();
+        bytes[first + 43] = 0xFE;
+        let preset = parse_ngenuity_legacy_preset(&bytes).unwrap();
+        let assignment = &preset.key_assignments[0];
+        assert_eq!(assignment.macro_playback_option_code, Some(0xFE));
+        assert_eq!(assignment.macro_playback_option_name(), None);
+        assert!(
+            preset
+                .to_software_profile("pulsefire-raid")
+                .unwrap()
+                .partial
+        );
     }
 
     #[test]
@@ -975,6 +1045,8 @@ mod tests {
                 assignment_type_code: 0,
                 active_function_code: None,
                 macro_source_id: None,
+                macro_playback_option_code: None,
+                macro_times: None,
             };
             assert_eq!(assignment.pulsefire_raid_control(), Some(control));
         }
@@ -985,6 +1057,8 @@ mod tests {
                 assignment_type_code: 0,
                 active_function_code: None,
                 macro_source_id: None,
+                macro_playback_option_code: None,
+                macro_times: None,
             };
             assert_eq!(assignment.pulsefire_raid_control(), None);
         }
@@ -1088,6 +1162,8 @@ mod tests {
         assignment[20..22].copy_from_slice(&0x203_u16.to_le_bytes());
         assignment[22] = 4;
         assignment[27..43].copy_from_slice(&MACRO_ID);
+        assignment[43] = 1;
+        assignment[44..46].copy_from_slice(&1_u16.to_le_bytes());
         inner.extend_from_slice(&assignment);
 
         push_u32(&mut inner, 1);

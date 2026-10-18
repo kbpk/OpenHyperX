@@ -51,6 +51,11 @@ not populate physical bindings. The inspector shows only the active Legacy
 function code for KeyboardFunction, MouseFunction, Multimedia or
 WindowsShortcut; enum labels identify Legacy values, not guaranteed Raid
 capabilities or HID wire codes. Inactive/stale function fields are ignored.
+For Macro assignments it also displays the assignment-level raw playback
+option and count; these are separate from the referenced macro definition.
+Raid's Legacy `InitProfile` uses the macro identifier, while the current
+`Master.hxp` stores option/count `0/0` for an assigned macro, so those two
+fields are not interpreted as actual playback behavior or imported.
 The version-40 Legacy mouse block's polling and lift-off bytes are displayed
 as raw codes by `inspect-ngenuity-legacy` and compared by
 `diff-ngenuity-legacy`; they are not imported as portable settings.
