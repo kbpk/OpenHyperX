@@ -1260,6 +1260,27 @@ fn semantic_ngenuity_legacy_changes(
         .len()
         .max(after.key_assignments.len())
     {
+        if let (Some(left), Some(right)) = (
+            before.key_assignments.get(index),
+            after.key_assignments.get(index),
+        ) {
+            if left.source_key_code != right.source_key_code {
+                changes.push(format!(
+                    "assignment {} source key: 0x{:04X} -> 0x{:04X}",
+                    index + 1,
+                    left.source_key_code,
+                    right.source_key_code
+                ));
+            }
+            if left.assignment_type_code != right.assignment_type_code {
+                changes.push(format!(
+                    "assignment {} raw type: 0x{:02X} -> 0x{:02X}",
+                    index + 1,
+                    left.assignment_type_code,
+                    right.assignment_type_code
+                ));
+            }
+        }
         let left = before
             .key_assignments
             .get(index)
@@ -1446,14 +1467,21 @@ fn print_ngenuity_legacy_preset(preset: &NgenuityPreset) {
             || "no decoded macro reference".to_owned(),
             |id| format!("macro {}", format_ngenuity_legacy_id(id)),
         );
+        let raid_target = assignment.pulsefire_raid_control().map_or_else(
+            || "no confirmed Raid physical target".to_owned(),
+            |control| format!("Raid interpretation: {}", control.name()),
+        );
+        let source_type = assignment.assignment_type_name().unwrap_or("unknown");
         println!(
-            "  {}: source_id={}, {reference}; physical control unresolved",
+            "  {}: key=0x{:04X}, type=0x{:02X} ({source_type}), {raid_target}; source_id={}, {reference}; binding value not imported",
             index + 1,
+            assignment.source_key_code,
+            assignment.assignment_type_code,
             format_ngenuity_legacy_id(&assignment.source_id),
         );
     }
     println!(
-        "Not decoded to portable settings: polling code, lift-off code, lighting fields, and physical targets for assignments."
+        "Not decoded to portable settings: polling code, lift-off code, lighting and assignment values. Raid targets require a confirmed model identity."
     );
     println!("Inspection was offline; no HID device was opened.");
 }
@@ -2856,7 +2884,7 @@ mod tests {
 
     #[test]
     fn ngenuity_legacy_diff_reports_semantics_but_ignores_source_ids() {
-        use hyperx_protocol::ngenuity_legacy::NgenuityDpiStage;
+        use hyperx_protocol::ngenuity_legacy::{NgenuityDpiStage, NgenuityKeyAssignment};
 
         let before = NgenuityPreset {
             container: NgenuityContainer::Export,
@@ -2873,10 +2901,16 @@ mod tests {
             polling_rate_code: 0x01,
             lift_off_distance_code: 0x01,
             macros: Vec::new(),
-            key_assignments: Vec::new(),
+            key_assignments: vec![NgenuityKeyAssignment {
+                source_id: [3; 16],
+                source_key_code: 0x203,
+                assignment_type_code: 2,
+                macro_source_id: None,
+            }],
         };
         let mut identifiers_only = before.clone();
         identifiers_only.dpi_stages[0].source_id = [2; 16];
+        identifiers_only.key_assignments[0].source_id = [4; 16];
         assert!(semantic_ngenuity_legacy_changes(&before, &identifiers_only).is_empty());
 
         let mut changed = identifiers_only;
@@ -2884,6 +2918,8 @@ mod tests {
         changed.active_dpi_stage = 2;
         changed.polling_rate_code = 0x02;
         changed.lift_off_distance_code = 0x03;
+        changed.key_assignments[0].source_key_code = 0x204;
+        changed.key_assignments[0].assignment_type_code = 4;
         assert_eq!(
             semantic_ngenuity_legacy_changes(&before, &changed),
             vec![
@@ -2891,6 +2927,8 @@ mod tests {
                 "stored active-stage index: 1 -> 2",
                 "raw polling code: 0x01 -> 0x02",
                 "raw lift-off code: 0x01 -> 0x03",
+                "assignment 1 source key: 0x0203 -> 0x0204",
+                "assignment 1 raw type: 0x02 -> 0x04",
             ]
         );
     }

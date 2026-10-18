@@ -11,6 +11,8 @@ use hyperx_core::{
 };
 use thiserror::Error;
 
+use crate::pulsefire_raid::PulsefireRaidControl;
+
 const HEADER_ALL: u32 = 0x7D65_83CA;
 const HEADER_PRESET: u32 = 0x4D2C_83CE;
 const HEADER_MOUSE_PRESET: u32 = 0x1A4A_0099;
@@ -164,7 +166,51 @@ impl NgenuityMouseButton {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NgenuityKeyAssignment {
     pub source_id: [u8; 16],
+    /// Raw Legacy KeyCode; a physical target is model-specific.
+    pub source_key_code: u16,
+    /// Raw Legacy AssignmentType; its payload is not imported by this parser.
+    pub assignment_type_code: u8,
     pub macro_source_id: Option<[u8; 16]>,
+}
+
+impl NgenuityKeyAssignment {
+    /// Name from Legacy's version-40 `AssignmentType` enum, not proof that the
+    /// corresponding binding value can be imported or sent to a mouse.
+    pub const fn assignment_type_name(&self) -> Option<&'static str> {
+        match self.assignment_type_code {
+            0 => Some("Default"),
+            1 => Some("KeyboardFunction"),
+            2 => Some("MouseFunction"),
+            3 => Some("Multimedia"),
+            4 => Some("Macro"),
+            5 => Some("WindowsShortcut"),
+            6 => Some("Open"),
+            7 => Some("Disabled"),
+            8 => Some("FunctionLock"),
+            9 => Some("FNKey"),
+            _ => None,
+        }
+    }
+
+    /// Interpret a Legacy key code through Pulsefire Raid's `InitProfile`
+    /// switch. The `.hxp` container itself does not prove the device model.
+    /// Raid's extra keys 0x20B and 0x20C have no confirmed physical target.
+    pub const fn pulsefire_raid_control(&self) -> Option<PulsefireRaidControl> {
+        match self.source_key_code {
+            0x200 => Some(PulsefireRaidControl::LeftClick),
+            0x201 => Some(PulsefireRaidControl::RightClick),
+            0x202 => Some(PulsefireRaidControl::MiddleClick),
+            0x203 => Some(PulsefireRaidControl::Button4),
+            0x204 => Some(PulsefireRaidControl::Button5),
+            0x205 => Some(PulsefireRaidControl::Button6),
+            0x206 => Some(PulsefireRaidControl::Button7),
+            0x207 => Some(PulsefireRaidControl::Button8),
+            0x208 => Some(PulsefireRaidControl::Dpi),
+            0x209 => Some(PulsefireRaidControl::WheelTiltLeft),
+            0x20A => Some(PulsefireRaidControl::WheelTiltRight),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -532,14 +578,24 @@ fn parse_key_assignments(
         expect_header(payload, offset, HEADER_KEY_ASSIGNMENT, "key assignment")?;
         let record = read_bytes(payload, offset, KEY_ASSIGNMENT_LENGTH, "key assignment")?;
         let source_id = read_id(payload, offset + 4, "key assignment identifier")?;
-        let macro_source_id = macros.iter().find_map(|source_macro| {
-            record
-                .windows(source_macro.source_id.len())
-                .any(|window| window == source_macro.source_id)
-                .then_some(source_macro.source_id)
-        });
+        // KeyAssignment.Deserialize reads KeyCode and AssignmentType directly
+        // after the GUID; MacroID is exactly the 16 bytes at +27. Searching
+        // the whole record could mistake an unrelated GUID for a macro link.
+        let source_key_code = read_u16(record, 20, "key assignment source key")?;
+        let assignment_type_code = read_u8(record, 22, "key assignment type")?;
+        let macro_id = read_id(record, 27, "key assignment macro identifier")?;
+        let macro_source_id = if assignment_type_code == 4 {
+            macros
+                .iter()
+                .find(|source_macro| source_macro.source_id == macro_id)
+                .map(|source_macro| source_macro.source_id)
+        } else {
+            None
+        };
         assignments.push(NgenuityKeyAssignment {
             source_id,
+            source_key_code,
+            assignment_type_code,
             macro_source_id,
         });
     }
@@ -740,6 +796,16 @@ mod tests {
         assert_eq!(preset.lift_off_distance_code, 0x01);
         assert_eq!(preset.macros.len(), 1);
         assert_eq!(preset.macros[0].items.len(), 2);
+        assert_eq!(preset.key_assignments[0].source_key_code, 0x203);
+        assert_eq!(preset.key_assignments[0].assignment_type_code, 4);
+        assert_eq!(
+            preset.key_assignments[0].assignment_type_name(),
+            Some("Macro")
+        );
+        assert_eq!(
+            preset.key_assignments[0].pulsefire_raid_control(),
+            Some(PulsefireRaidControl::Button4)
+        );
         assert_eq!(preset.key_assignments[0].macro_source_id, Some(MACRO_ID));
 
         let imported = preset.to_software_profile("pulsefire-raid").unwrap();
@@ -777,6 +843,65 @@ mod tests {
         assert_eq!(preset.container, NgenuityContainer::InternalPreset);
         assert_eq!(preset.embedded_length, bytes.len());
         assert_eq!(ngenuity_legacy_embedded_payload(&bytes).unwrap(), bytes);
+    }
+
+    #[test]
+    fn macro_reference_uses_only_the_deserialized_macro_id_field() {
+        let mut bytes = fixture(false);
+        let first = find_header(&bytes, HEADER_KEY_ASSIGNMENT).unwrap();
+        bytes[first + 27..first + 43].fill(0);
+        bytes[first + 50..first + 66].copy_from_slice(&MACRO_ID);
+
+        let preset = parse_ngenuity_legacy_preset(&bytes).unwrap();
+        assert_eq!(preset.key_assignments[0].macro_source_id, None);
+    }
+
+    #[test]
+    fn inactive_macro_id_does_not_become_an_active_binding_reference() {
+        let mut bytes = fixture(false);
+        let first = find_header(&bytes, HEADER_KEY_ASSIGNMENT).unwrap();
+        bytes[first + 22] = 2; // MouseFunction, with the old MacroID still stored.
+
+        let preset = parse_ngenuity_legacy_preset(&bytes).unwrap();
+        assert_eq!(
+            preset.key_assignments[0].assignment_type_name(),
+            Some("MouseFunction")
+        );
+        assert_eq!(preset.key_assignments[0].macro_source_id, None);
+    }
+
+    #[test]
+    fn raid_key_codes_map_only_to_the_eleven_known_controls() {
+        for (code, control) in [
+            (0x200, PulsefireRaidControl::LeftClick),
+            (0x201, PulsefireRaidControl::RightClick),
+            (0x202, PulsefireRaidControl::MiddleClick),
+            (0x203, PulsefireRaidControl::Button4),
+            (0x204, PulsefireRaidControl::Button5),
+            (0x205, PulsefireRaidControl::Button6),
+            (0x206, PulsefireRaidControl::Button7),
+            (0x207, PulsefireRaidControl::Button8),
+            (0x208, PulsefireRaidControl::Dpi),
+            (0x209, PulsefireRaidControl::WheelTiltLeft),
+            (0x20A, PulsefireRaidControl::WheelTiltRight),
+        ] {
+            let assignment = NgenuityKeyAssignment {
+                source_id: [0; 16],
+                source_key_code: code,
+                assignment_type_code: 0,
+                macro_source_id: None,
+            };
+            assert_eq!(assignment.pulsefire_raid_control(), Some(control));
+        }
+        for code in [0x000, 0x20B, 0x20C, 0xFFFF] {
+            let assignment = NgenuityKeyAssignment {
+                source_id: [0; 16],
+                source_key_code: code,
+                assignment_type_code: 0,
+                macro_source_id: None,
+            };
+            assert_eq!(assignment.pulsefire_raid_control(), None);
+        }
     }
 
     #[test]
@@ -874,6 +999,8 @@ mod tests {
         let mut assignment = [0_u8; KEY_ASSIGNMENT_LENGTH];
         assignment[..4].copy_from_slice(&HEADER_KEY_ASSIGNMENT.to_le_bytes());
         assignment[4..20].fill(0x33);
+        assignment[20..22].copy_from_slice(&0x203_u16.to_le_bytes());
+        assignment[22] = 4;
         assignment[27..43].copy_from_slice(&MACRO_ID);
         inner.extend_from_slice(&assignment);
 

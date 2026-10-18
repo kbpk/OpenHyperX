@@ -39,10 +39,13 @@ The output path must not already exist. The importer currently normalizes:
 
 The import is deliberately marked `partial = true`. Version-40 files examined
 so far do not provide a decoded physical-device identity, and OpenHyperX has
-not yet mapped their polling, lighting or physical key-assignment fields.
+not yet mapped their polling, lighting or assignment values to portable settings.
 Source assignment identifiers and macro references are retained under
 `unresolved_button_assignments` so later decoders can resolve them without
-silently inventing a target.
+silently inventing a binding. The inspector shows raw source key/type codes
+and a conditional Pulsefire Raid target interpretation for keys `0x200..0x20A`.
+Because the `.hxp` container does not prove its source model and assignment
+values are not yet decoded, import still does not populate physical bindings.
 The version-40 Legacy mouse block's polling and lift-off bytes are displayed
 as raw codes by `inspect-ngenuity-legacy` and compared by
 `diff-ngenuity-legacy`; they are not imported as portable settings.

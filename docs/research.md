@@ -2498,8 +2498,8 @@ alone, so all normal runtime reads/writes and onboarding remain blocked.
 Do not replay the constructor body or copy onboard fields into runtime.
 
 **Next offline work:** compare a Legacy preset with the captured cold write
-field-by-field, especially LED modes, bitmap fields and the 13th single-key
-entry. Only after that, design a
+field-by-field, especially assignment values and separate effect application.
+Only after that, design a
 validated, separately consented cold-runtime activation transaction with a
 physical reconnect available. Do not use exploratory HID sends to fill gaps.
 
@@ -2548,6 +2548,48 @@ local file generated that capture. The `.hxp` inspector/diff now show both
 raw codes, while the portable importer deliberately leaves polling and
 lift-off unset. The lift-off value mapping and safe write path are unknown.
 
+Static inspection of `MousePulsefireRaid.InitProfile` further narrows the
+cold-write provenance. After the GET result is loaded, this method sets LED
+intensity from global `Settings.MouseBrightness` (capped at 100), resets and
+fills the five DPI slots/colors/enabled flags, copies the preset's zero-based
+active stage and raw polling code, and initializes **13** default button
+records before applying assignments. It does **not** set zone LED modes,
+effect palettes/speeds, bitmap metadata or the 13 single-key records in that
+method. The cold capture's all-zero GET followed by TX has intensity `0x64`,
+the expected DPI/polling values, the two extra default button records at
+`0xA8..0xAF`, and zeros in those untouched effect/single-key regions. By
+contrast, the onboard fixture has nonzero LED mode, bitmap and final
+single-key bytes. An offline golden regression now checks this distinction.
+The source of brightness is *global settings*, not the `.hxp` mouse block;
+the specific value at capture time and any later `ApplyEffects` packets are
+not reconstructed by these fixtures. This explains the observed partial
+overlay but does **not** make the cold TX a valid general restore template.
+
+`KeyAssignment.Deserialize` also confirms fixed version-40 fields within each
+93-byte assignment: the source GUID at `+0x04`, a little-endian `KeyCode` at
+`+0x14`, `AssignmentType` at `+0x16`, and the macro GUID at `+0x1B`. The old
+parser searched for a known macro GUID *anywhere* in the record; it now reads
+only the dedicated field and treats it as an active link only for Macro type
+`4`, with regressions for a matching GUID at another offset and an inactive
+stale macro field. Legacy's `AssignmentType` enum names codes 0–9, including
+KeyboardFunction `1`, MouseFunction `2`, Multimedia `3` and Macro `4`.
+`MousePulsefireRaid.InitProfile` maps source keys `0x200..0x20A` to Raid's
+eleven known physical controls; its key `0x205` targets device slot 6
+(Button 6), while `0x206` targets slot 5 (Button 7). Keys `0x20B` and
+`0x20C` address the two extra vendor records, but their physical purpose is
+not confirmed. This mapping is **conditional on a Raid preset**: `.hxp`
+itself still does not prove the source device model, so the CLI labels it a
+Raid interpretation and the TOML importer keeps assignments unresolved.
+
+The current, later-modified `Master.hxp` contains six explicit assignments:
+key `0x208`/KeyboardFunction, `0x204`/Macro, `0x203`/MouseFunction,
+`0x206`/Multimedia, `0x201`/MouseFunction and `0x200`/MouseFunction. Those
+targets align with the cold capture's DPI button, Button 5, Button 4,
+Button 7 and primary pair, while the other report button records can come
+from `InitProfile` defaults. This is corroboration only; individual function
+values and the historical preset ID are not yet proven from this file, and
+no raw GUID or macro content is committed.
+
 ## Unknowns and required evidence
 
 The table records **historical capture-backed capabilities**, not commands
@@ -2557,7 +2599,7 @@ discovery; the new serializer field names do not lift that gate.
 
 | Area | Current state | Required next experiment |
 | --- | --- | --- |
-| cold runtime activation | Legacy's serializer layout, `InitProfile` handler, read-modify-write order and current preset-selection path are identified offline; a cold runtime GET can still be empty, and the exact safe baseline/activation transaction is unproven | compare the selected preset with the captured cold image field-by-field, then validate a complete constructed image offline before any separately consented hardware test |
+| cold runtime activation | Legacy's serializer layout, `InitProfile` overlay, read-modify-write order and current preset-selection path are identified offline; cold TX preserves zeros in effect/single-key fields after an empty GET, and the exact safe baseline/activation transaction is unproven | trace assignment values and separate effect application, then validate a complete image offline before any separately consented hardware test |
 | firmware/device info query | unknown | capture NGENUITY Legacy startup with no setting changes; identify repeated IN/feature queries |
 | report descriptor for configuration collection | confirmed | optionally dump the two other vendor collections for research without sending reports |
 | direct RGB transport | hardware-validated for independent wheel/logo colors and black/off; NGENUITY Legacy Solid and Cycle both use it, and the previous lighting state returns without keepalive | optionally measure the exact timeout/revert interval |

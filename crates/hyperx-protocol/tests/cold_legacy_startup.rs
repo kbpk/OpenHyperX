@@ -188,6 +188,33 @@ fn extra_records_after_the_eleven_controls_are_retained_but_not_mapped() {
 }
 
 #[test]
+fn cold_legacy_overlay_is_not_a_complete_runtime_restore_template() {
+    let (_, cold_write, onboard) = captured_profiles();
+
+    // The installed Legacy InitProfile method overlays brightness, DPI,
+    // polling and button records after a profile GET. It does not initialize
+    // these effect/single-key regions. This captured cold GET was all zero,
+    // so the following TX retained zeros here even though onboard data had
+    // nonzero values. These assertions are evidence against replaying TX as
+    // a general restore image, not a recipe for constructing another TX.
+    for (range, name) in [
+        (0x37..0x39, "LED modes"),
+        (0x3E..0x69, "LED palettes and effect parameters"),
+        (0x78..0x7A, "bitmap metadata"),
+        (0xB0..0xE4, "single-key records"),
+    ] {
+        assert!(
+            cold_write.as_bytes()[range].iter().all(|byte| *byte == 0),
+            "cold TX unexpectedly populates {name}"
+        );
+    }
+    assert_eq!(cold_write.as_bytes()[0x16], 0x64);
+    assert_eq!(onboard.as_bytes()[0x37], 0x04);
+    assert_eq!(onboard.as_bytes()[0x78], 0x01);
+    assert_eq!(onboard.as_bytes()[0xE3], 0xD5);
+}
+
+#[test]
 fn warm_legacy_read_write_only_changes_opcode_and_has_section_specific_opaque_bytes() {
     let warm = parse_report_log(WARM).unwrap();
     assert_eq!(warm.records.len(), 2);
