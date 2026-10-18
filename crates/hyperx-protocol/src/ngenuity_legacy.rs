@@ -168,8 +168,11 @@ pub struct NgenuityKeyAssignment {
     pub source_id: [u8; 16],
     /// Raw Legacy KeyCode; a physical target is model-specific.
     pub source_key_code: u16,
-    /// Raw Legacy AssignmentType; its payload is not imported by this parser.
+    /// Raw Legacy AssignmentType; its payload is not imported as a binding.
     pub assignment_type_code: u8,
+    /// Active scalar field for KeyboardFunction, MouseFunction, Multimedia or
+    /// WindowsShortcut. This is a Legacy enum/code, not a Raid wire value.
+    pub active_function_code: Option<u16>,
     pub macro_source_id: Option<[u8; 16]>,
 }
 
@@ -188,6 +191,37 @@ impl NgenuityKeyAssignment {
             7 => Some("Disabled"),
             8 => Some("FunctionLock"),
             9 => Some("FNKey"),
+            _ => None,
+        }
+    }
+
+    /// Legacy enum name only; it does not establish device support or make an
+    /// assignment safe to import/write. Keyboard key codes remain raw.
+    pub const fn active_function_name(&self) -> Option<&'static str> {
+        match (self.assignment_type_code, self.active_function_code) {
+            (2, Some(1)) => Some("Left"),
+            (2, Some(2)) => Some("Right"),
+            (2, Some(3)) => Some("Middle"),
+            (2, Some(4)) => Some("Previous"),
+            (2, Some(5)) => Some("Forward"),
+            (2, Some(6)) => Some("TiltL"),
+            (2, Some(7)) => Some("TiltR"),
+            (2, Some(8)) => Some("DPI"),
+            (2, Some(9)) => Some("ScrollUp"),
+            (2, Some(10)) => Some("ScrollDown"),
+            (3, Some(1)) => Some("VolumeUp"),
+            (3, Some(2)) => Some("VolumeDown"),
+            (3, Some(3)) => Some("MuteVolume"),
+            (3, Some(8)) => Some("PlayPause"),
+            (3, Some(9)) => Some("NextTrack"),
+            (3, Some(10)) => Some("PreviousTrack"),
+            (3, Some(11)) => Some("Stop"),
+            (5, Some(4)) => Some("CycleApps"),
+            (5, Some(5)) => Some("SwitchApps"),
+            (5, Some(7)) => Some("Cut"),
+            (5, Some(8)) => Some("Copy"),
+            (5, Some(9)) => Some("Paste"),
+            (5, Some(10)) => Some("Undo"),
             _ => None,
         }
     }
@@ -583,6 +617,16 @@ fn parse_key_assignments(
         // the whole record could mistake an unrelated GUID for a macro link.
         let source_key_code = read_u16(record, 20, "key assignment source key")?;
         let assignment_type_code = read_u8(record, 22, "key assignment type")?;
+        // KeyAssignment.Deserialize always reads all fields. Only the field
+        // selected by AssignmentType is semantically active; stale values in
+        // other fields must not appear as a current binding.
+        let active_function_code = match assignment_type_code {
+            1 => Some(read_u16(record, 23, "keyboard function")?),
+            2 => Some(u16::from(read_u8(record, 25, "mouse function")?)),
+            3 => Some(u16::from(read_u8(record, 26, "multimedia function")?)),
+            5 => Some(u16::from(read_u8(record, 46, "Windows shortcut")?)),
+            _ => None,
+        };
         let macro_id = read_id(record, 27, "key assignment macro identifier")?;
         let macro_source_id = if assignment_type_code == 4 {
             macros
@@ -596,6 +640,7 @@ fn parse_key_assignments(
             source_id,
             source_key_code,
             assignment_type_code,
+            active_function_code,
             macro_source_id,
         });
     }
@@ -807,6 +852,7 @@ mod tests {
             Some(PulsefireRaidControl::Button4)
         );
         assert_eq!(preset.key_assignments[0].macro_source_id, Some(MACRO_ID));
+        assert_eq!(preset.key_assignments[0].active_function_code, None);
 
         let imported = preset.to_software_profile("pulsefire-raid").unwrap();
         assert!(imported.partial);
@@ -871,6 +917,44 @@ mod tests {
     }
 
     #[test]
+    fn assignment_value_comes_only_from_the_active_legacy_field() {
+        for (assignment_type, expected_code, expected_name) in [
+            (1, Some(0x0123), None),
+            (2, Some(4), Some("Previous")),
+            (3, Some(2), Some("VolumeDown")),
+            (4, None, None),
+            (5, Some(10), Some("Undo")),
+            (7, None, None),
+            (0xFF, None, None),
+        ] {
+            let mut bytes = fixture(false);
+            let first = find_header(&bytes, HEADER_KEY_ASSIGNMENT).unwrap();
+            bytes[first + 22] = assignment_type;
+            bytes[first + 23..first + 25].copy_from_slice(&0x0123_u16.to_le_bytes());
+            bytes[first + 25] = 4;
+            bytes[first + 26] = 2;
+            bytes[first + 46] = 10;
+            let preset = parse_ngenuity_legacy_preset(&bytes).unwrap();
+            let assignment = &preset.key_assignments[0];
+            assert_eq!(assignment.active_function_code, expected_code);
+            assert_eq!(assignment.active_function_name(), expected_name);
+            assert_eq!(assignment.macro_source_id.is_some(), assignment_type == 4);
+        }
+    }
+
+    #[test]
+    fn unknown_legacy_function_codes_stay_raw() {
+        let mut bytes = fixture(false);
+        let first = find_header(&bytes, HEADER_KEY_ASSIGNMENT).unwrap();
+        bytes[first + 22] = 2;
+        bytes[first + 25] = 0xFE;
+        let preset = parse_ngenuity_legacy_preset(&bytes).unwrap();
+        let assignment = &preset.key_assignments[0];
+        assert_eq!(assignment.active_function_code, Some(0xFE));
+        assert_eq!(assignment.active_function_name(), None);
+    }
+
+    #[test]
     fn raid_key_codes_map_only_to_the_eleven_known_controls() {
         for (code, control) in [
             (0x200, PulsefireRaidControl::LeftClick),
@@ -889,6 +973,7 @@ mod tests {
                 source_id: [0; 16],
                 source_key_code: code,
                 assignment_type_code: 0,
+                active_function_code: None,
                 macro_source_id: None,
             };
             assert_eq!(assignment.pulsefire_raid_control(), Some(control));
@@ -898,6 +983,7 @@ mod tests {
                 source_id: [0; 16],
                 source_key_code: code,
                 assignment_type_code: 0,
+                active_function_code: None,
                 macro_source_id: None,
             };
             assert_eq!(assignment.pulsefire_raid_control(), None);

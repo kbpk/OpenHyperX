@@ -1280,6 +1280,14 @@ fn semantic_ngenuity_legacy_changes(
                     right.assignment_type_code
                 ));
             }
+            if left.active_function_code != right.active_function_code {
+                changes.push(format!(
+                    "assignment {} active Legacy value: {} -> {}",
+                    index + 1,
+                    format_ngenuity_legacy_function_code(left.active_function_code),
+                    format_ngenuity_legacy_function_code(right.active_function_code)
+                ));
+            }
         }
         let left = before
             .key_assignments
@@ -1299,6 +1307,10 @@ fn semantic_ngenuity_legacy_changes(
         }
     }
     changes
+}
+
+fn format_ngenuity_legacy_function_code(code: Option<u16>) -> String {
+    code.map_or_else(|| "none".to_owned(), |value| format!("0x{value:04X}"))
 }
 
 fn compare_ngenuity_legacy_macro(
@@ -1472,8 +1484,17 @@ fn print_ngenuity_legacy_preset(preset: &NgenuityPreset) {
             |control| format!("Raid interpretation: {}", control.name()),
         );
         let source_type = assignment.assignment_type_name().unwrap_or("unknown");
+        let active_value = assignment.active_function_code.map_or_else(
+            || "no scalar function value".to_owned(),
+            |code| {
+                let name = assignment
+                    .active_function_name()
+                    .map_or_else(String::new, |name| format!(" ({name})"));
+                format!("Legacy value=0x{code:04X}{name}")
+            },
+        );
         println!(
-            "  {}: key=0x{:04X}, type=0x{:02X} ({source_type}), {raid_target}; source_id={}, {reference}; binding value not imported",
+            "  {}: key=0x{:04X}, type=0x{:02X} ({source_type}), {active_value}, {raid_target}; source_id={}, {reference}; binding not imported",
             index + 1,
             assignment.source_key_code,
             assignment.assignment_type_code,
@@ -1481,7 +1502,7 @@ fn print_ngenuity_legacy_preset(preset: &NgenuityPreset) {
         );
     }
     println!(
-        "Not decoded to portable settings: polling code, lift-off code, lighting and assignment values. Raid targets require a confirmed model identity."
+        "Not imported to portable settings: polling code, lift-off code, lighting and assignment values. Legacy values are not Raid wire codes; Raid targets require a confirmed model identity."
     );
     println!("Inspection was offline; no HID device was opened.");
 }
@@ -2905,6 +2926,7 @@ mod tests {
                 source_id: [3; 16],
                 source_key_code: 0x203,
                 assignment_type_code: 2,
+                active_function_code: Some(4),
                 macro_source_id: None,
             }],
         };
@@ -2920,6 +2942,7 @@ mod tests {
         changed.lift_off_distance_code = 0x03;
         changed.key_assignments[0].source_key_code = 0x204;
         changed.key_assignments[0].assignment_type_code = 4;
+        changed.key_assignments[0].active_function_code = None;
         assert_eq!(
             semantic_ngenuity_legacy_changes(&before, &changed),
             vec![
@@ -2929,6 +2952,7 @@ mod tests {
                 "raw lift-off code: 0x01 -> 0x03",
                 "assignment 1 source key: 0x0203 -> 0x0204",
                 "assignment 1 raw type: 0x02 -> 0x04",
+                "assignment 1 active Legacy value: 0x0004 -> none",
             ]
         );
     }

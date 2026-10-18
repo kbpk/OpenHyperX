@@ -21,10 +21,11 @@ Current NGENUITY profiles have not been collected or identified yet. They
 must get a separate parser and command namespace if their format is confirmed;
 the Legacy parser must not be extended by guessing that the formats match.
 
-`diff-ngenuity-legacy` reports normalized changes to decoded DPI and macro
-fields, then lists exact byte offsets in the embedded presets. It compares
-source macro references by their position rather than their regenerated
-identifiers. The raw section deliberately remains available for finding
+`diff-ngenuity-legacy` reports normalized changes to decoded DPI, macro and
+active raw assignment-function fields, then lists exact byte offsets in the
+embedded presets. It compares source macro references by their position
+rather than their regenerated identifiers. The raw section deliberately
+remains available for finding
 polling, lighting and assignment fields that are not decoded yet. By default
 it prints at most 256 changed bytes; `--all-raw` removes that display limit. If
 file lengths differ, offsets after the first insertion/removal may be shifted.
@@ -45,7 +46,11 @@ Source assignment identifiers and macro references are retained under
 silently inventing a binding. The inspector shows raw source key/type codes
 and a conditional Pulsefire Raid target interpretation for keys `0x200..0x20A`.
 Because the `.hxp` container does not prove its source model and assignment
-values are not yet decoded, import still does not populate physical bindings.
+values are not yet safely translated to portable bindings, import still does
+not populate physical bindings. The inspector shows only the active Legacy
+function code for KeyboardFunction, MouseFunction, Multimedia or
+WindowsShortcut; enum labels identify Legacy values, not guaranteed Raid
+capabilities or HID wire codes. Inactive/stale function fields are ignored.
 The version-40 Legacy mouse block's polling and lift-off bytes are displayed
 as raw codes by `inspect-ngenuity-legacy` and compared by
 `diff-ngenuity-legacy`; they are not imported as portable settings.
