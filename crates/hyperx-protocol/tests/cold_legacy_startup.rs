@@ -3,9 +3,9 @@
 use hyperx_protocol::{
     capture::parse_report_log,
     pulsefire_raid::{
-        classify_profile_image_byte, inspect_captured_report, PerformanceProfile,
-        ProfileImageByteClass, ProfileImageKind, ProfileSection, PulsefireRaidControl,
-        RaidReportInspection, DIRECT_REPORT_LENGTH,
+        classify_profile_image_byte, inspect_captured_report, vendor_profile_field_at,
+        PerformanceProfile, ProfileImageByteClass, ProfileImageKind, ProfileSection,
+        PulsefireRaidControl, RaidReportInspection, DIRECT_REPORT_LENGTH,
     },
     Direction,
 };
@@ -94,8 +94,8 @@ fn cold_legacy_write_matches_known_onboard_settings_but_not_opaque_bytes() {
     assert!(write.has_confirmed_macro_reference(PulsefireRaidControl::Button5));
 
     // Ignore only the confirmed read/write opcode and onboard/runtime section
-    // bytes. All remaining differences are opaque to the *current* codec;
-    // this list is capture evidence, not permission to zero or copy them.
+    // bytes. Legacy's serializer now names these fields, but their values are
+    // still opaque to our codec; this is not permission to zero or copy them.
     let differing_body_offsets = differing_body_offsets(&onboard, &write);
     assert_eq!(
         differing_body_offsets,
@@ -108,12 +108,12 @@ fn cold_legacy_write_matches_known_onboard_settings_but_not_opaque_bytes() {
         .iter()
         .all(|offset| write.as_bytes()[*offset] == 0));
     assert!(differing_body_offsets.iter().all(|&offset| {
-        classify_profile_image_byte(offset) == Some(ProfileImageByteClass::UninterpretedBody)
+        classify_profile_image_byte(offset) == Some(ProfileImageByteClass::VendorNamedRegion)
     }));
 }
 
 #[test]
-fn profile_byte_layout_marks_only_confirmed_setting_regions() {
+fn profile_byte_layout_separates_decoded_and_vendor_named_regions() {
     for offset in 0..3 {
         assert_eq!(
             classify_profile_image_byte(offset),
@@ -130,14 +130,36 @@ fn profile_byte_layout_marks_only_confirmed_setting_regions() {
         );
     }
     for offset in [
-        0x17, 0x23, 0x24, 0x2F, 0x30, 0x37, 0x38, 0x68, 0x78, 0xA8, 0xE3,
+        0x16, 0x23, 0x24, 0x2F, 0x30, 0x37, 0x38, 0x3A, 0x3E, 0x5B, 0x5D, 0x68, 0x78, 0x79, 0xA8,
+        0xAF, 0xB0, 0xE3,
     ] {
+        assert_eq!(
+            classify_profile_image_byte(offset),
+            Some(ProfileImageByteClass::VendorNamedRegion),
+            "offset 0x{offset:02X}"
+        );
+    }
+    for offset in [0x17, 0x39, 0x3B, 0x5C, 0x7A, 0x7B, 0xE4, 0x107] {
         assert_eq!(
             classify_profile_image_byte(offset),
             Some(ProfileImageByteClass::UninterpretedBody),
             "offset 0x{offset:02X}"
         );
     }
+    for (offset, name) in [
+        (0x16, "LED intensity"),
+        (0x24, "DPI sniper value"),
+        (0x30, "DPI sniper mirror (write-only in Legacy parser)"),
+        (0x37, "logo LED mode"),
+        (0x38, "wheel LED mode"),
+        (0xA8, "extra vendor button records 12-13"),
+        (0xAF, "extra vendor button records 12-13"),
+        (0xB0, "vendor single-key records (13 slots)"),
+        (0xE3, "vendor single-key records (13 slots)"),
+    ] {
+        assert_eq!(vendor_profile_field_at(offset), Some(name));
+    }
+    assert_eq!(vendor_profile_field_at(0xE4), None);
     assert_eq!(classify_profile_image_byte(DIRECT_REPORT_LENGTH), None);
 }
 
@@ -160,7 +182,7 @@ fn extra_records_after_the_eleven_controls_are_retained_but_not_mapped() {
     for offset in 0xA8..0xB0 {
         assert_eq!(
             classify_profile_image_byte(offset),
-            Some(ProfileImageByteClass::UninterpretedBody)
+            Some(ProfileImageByteClass::VendorNamedRegion)
         );
     }
 }

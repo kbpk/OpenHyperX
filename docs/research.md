@@ -1619,9 +1619,12 @@ contemporaneous local `Master.hxp` only in two 16-byte identifiers.
 The mouse object uses header `0x1A4A0099`. Its observed DPI list contains
 64-byte records with a 16-byte source identifier, a direct little-endian DPI
 integer and an ARGB color. The examined file decoded to 800 `#2B00FF`, 1600
-`#CD00FF`, 3200 `#32FF00` and 6400 `#FF0000`. A following value was `1` and is
-probably the selected stage, but its indexing semantics are not confirmed;
-the importer therefore preserves it only as `source_active_stage`.
+`#CD00FF`, 3200 `#32FF00` and 6400 `#FF0000`. Later static analysis of
+Legacy 5.38.0.0 corrected an initial interpretation: `DPIStage` is the
+little-endian integer at mouse-object offset `0x17`, *before* the list; the
+integer immediately after the list is the effect count. Legacy copies
+`DPIStage` directly to the zero-based device profile index. The importer
+retains this value as `source_active_stage` and remains partial/non-applying.
 
 Macro objects use header `0x2545C654`; their fixed 38-byte event objects use
 header `0x1B35A31E`. The object fields expose the macro name, Standard Timing
@@ -2425,10 +2428,127 @@ no HID was enumerated/opened or report sent. Native Windows physical-console
 mouse behavior still needs an operator smoke test. The existing runtime-read
 failure and unknown hardware state are not affected by these offline changes.
 
+### Legacy Raid serializer field map, offline (2026-10-18)
+
+Static inspection of the **installed NGENUITY Legacy 5.38.0.0**
+`Assets/Native/NGenuity2Helper.exe` (SHA-256
+`4050323a84ea3c0d7b3f6d576c24ae7bbfb4224380d0233596d20bd7f26314a9`)
+identified `ProfilePulsefireRaid.ToBuffer`, `LoadFromBuffer`, and its
+constructor. The Microsoft .NET Framework IL disassembler was used only to
+read this installed file; no Legacy method was executed, no USB traffic was
+captured, and no HID report was sent. Only interoperability facts below were
+transcribed into OpenHyperX; no vendor binary, default payload or decompiled
+method is committed. The names below are Legacy's *model field names*, not
+independent proof of device-side behavior or legal values.
+
+The serializer creates a 256-byte body and places it after the report's first
+eight bytes. Thus packet offset = serializer index + `0x08`. Its constructor
+allocates five DPI stages, two base LED colors, two cycle colors, three
+breathing colors, three trigger colors, and **13** button and **13**
+single-key entries. It loads a static 256-byte initial body, but the read
+command immediately calls `LoadFromBuffer` with the 256 bytes returned by the
+device. In particular, an empty cold read overwrites the constructor's
+defaults; the static body is **not** a safe cold-write template.
+
+| Packet offsets (inclusive) | Legacy model field | OpenHyperX status |
+| --- | --- | --- |
+| `0x16` | LED intensity | named, no value codec |
+| `0x23..0x24`, `0x2F..0x30` | DPI sniper value, serialized twice | named; Legacy parser reads the first copy only |
+| `0x37`, `0x38`, `0x3A` | logo LED mode, wheel LED mode, angle snapping | named, no general value codec |
+| `0x3E..0x43`, `0x44..0x49` | two LED colors, two cycle colors | field boundaries only |
+| `0x4A..0x52`, `0x53..0x5B` | three breathing colors, three trigger colors | field boundaries only |
+| `0x5D..0x5E`, `0x60..0x61`, `0x63..0x64` | zone cycle, breathing and trigger speeds | named, value scale unknown |
+| `0x66..0x68` | cycle, breathing and trigger modes | named, values not generally validated |
+| `0x78..0x79` | bitmap frame count and interval | named, semantics need isolation |
+| `0x7C..0xAF` | 13 four-byte button records | first 11 map to known physical controls; records 12–13 at `0xA8..0xAF` have unknown target role |
+| `0xB0..0xE3` | 13 four-byte single-key records | not a confirmed binding codec; `0xE3` is in record 13, not a checksum |
+
+This reclassifies all 24 previously *uninterpreted* onboard-vs-cold offsets
+as **vendor-named fields**, while their value semantics remain unimplemented.
+It also identifies the five cold empty-RX-to-TX differences outside our
+decoded settings as LED intensity (`0x16`) and the two extra vendor button
+records (`0xA8..0xAF`). The offline CLI diff now shows these field names in
+a separate category; it does not synthesize or write them.
+
+The static constructor body and the warm/onboard fixtures have identical
+values at **19** of those 24 offsets. The other five (`0x37`, `0x38`,
+`0x78`, `0x79`, `0xE3`) differ between warm runtime and onboard; the cold
+runtime TX has zero at all 24. This agreement supports the field map but
+does **not** prove that the constructor body was the source of either captured
+nonzero image. A search of the main app DLL, app EXE and `KeyStone.dll` found
+no literal full captured image or 24-offset nonzero signature; that earlier
+negative result did not include this separate helper executable and should
+not be read as evidence that the installed package lacked Raid data.
+
+`HXPulsefireRaidSetProfileData.Execute` first performs a profile GET for the
+selected section, passes the parsed object through a supplied handler, uploads
+any selected macros, serializes a fresh 256-byte body, then requests ACK and
+sends the profile SET. `HXPulsefireRaidGetProfileData.Execute` copies response
+bytes `0x08..0x107` into that object. `MousePulsefireRaid.ApplyBasicSettings`
+constructs that set command with its `InitProfile` method as the handler and
+the current preset ID as the target; `InitProfile` reads settings from the
+in-memory preset and modifies DPI, polling, intensity and button data. This
+is consistent with the cold capture: empty runtime read, preset-populated
+DPI/buttons/macros, zero in otherwise untouched lighting/single-key fields.
+The exact startup call site, the source of the in-memory preset and all
+hardware effects of a zero-field image are **not** established by this static
+inspection. A 256-byte constructed body is not an acceptable restore baseline.
+The selector `07 03 04 64` remains known to disable the mouse when sent
+alone, so all normal runtime reads/writes and onboarding remain blocked.
+Do not replay the constructor body or copy onboard fields into runtime.
+
+**Next offline work:** compare a Legacy preset with the captured cold write
+field-by-field, especially LED modes, bitmap fields and the 13th single-key
+entry. Only after that, design a
+validated, separately consented cold-runtime activation transaction with a
+physical reconnect available. Do not use exploratory HID sends to fill gaps.
+
+### Legacy preset selection and DPI-stage correction, offline (2026-10-18)
+
+Further static IL inspection of the same installed Legacy helper confirms
+that `Preset.LoadPresets` loads `LocalFolder/Presets/*.hxp` and separately
+loads `LocalFolder/Master.hxp` as `BasePreset`. It compares each preset ID to
+`Settings.Instance.SelectedPreset` from `LocalFolder/Settings/setting.db`;
+when no regular preset matches, it chooses `BasePreset`. `HyperXCenter` passes
+`Preset.CurrentPreset` to a newly added device via `SetupPreset`, which calls
+`ApplyPresetAndEffects`. `MousePulsefireRaid.InitProfile` reads that preset's
+mouse DPI levels/colors, active stage, polling code and assignments when
+building a volatile Raid profile. This identifies the intended *source path*
+for the cold startup write, but not every branch/timing of that particular
+capture; `InitDevice` can call `ApplyBasicSettings` before `SetupPreset` has
+installed a preset, in which case the former may return early.
+
+In the **current local state**, `setting.db` selects an ID found in
+`Master.hxp` and not in either regular `Presets/*.hxp`, so Legacy would select
+the Base Settings preset. Its four DPI/color pairs match the cold runtime
+image. These local files were last modified **after** the 2026-09-27 cold
+capture, so the match is corroboration, not proof of the selected ID or exact
+file bytes at capture time. No local preset, GUID, macro content or vendor
+binary is committed.
+
+`MousePreset.Deserialize` reads three flags after its 16-byte ID, then a
+32-bit `DPIStage` at mouse-object offset `0x17`, a polling byte at `0x1B`, a
+lift-off byte at `0x1C`, and a 32-bit DPI collection count at `0x1D`. The
+records start at `0x21`. The next 32-bit integer *after* the records is the
+effect count. Our previous `.hxp` parser incorrectly called this effect count
+the active stage; on current `Master.hxp` that produced a misleading `1`
+instead of the actual stored `0`. `MousePulsefireRaid.InitProfile` compares
+`DPIStage` directly to each zero-based list index and copies it unchanged to
+`ProfilePulsefireRaid.DPIStage`, matching the independently captured device
+offset `0x31`. The read-only parser, CLI marker, tests and format docs now use
+the correct offset and zero-based interpretation; importing a partial `.hxp`
+still cannot trigger a device write.
+
 ## Unknowns and required evidence
+
+The table records **historical capture-backed capabilities**, not commands
+currently available against hardware. Since the cold empty-runtime failure,
+normal runtime reads/writes and onboard save remain safety-gated before HID
+discovery; the new serializer field names do not lift that gate.
 
 | Area | Current state | Required next experiment |
 | --- | --- | --- |
+| cold runtime activation | Legacy's serializer layout, `InitProfile` handler, read-modify-write order and current preset-selection path are identified offline; a cold runtime GET can still be empty, and the exact safe baseline/activation transaction is unproven | compare the selected preset with the captured cold image field-by-field, then validate a complete constructed image offline before any separately consented hardware test |
 | firmware/device info query | unknown | capture NGENUITY Legacy startup with no setting changes; identify repeated IN/feature queries |
 | report descriptor for configuration collection | confirmed | optionally dump the two other vendor collections for research without sending reports |
 | direct RGB transport | hardware-validated for independent wheel/logo colors and black/off; NGENUITY Legacy Solid and Cycle both use it, and the previous lighting state returns without keepalive | optionally measure the exact timeout/revert interval |

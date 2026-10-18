@@ -9,7 +9,7 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 #[test]
-fn compares_cross_section_images_without_inventing_opaque_field_semantics() {
+fn compares_cross_section_images_with_vendor_field_names_but_no_value_codec() {
     let onboard = fixture("read-request-get-onboard.hex");
     let cold = fixture("cold-legacy-startup-images.hex");
     let output = Command::new(env!("CARGO_BIN_EXE_hyperx-cli"))
@@ -31,9 +31,10 @@ fn compares_cross_section_images_without_inventing_opaque_field_semantics() {
         "Onboard DeviceReadResponse",
         "Runtime HostWrite",
         "26 total; 24 profile-body byte(s)",
-        "0 mapped setting-region byte(s), 24 uninterpreted byte(s)",
+        "0 mapped setting-region byte(s), 24 vendor-named byte(s), 0 uninterpreted byte(s)",
         "0x0001: 81 -> 01 (report envelope)",
-        "0x0024: 02 -> 00 (uninterpreted body byte)",
+        "0x0024: 02 -> 00 (vendor field: DPI sniper value)",
+        "0x00E3: D5 -> 00 (vendor field: vendor single-key records (13 slots))",
         "Decoded known settings: equal",
         "Offline comparison only",
     ] {
@@ -65,7 +66,9 @@ fn empty_cold_runtime_is_not_presented_as_a_valid_known_settings_baseline() {
         "{stdout}"
     );
     assert!(
-        stdout.contains("43 mapped setting-region byte(s), 5 uninterpreted byte(s)"),
+        stdout.contains(
+            "43 mapped setting-region byte(s), 5 vendor-named byte(s), 0 uninterpreted byte(s)"
+        ),
         "{stdout}"
     );
     assert!(!stdout.contains("Decoded known settings: equal"));

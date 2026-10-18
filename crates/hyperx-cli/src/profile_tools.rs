@@ -92,7 +92,7 @@ pub(super) fn inspect(path: &Path) -> Result<()> {
             )
         );
         if let Some(value) = dpi.source_active_stage {
-            println!("  source_active_stage={value}: unconfirmed source indexing, provenance only; not applied.");
+            println!("  source_active_stage={value}: zero-based Legacy index, provenance only; not applied.");
         }
         for (index, stage) in dpi.stages.iter().enumerate() {
             println!(

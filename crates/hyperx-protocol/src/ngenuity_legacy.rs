@@ -18,6 +18,7 @@ const HEADER_KEY_ASSIGNMENT: u32 = 0x2CD8_54CB;
 const HEADER_MACRO: u32 = 0x2545_C654;
 const HEADER_MACRO_ITEM: u32 = 0x1B35_A31E;
 const SUPPORTED_PRESET_VERSION: u32 = 40;
+const ACTIVE_DPI_STAGE_OFFSET: usize = 23;
 const DPI_COUNT_OFFSET: usize = 29;
 const DPI_RECORD_OFFSET: usize = 33;
 const DPI_RECORD_LENGTH: usize = 64;
@@ -38,7 +39,7 @@ pub struct NgenuityPreset {
     pub version: u32,
     pub name: String,
     pub dpi_stages: Vec<NgenuityDpiStage>,
-    /// The exact one-based value stored by NGENUITY Legacy version 40.
+    /// Zero-based stage index stored by NGENUITY Legacy version 40.
     pub active_dpi_stage: u32,
     pub macros: Vec<NgenuityMacro>,
     pub key_assignments: Vec<NgenuityKeyAssignment>,
@@ -235,6 +236,14 @@ pub fn parse_ngenuity_legacy_preset(bytes: &[u8]) -> Result<NgenuityPreset, Ngen
 
     let mouse_offset =
         find_header(payload, HEADER_MOUSE_PRESET).ok_or(NgenuityPresetError::MissingMousePreset)?;
+    // MousePreset.Deserialize reads three flags after the 16-byte GUID, then
+    // DPIStage (Int32), polling (Byte), lift-off (Byte), and the DPI collection.
+    // The Int32 after that collection is the effect count, not DPIStage.
+    let active_dpi_stage = read_u32(
+        payload,
+        mouse_offset + ACTIVE_DPI_STAGE_OFFSET,
+        "active DPI stage",
+    )?;
     let dpi_count = usize::try_from(read_u32(
         payload,
         mouse_offset + DPI_COUNT_OFFSET,
@@ -255,9 +264,6 @@ pub fn parse_ngenuity_legacy_preset(bytes: &[u8]) -> Result<NgenuityPreset, Ngen
             color: RgbColor::new(color[1], color[2], color[3]),
         });
     }
-    let active_offset = mouse_offset + DPI_RECORD_OFFSET + dpi_count * DPI_RECORD_LENGTH;
-    let active_dpi_stage = read_u32(payload, active_offset, "active DPI stage")?;
-
     let macros = parse_macros(payload)?;
     let key_assignments = parse_key_assignments(payload, &macros)?;
 
@@ -711,7 +717,7 @@ mod tests {
         assert_eq!(preset.dpi_stages.len(), 1);
         assert_eq!(preset.dpi_stages[0].dpi, 800);
         assert_eq!(preset.dpi_stages[0].color, RgbColor::new(0x2B, 0, 0xFF));
-        assert_eq!(preset.active_dpi_stage, 1);
+        assert_eq!(preset.active_dpi_stage, 0);
         assert_eq!(preset.macros.len(), 1);
         assert_eq!(preset.macros[0].items.len(), 2);
         assert_eq!(preset.key_assignments[0].macro_source_id, Some(MACRO_ID));
@@ -727,7 +733,7 @@ mod tests {
         );
         let dpi = imported.dpi.unwrap();
         assert_eq!(dpi.active_stage, None);
-        assert_eq!(dpi.source_active_stage, Some(1));
+        assert_eq!(dpi.source_active_stage, Some(0));
         assert_eq!(imported.macros[0].definition.playback, MacroPlayback::Once);
         assert_eq!(
             imported.macros[0].definition.events,
@@ -831,6 +837,9 @@ mod tests {
 
         push_u32(&mut inner, HEADER_MOUSE_PRESET);
         inner.extend_from_slice(&[0x10; 16]);
+        // Three flags, zero-based active stage 0, polling code 0, lift-off 0.
+        // The effect-count Int32 after the DPI record is deliberately 1 so a
+        // regression back to that old offset fails the assertions above.
         inner.extend_from_slice(&[0; 9]);
         push_u32(&mut inner, 1);
         let mut dpi = [0_u8; DPI_RECORD_LENGTH];

@@ -7,8 +7,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use hyperx_protocol::{
     capture::{diff_captures, CaptureRecord},
     pulsefire_raid::{
-        classify_profile_image_byte, inspect_captured_report, PerformanceProfile,
-        ProfileImageByteClass, PulsefireRaidControl, RaidReportInspection,
+        classify_profile_image_byte, inspect_captured_report, vendor_profile_field_at,
+        PerformanceProfile, ProfileImageByteClass, PulsefireRaidControl, RaidReportInspection,
     },
 };
 
@@ -50,18 +50,34 @@ pub(super) fn diff_images(
                 == Some(ProfileImageByteClass::UninterpretedBody)
         })
         .count();
+    let vendor_named_count = changes
+        .iter()
+        .filter(|change| {
+            classify_profile_image_byte(change.offset)
+                == Some(ProfileImageByteClass::VendorNamedRegion)
+        })
+        .count();
     println!(
-        "Profile-body layout: {} mapped setting-region byte(s), {} uninterpreted byte(s). Neither category authorizes a write.",
-        body_count - uninterpreted_count,
+        "Profile-body layout: {} mapped setting-region byte(s), {} vendor-named byte(s), {} uninterpreted byte(s). No category authorizes a write.",
+        body_count - vendor_named_count - uninterpreted_count,
+        vendor_named_count,
         uninterpreted_count
     );
     let limit = if all_raw { changes.len() } else { 32 };
     for change in changes.iter().take(limit) {
         let region = match classify_profile_image_byte(change.offset) {
-            Some(ProfileImageByteClass::Envelope) => " (report envelope)",
-            Some(ProfileImageByteClass::MappedSettingRegion) => " (mapped setting region)",
-            Some(ProfileImageByteClass::UninterpretedBody) => " (uninterpreted body byte)",
-            None => " (outside a complete profile image)",
+            Some(ProfileImageByteClass::Envelope) => " (report envelope)".to_owned(),
+            Some(ProfileImageByteClass::MappedSettingRegion) => {
+                " (mapped setting region)".to_owned()
+            }
+            Some(ProfileImageByteClass::VendorNamedRegion) => format!(
+                " (vendor field: {})",
+                vendor_profile_field_at(change.offset).expect("vendor-named offset has a field")
+            ),
+            Some(ProfileImageByteClass::UninterpretedBody) => {
+                " (uninterpreted body byte)".to_owned()
+            }
+            None => " (outside a complete profile image)".to_owned(),
         };
         println!(
             "  0x{:04X}: {} -> {}{}",
@@ -109,7 +125,7 @@ pub(super) fn diff_images(
             );
         }
     }
-    println!("Offline comparison only. Report numbers, direction and section do not prove the same physical device, causal transaction, valid write baseline or safe USB behavior. Unknown body bytes are never synthesized, replayed or discarded.");
+    println!("Offline comparison only. Vendor field names identify serialized ranges, not valid values. Report numbers, direction and section do not prove the same physical device, causal transaction, valid write baseline or safe USB behavior. Unknown body bytes are never synthesized, replayed or discarded.");
     Ok(())
 }
 

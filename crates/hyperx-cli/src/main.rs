@@ -1205,7 +1205,7 @@ fn semantic_ngenuity_legacy_changes(
     }
     if before.active_dpi_stage != after.active_dpi_stage {
         changes.push(format!(
-            "stored active-stage value: {} -> {}",
+            "stored active-stage index: {} -> {}",
             before.active_dpi_stage, after.active_dpi_stage
         ));
     }
@@ -1397,8 +1397,8 @@ fn print_ngenuity_legacy_preset(preset: &NgenuityPreset) {
     println!("Embedded preset: {} bytes", preset.embedded_length);
     println!("DPI stages:");
     for (index, stage) in preset.dpi_stages.iter().enumerate() {
-        let active = if u32::try_from(index + 1).ok() == Some(preset.active_dpi_stage) {
-            " [active candidate]"
+        let active = if u32::try_from(index).ok() == Some(preset.active_dpi_stage) {
+            " [stored active]"
         } else {
             ""
         };
@@ -1412,7 +1412,7 @@ fn print_ngenuity_legacy_preset(preset: &NgenuityPreset) {
         );
     }
     println!(
-        "  Stored active-stage value: {} (indexing semantics are not confirmed).",
+        "  Stored active-stage index: {} (zero-based; imported as provenance only).",
         preset.active_dpi_stage
     );
 
@@ -2868,7 +2868,7 @@ mod tests {
             semantic_ngenuity_legacy_changes(&before, &changed),
             vec![
                 "DPI stage 1: 800 DPI #010203/alpha 255 -> 900 DPI #010203/alpha 255",
-                "stored active-stage value: 1 -> 2",
+                "stored active-stage index: 1 -> 2",
             ]
         );
     }

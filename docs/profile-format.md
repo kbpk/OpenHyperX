@@ -44,10 +44,9 @@ Source assignment identifiers and macro references are retained under
 `unresolved_button_assignments` so later decoders can resolve them without
 silently inventing a target.
 
-The observed source active-stage value is retained as
-`dpi.source_active_stage`. `dpi.active_stage` remains absent until a controlled
-Legacy export comparison establishes whether NGENUITY Legacy stores that field as a
-zero-based index, a one-based index or another enum.
+The NGENUITY Legacy version-40 active-stage value is a zero-based index.
+It is retained as `dpi.source_active_stage`; `dpi.active_stage` remains absent
+because the import is partial and does not yet safely apply device settings.
 
 ## Profile shape
 
@@ -63,7 +62,7 @@ format = "ngenuity-legacy-hxp"
 format_version = 40
 
 [dpi]
-source_active_stage = 1
+source_active_stage = 0
 
 [[dpi.stages]]
 x = 800

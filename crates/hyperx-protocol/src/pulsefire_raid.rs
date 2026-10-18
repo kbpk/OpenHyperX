@@ -102,13 +102,44 @@ pub enum ProfileSection {
 /// Where an offset falls in the currently mapped profile-image layout.
 ///
 /// This classifies byte ranges, not the meaning of every possible value in a
-/// range. In particular, an uninterpreted body byte is not reserved padding,
-/// and a mapped button record is not evidence for an uncaptured binding.
+/// range. `VendorNamedRegion` identifies a field in NGENUITY Legacy's Raid
+/// serializer, but does not establish legal values or authorize writes. An
+/// uninterpreted body byte is not reserved padding, and a mapped button
+/// record is not evidence for an uncaptured binding.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProfileImageByteClass {
     Envelope,
     MappedSettingRegion,
+    VendorNamedRegion,
     UninterpretedBody,
+}
+
+/// A field name recovered from the installed NGENUITY Legacy 5.38 Raid
+/// serializer. Packet offsets include the eight-byte report prefix; its
+/// `ToBuffer`/`LoadFromBuffer` methods address the following 256-byte body.
+/// These names are layout evidence only, not a verified value codec.
+pub fn vendor_profile_field_at(offset: usize) -> Option<&'static str> {
+    match offset {
+        0x16 => Some("LED intensity"),
+        0x23..=0x24 => Some("DPI sniper value"),
+        0x2F..=0x30 => Some("DPI sniper mirror (write-only in Legacy parser)"),
+        0x37 => Some("logo LED mode"),
+        0x38 => Some("wheel LED mode"),
+        0x3A => Some("angle snapping"),
+        0x3E..=0x43 => Some("LED colors"),
+        0x44..=0x49 => Some("cycle colors"),
+        0x4A..=0x52 => Some("breathing colors"),
+        0x53..=0x5B => Some("trigger colors"),
+        0x5D..=0x5E => Some("cycle speeds"),
+        0x60..=0x61 => Some("breathing speeds"),
+        0x63..=0x64 => Some("trigger speeds"),
+        0x66..=0x68 => Some("effect modes"),
+        0x78 => Some("bitmap frame count"),
+        0x79 => Some("bitmap frame interval"),
+        0xA8..=0xAF => Some("extra vendor button records 12-13"),
+        0xB0..=0xE3 => Some("vendor single-key records (13 slots)"),
+        _ => None,
+    }
 }
 
 /// Classify one offset in a 264-byte Pulsefire Raid profile image without
@@ -138,6 +169,8 @@ pub fn classify_profile_image_byte(offset: usize) -> Option<ProfileImageByteClas
 
     Some(if mapped {
         ProfileImageByteClass::MappedSettingRegion
+    } else if vendor_profile_field_at(offset).is_some() {
+        ProfileImageByteClass::VendorNamedRegion
     } else {
         ProfileImageByteClass::UninterpretedBody
     })
